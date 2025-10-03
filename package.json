@@ -1,18 +1,16 @@
 {
-  "name": "create-bini-app",
+  "name": "create-bini-app-new",
   "version": "1.0.0",
   "description": "A powerful CLI tool to scaffold fast Bini.js (React/SWC) applications.",
   "main": "create-bini-app.js",
   "bin": {
-    "create-bini-app": "./create-bini-app.js"
+    "create-bini-app": "create-bini-app.js"
   },
-
   "files": [
     "create-bini-app.js",
-    "README.md", 
-    "LICENSE" 
+    "README.md",
+    "LICENSE"
   ],
-
   "scripts": {
     "start": "node create-bini-app.js",
     "test": "echo \"Error: No tests specified\" && exit 1"
@@ -27,19 +25,17 @@
     "swc",
     "tailwindcss"
   ],
-
-  "homepage": "https://github.com/Binidu/bini-cli#readme",
+  "homepage": "https://github.com/Binidu01/bini-cli",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Binidu/bini-cli.git"
+    "url": "git+https://github.com/Binidu01/bini-cli.git"
   },
   "author": "Binidu",
   "license": "MIT",
-  
   "dependencies": {
-    "inquirer": "^9.2.23" 
+    "inquirer": "^9.2.23"
   },
   "engines": {
-    "node": ">=18.0.0" 
+    "node": ">=18.0.0"
   }
 }
