@@ -1,7 +1,7 @@
 {
-  "name": "create-bini-app-new",
-  "version": "1.0.0",
-  "description": "A powerful CLI tool to scaffold fast Bini.js (React/SWC) applications.",
+  "name": "create-bini-app",
+  "version": "6.0.0",
+  "description": "A powerful CLI tool to scaffold modern Bini.js (React/Vite) applications with runtime code injection.",
   "main": "create-bini-app.js",
   "bin": {
     "create-bini-app": "create-bini-app.js"
@@ -19,16 +19,23 @@
     "bini",
     "binijs",
     "react",
+    "vite",
     "framework",
     "cli",
     "generator",
-    "swc",
-    "tailwindcss"
+    "code-injection",
+    "tailwindcss",
+    "typescript",
+    "ssr",
+    "react-router"
   ],
   "homepage": "https://github.com/Binidu01/bini-cli",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Binidu01/bini-cli.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Binidu01/bini-cli/issues"
   },
   "author": "Binidu",
   "license": "MIT",
