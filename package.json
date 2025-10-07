@@ -1,6 +1,6 @@
 {
   "name": "create-bini-app",
-  "version": "6.0.0",
+  "version": "7.0.1",
   "description": "A powerful CLI tool to scaffold modern Bini.js (React/Vite) applications with runtime code injection.",
   "main": "create-bini-app.js",
   "bin": {
