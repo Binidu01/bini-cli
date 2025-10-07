@@ -183,4 +183,4 @@ MIT License
 
 ---
 
-**Built with ❤️ using Bini.js v${BINIJS_VERSION} | Fast, Secure, Developer-Friendly**
+**Built with ❤️ using Bini.js v7.0.2 | Fast, Secure, Developer-Friendly**
