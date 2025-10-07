@@ -1,17 +1,19 @@
 #!/usr/bin/env node
 
 const inquirer = require("inquirer").default;
-const fs = require("fs"); 
+const fs = require("fs");
 const path = require("path");
 const os = require("os");
 const { execSync } = require('child_process');
 
-const BINIJS_VERSION = "5.0.2";
-// --- NEW: Cache Configuration ---
+// Read version from package.json
+const CLI_PACKAGE_PATH = path.join(__dirname, 'package.json');
+const cliPackageJson = JSON.parse(fs.readFileSync(CLI_PACKAGE_PATH, 'utf-8'));
+const BINIJS_VERSION = cliPackageJson.version;
+
 const CACHE_DIR = path.join(os.homedir(), '.bini-cache');
 const MODULES_CACHE_PATH = path.join(CACHE_DIR, 'node_modules_base');
 const CACHE_LOCK_FILE = path.join(CACHE_DIR, 'cache.lock');
-// --------------------------------
 
 const LOGO = `
 ██████╗ ██╗███╗   ██╗██╗      ██╗███████╗
@@ -20,7 +22,6 @@ const LOGO = `
 ██╔══██╗██║██║╚██╗██║██║ ██   ██║╚════██║
 ██████╔╝██║██║ ╚████║██║ ╚█████╔╝███████║
 ╚═════╝ ╚═╝╚═╝  ╚═══╝╚═╝  ╚════╝ ╚══════╝
-
              Developed By Binidu
 `;
 
@@ -30,415 +31,391 @@ function mkdirRecursive(dirPath) {
   }
 }
 
-// --- NEW: Cache Management Functions ---
-
-/**
- * Checks if the prebuilt node_modules cache exists.
- * @returns {boolean} True if the cache directory exists and is not locked.
- */
 function isCacheAvailable() {
   return fs.existsSync(MODULES_CACHE_PATH) && !fs.existsSync(CACHE_LOCK_FILE);
 }
 
-/**
- * Builds the base node_modules cache if it doesn't exist.
- * This runs a minimal npm install once globally.
- */
 function buildCache(tempProjectPath) {
-  console.log('\n📦 Initializing Bini.js global module cache (first run, may take a moment)...');
-  
-  // Create cache and lock file
+  console.log('\n📦 Building global module cache (first run)...');
   mkdirRecursive(CACHE_DIR);
   fs.writeFileSync(CACHE_LOCK_FILE, 'locked');
 
   try {
-    // 1. Install dependencies into a temporary directory
-    console.log('   - Installing base dependencies...');
-    execSync('npm install --prefix .', { 
-      cwd: tempProjectPath, 
-      stdio: 'inherit' 
-    });
-
-    // 2. Move node_modules to the cache location
+    console.log('   - Installing dependencies...');
+    execSync('npm install --prefix .', { cwd: tempProjectPath, stdio: 'inherit' });
+    
     const tempNodeModules = path.join(tempProjectPath, 'node_modules');
     if (fs.existsSync(tempNodeModules)) {
-      console.log(`   - Caching modules to ${MODULES_CACHE_PATH}...`);
+      console.log(`   - Caching to ${MODULES_CACHE_PATH}...`);
       fs.renameSync(tempNodeModules, MODULES_CACHE_PATH);
+      console.log('✅ Cache built successfully!');
     } else {
-      throw new Error('npm install failed to create node_modules.');
+      throw new Error('npm install failed.');
     }
-
-    console.log('✅ Module cache built successfully!');
   } catch (error) {
-    console.error('\n❌ Error building cache. Deleting cache files for clean retry.');
-    // Clean up failed cache attempt
+    console.error('\n❌ Cache build failed. Cleaning up...');
     if (fs.existsSync(MODULES_CACHE_PATH)) {
-        fs.rmSync(MODULES_CACHE_PATH, { recursive: true, force: true });
+      fs.rmSync(MODULES_CACHE_PATH, { recursive: true, force: true });
     }
-    throw error; // Re-throw to stop project generation
+    throw error;
   } finally {
-    // 3. Remove lock file
     if (fs.existsSync(CACHE_LOCK_FILE)) {
       fs.unlinkSync(CACHE_LOCK_FILE);
     }
   }
 }
 
-// --- NEW: Code Injection System ---
-function setupCodeInjection(projectPath, answers) {
-  const injectionDir = path.join(projectPath, 'src', 'injection');
-  mkdirRecursive(injectionDir);
-  
-  // Create injection hook
-  const injectionHook = `// Code Injection Hook for Bini.js
-// This file allows you to inject custom code at runtime
-
-export class CodeInjector {
-  constructor() {
-    this.injections = new Map();
-    this.setupInjectionSystem();
-  }
-
-  setupInjectionSystem() {
-    // Listen for custom injection events
-    if (typeof window !== 'undefined') {
-      window.addEventListener('bini-inject-code', (event) => {
-        this.injectCode(event.detail);
-      });
-    }
-  }
-
-  injectCode({ id, code, type = 'script' }) {
-    try {
-      switch (type) {
-        case 'script':
-          this.injectScript(code, id);
-          break;
-        case 'style':
-          this.injectStyle(code, id);
-          break;
-        case 'component':
-          this.injectComponent(code, id);
-          break;
-        default:
-          console.warn('Unknown injection type:', type);
-      }
-    } catch (error) {
-      console.error('Code injection failed:', error);
-    }
-  }
-
-  injectScript(code, id) {
-    if (this.injections.has(id)) {
-      console.warn('Injection with ID already exists:', id);
-      return;
-    }
-
-    const script = document.createElement('script');
-    script.textContent = code;
-    script.setAttribute('data-injection-id', id);
-    document.head.appendChild(script);
-    
-    this.injections.set(id, script);
-    console.log('Script injected:', id);
-  }
-
-  injectStyle(code, id) {
-    if (this.injections.has(id)) {
-      console.warn('Injection with ID already exists:', id);
-      return;
-    }
-
-    const style = document.createElement('style');
-    style.textContent = code;
-    style.setAttribute('data-injection-id', id);
-    document.head.appendChild(style);
-    
-    this.injections.set(id, style);
-    console.log('Style injected:', id);
-  }
-
-  injectComponent(code, id) {
-    // Component injection would be handled by React
-    // This is a placeholder for component-level injection
-    console.log('Component injection requested:', id, code);
-  }
-
-  removeInjection(id) {
-    const injection = this.injections.get(id);
-    if (injection && injection.parentNode) {
-      injection.parentNode.removeChild(injection);
-      this.injections.delete(id);
-      console.log('Injection removed:', id);
-    }
-  }
-
-  listInjections() {
-    return Array.from(this.injections.keys());
-  }
-}
-
-// Global instance
-export const codeInjector = new CodeInjector();
-
-// Development helper
-if (import.meta.env.DEV) {
-  window.biniInjector = codeInjector;
-  console.log('🔄 Bini.js Code Injector ready for development');
-}
-`;
-
-  fs.writeFileSync(path.join(injectionDir, 'injector.js'), injectionHook);
-
-  // Update main entry point to include injection system
-  const ext = answers.typescript ? 'tsx' : 'jsx';
-  const mainEntryPath = path.join(projectPath, 'src', `main.${ext}`);
-  
-  const mainEntryContent = `import React from 'react';
-import { createRoot } from 'react-dom/client';
-import App from './App';
-import { codeInjector } from './injection/injector';
-
-// Initialize code injection system
-console.log('🚀 Bini.js with Vite - Code Injection Enabled');
-
-// Development mode injection examples
-if (import.meta.env.DEV) {
-  // Example: Inject development helper script
-  setTimeout(() => {
-    codeInjector.injectCode({
-      id: 'dev-helper',
-      code: \`
-        console.log('🔧 Bini.js Development Mode Active');
-        console.log('💉 Use window.biniInjector to manage code injections');
-      \`,
-      type: 'script'
-    });
-  }, 1000);
-}
-
-const container = document.getElementById('root');
-const root = createRoot(container);
-root.render(<App />);
-
-// Hot Module Replacement (HMR) for Vite
-if (import.meta.env.DEV) {
-  import.meta.hot?.accept();
-}
-`;
-
-  fs.writeFileSync(mainEntryPath, mainEntryContent);
-}
-// ------------------------------------------
-
 async function askQuestions() {
   return inquirer.prompt([
     {
       type: "confirm",
       name: "typescript",
-      message: "Would you like to use TypeScript?",
+      message: "Use TypeScript?",
       default: true,
     },
     {
       type: "list",
       name: "styling",
-      message: "What styling would you like to use?",
+      message: "Styling preference?",
       choices: ["Tailwind", "CSS Modules", "None"],
       default: "Tailwind",
-    },
-    {
-      type: "confirm",
-      name: "ssr",
-      message: "Enable Server-Side Rendering (SSR)?",
-      default: false,
-    },
-    {
-      type: "list",
-      name: "features",
-      message: "Additional features?",
-      choices: ["Static Generation", "None"],
-      default: "Static Generation",
-    },
+    }
   ]);
+}
+
+function generateAPIRoutes(projectPath, answers) {
+  // ALWAYS use .js for API files to avoid import issues
+  const ext = 'js';
+  const apiPath = path.join(projectPath, 'src/api');
+  const postsApiPath = path.join(apiPath, 'posts');
+  
+  mkdirRecursive(postsApiPath);
+
+  // Hello API - Simple and ready for extension
+  fs.writeFileSync(path.join(apiPath, `hello.${ext}`), `export default function handler(req, res) {
+  return {
+    message: 'Hello from Bini.js API!',
+    timestamp: new Date().toISOString(),
+    method: req.method,
+    environment: process.env.NODE_ENV || 'development'
+  }
+}`);
+
+  // Users API - Ready for database integration
+  fs.writeFileSync(path.join(apiPath, `users.${ext}`), `// Users API - Ready for Firebase/MongoDB integration
+// Add your database logic here when needed
+
+let users = [
+  { id: 1, name: 'John Doe', email: 'john@bini.js' },
+  { id: 2, name: 'Jane Smith', email: 'jane@bini.js' }
+]
+
+export default function handler(req, res) {
+  switch (req.method) {
+    case 'GET':
+      return {
+        users,
+        total: users.length,
+        timestamp: new Date().toISOString()
+      }
+    
+    case 'POST':
+      const newUser = {
+        id: users.length + 1,
+        ...req.body,
+        createdAt: new Date().toISOString()
+      }
+      users.push(newUser)
+      return {
+        user: newUser,
+        message: 'User created successfully'
+      }
+    
+    case 'PUT':
+      // Add your update logic here
+      return res.status(501).json({ error: 'Update not implemented - add your database logic' })
+    
+    case 'DELETE':
+      // Add your delete logic here
+      return res.status(501).json({ error: 'Delete not implemented - add your database logic' })
+    
+    default:
+      return res.status(405).json({ error: 'Method not allowed' })
+  }
+}`);
+
+  // Posts API - Ready for extension
+  fs.writeFileSync(path.join(postsApiPath, `index.${ext}`), `// Posts API - Add Firebase/MongoDB when needed
+
+let posts = [
+  { id: 1, title: 'First Post', content: 'Hello world!' },
+  { id: 2, title: 'Second Post', content: 'API routes are awesome!' }
+]
+
+export default function handler(req, res) {
+  if (req.method === 'GET') {
+    return { 
+      posts,
+      note: 'Add database integration for production use'
+    }
+  }
+  
+  if (req.method === 'POST') {
+    // Add database creation logic here
+    return res.status(501).json({ error: 'Add database integration for POST operations' })
+  }
+  
+  return res.status(405).json({ error: 'Method not allowed' })
+}`);
+
+  // Dynamic post route
+  fs.writeFileSync(path.join(postsApiPath, `[id].${ext}`), `// Dynamic post route - Ready for database integration
+
+let posts = [
+  { id: 1, title: 'First Post', content: 'Hello world!' },
+  { id: 2, title: 'Second Post', content: 'API routes are awesome!' }
+]
+
+export default function handler(req, res) {
+  const postId = parseInt(req.query.id)
+  const post = posts.find(p => p.id === postId)
+  
+  if (!post) {
+    return res.status(404).json({ error: 'Post not found' })
+  }
+  
+  if (req.method === 'GET') {
+    return { post }
+  }
+  
+  if (req.method === 'PUT') {
+    // Add database update logic here
+    return res.status(501).json({ error: 'Add database integration for update operations' })
+  }
+  
+  if (req.method === 'DELETE') {
+    // Add database delete logic here
+    return res.status(501).json({ error: 'Add database integration for delete operations' })
+  }
+  
+  return res.status(405).json({ error: 'Method not allowed' })
+}`);
+
+  // Database integration example
+  fs.writeFileSync(path.join(apiPath, `database-example.${ext}`), `// Example: How to add Firebase to your API routes
+// Remove this file or use it as a reference
+
+/*
+// 1. Install Firebase: npm install firebase
+import { initializeApp } from 'firebase/app'
+import { getFirestore, collection, getDocs, addDoc, updateDoc, deleteDoc, doc } from 'firebase/firestore'
+
+// 2. Add your Firebase config to .env
+const firebaseConfig = {
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID
+}
+
+// 3. Initialize Firebase
+const app = initializeApp(firebaseConfig)
+const db = getFirestore(app)
+
+// 4. Use in your API handlers
+export default async function handler(req, res) {
+  try {
+    switch (req.method) {
+      case 'GET':
+        const snapshot = await getDocs(collection(db, 'users'))
+        const users = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
+        return res.json({ users })
+      
+      case 'POST':
+        const newUser = { ...req.body, createdAt: new Date().toISOString() }
+        const docRef = await addDoc(collection(db, 'users'), newUser)
+        return res.json({ id: docRef.id, ...newUser })
+      
+      case 'PUT':
+        const { id, ...updateData } = req.body
+        await updateDoc(doc(db, 'users', id), updateData)
+        return res.json({ message: 'User updated' })
+      
+      case 'DELETE':
+        await deleteDoc(doc(db, 'users', req.body.id))
+        return res.json({ message: 'User deleted' })
+      
+      default:
+        return res.status(405).json({ error: 'Method not allowed' })
+    }
+  } catch (error) {
+    console.error('Database error:', error)
+    return res.status(500).json({ error: 'Database operation failed' })
+  }
+}
+*/
+
+// Current implementation (in-memory)
+let items = [{ id: 1, name: 'Example item' }]
+
+export default function handler(req, res) {
+  // Replace this with Firebase/MongoDB when ready
+  return res.json({ 
+    items,
+    message: 'Replace with real database for production'
+  })
+}`);
 }
 
 function generateProject(projectName, answers) {
   const projectPath = path.join(process.cwd(), projectName);
-  mkdirRecursive(projectPath);
-  
   const srcPath = path.join(projectPath, "src");
-  mkdirRecursive(srcPath);
-  mkdirRecursive(path.join(srcPath, "pages"));
-  mkdirRecursive(path.join(srcPath, "components"));
-  mkdirRecursive(path.join(srcPath, "styles"));
   
-  // Create injection directory (always enabled for framework)
-  mkdirRecursive(path.join(srcPath, "injection"));
+  mkdirRecursive(srcPath);
+  ["pages", "components", "styles", "api", "api/posts"].forEach(dir => 
+    mkdirRecursive(path.join(srcPath, dir))
+  );
 
   const ext = answers.typescript ? "tsx" : "jsx";
   const isTS = answers.typescript;
 
-  // Create HTML template for Vite
-  const htmlTemplate = `<!DOCTYPE html>
+  // Generate API routes
+  generateAPIRoutes(projectPath, answers);
+
+  // HTML Template
+  fs.writeFileSync(path.join(projectPath, "index.html"), `<!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Bini.js App</title>
-    <style>
-      body { margin: 0; padding: 0; }
-      #root { min-height: 100vh; }
-    </style>
   </head>
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.${ext}"></script>
   </body>
-</html>`;
-  fs.writeFileSync(path.join(projectPath, "index.html"), htmlTemplate);
+</html>`);
 
-  // Generate pages and components
-  const indexPage = `${isTS
-    ? "import React from 'react';\nimport { Link } from 'react-router-dom';\n"
-    : "import React from 'react';\nimport { Link } from 'react-router-dom';\n"}
+  // Home Page
+  fs.writeFileSync(path.join(srcPath, "pages", `Home.${ext}`), `import React from 'react';
+import { Link } from 'react-router-dom';
+
 export default function Home() {
+  const testApi = async () => {
+    try {
+      const response = await fetch('/api/hello');
+      const data = await response.json();
+      alert('API Response: ' + JSON.stringify(data, null, 2));
+    } catch (error) {
+      alert('API Error: ' + error.message);
+    }
+  };
+
+  const testUsersApi = async () => {
+    try {
+      const response = await fetch('/api/users');
+      const data = await response.json();
+      alert('Users API: ' + JSON.stringify(data, null, 2));
+    } catch (error) {
+      alert('API Error: ' + error.message);
+    }
+  };
+
   return (
-    <div className="max-w-4xl mx-auto p-10 mt-12 space-y-8 bg-white rounded-2xl shadow-lg">
-      {/* Header Section */}
-      <div className="text-center space-y-2">
-        <h1 className="text-4xl font-extrabold text-indigo-700 drop-shadow-sm">
-          Welcome to Bini.js! 🚀
-        </h1>
-        <p className="text-lg text-gray-500">
-          The Vite-powered React framework, built for speed and simplicity.
-        </p>
+    <div className="max-w-4xl mx-auto my-12 p-10 bg-white rounded-xl shadow-lg">
+      <div className="text-center mb-8">
+        <h1 className="text-4xl font-bold text-indigo-700 mb-2">Welcome to Bini.js! 🚀</h1>
+        <p className="text-lg text-gray-600">Vite-powered React framework with built-in API routes</p>
       </div>
 
-      {/* Features Section */}
-      <div className="grid md:grid-cols-3 gap-6 pt-4">
-        {/* Feature 1 */}
-        <div className="border border-indigo-100 bg-indigo-50 hover:bg-indigo-100 transition-all duration-200 p-6 rounded-xl shadow-sm">
-          <h3 className="text-xl font-semibold text-indigo-700 mb-2">
-            ⚡ Lightning Fast
-          </h3>
-          <p className="text-gray-600">
-            Powered by <span className="font-medium">Vite</span> for blazing fast builds and refreshes.
-          </p>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 my-8">
+        <div className="p-6 bg-blue-50 border border-blue-100 rounded-lg transition-all hover:bg-blue-100 hover:-translate-y-1">
+          <h3 className="text-xl font-semibold text-indigo-700 mb-2">⚡ Lightning Fast</h3>
+          <p className="text-gray-600">Powered by Vite for instant HMR and blazing builds</p>
         </div>
-
-        {/* Feature 2 */}
-        <div className="border border-indigo-100 bg-indigo-50 hover:bg-indigo-100 transition-all duration-200 p-6 rounded-xl shadow-sm">
-          <h3 className="text-xl font-semibold text-indigo-700 mb-2">
-            🔄 File-based Routing
-          </h3>
-          <p className="text-gray-600">
-            Automatically creates routes based on your <code className="bg-gray-100 px-1 rounded">pages/</code> structure.
-          </p>
+        <div className="p-6 bg-blue-50 border border-blue-100 rounded-lg transition-all hover:bg-blue-100 hover:-translate-y-1">
+          <h3 className="text-xl font-semibold text-indigo-700 mb-2">🔌 Built-in API</h3>
+          <p className="text-gray-600">File-based API routes like Next.js</p>
         </div>
-
-        {/* Feature 3 */}
-        <div className="border border-indigo-100 bg-indigo-50 hover:bg-indigo-100 transition-all duration-200 p-6 rounded-xl shadow-sm">
-          <h3 className="text-xl font-semibold text-indigo-700 mb-2">
-            💉 Code Injection
-          </h3>
-          <p className="text-gray-600">
-            Runtime code injection system for dynamic updates.
-          </p>
+        <div className="p-6 bg-blue-50 border border-blue-100 rounded-lg transition-all hover:bg-blue-100 hover:-translate-y-1">
+          <h3 className="text-xl font-semibold text-indigo-700 mb-2">🎨 Extensible</h3>
+          <p className="text-gray-600">Add Firebase, MongoDB, or any database when needed</p>
         </div>
       </div>
 
-      {/* Link Section */}
-      <div className="pt-6 text-center">
-        <Link
-          to="/about"
-          className="link"
+      <div className="text-center mt-8 pt-8 border-t border-gray-200 space-x-4">
+        <Link 
+          to="/about" 
+          className="inline-block px-6 py-3 bg-gradient-to-r from-indigo-500 to-purple-600 text-white font-medium rounded-lg transition-transform hover:-translate-y-0.5"
         >
-          About Page →
+          About →
         </Link>
-      </div>
-
-      {/* Footer */}
-      <div className="text-center text-sm text-gray-400 pt-6 border-t border-gray-100">
-        <p>
-          © ${new Date().getFullYear()} <span className="font-semibold">Bini.js</span> — Built for Developers ❤️
-        </p>
+        <button 
+          onClick={testApi}
+          className="inline-block px-6 py-3 bg-green-500 text-white font-medium rounded-lg transition-transform hover:-translate-y-0.5"
+        >
+          Test Hello API
+        </button>
+        <button 
+          onClick={testUsersApi}
+          className="inline-block px-6 py-3 bg-blue-500 text-white font-medium rounded-lg transition-transform hover:-translate-y-0.5"
+        >
+          Test Users API
+        </button>
       </div>
     </div>
   );
-}`;
+}`);
 
-  fs.writeFileSync(path.join(srcPath, "pages", `Home.${ext}`), indexPage);
-
-  const aboutPage = `import React from 'react';
+  // About Page
+  fs.writeFileSync(path.join(srcPath, "pages", `About.${ext}`), `import React from 'react';
 import { Link } from 'react-router-dom';
 
 export default function About() {
   return (
-    <div className="max-w-3xl mx-auto p-10 mt-12 space-y-8 bg-white rounded-2xl shadow-lg">
-      {/* Header */}
-      <div className="text-center space-y-2">
-        <h1 className="text-4xl font-extrabold text-indigo-700 drop-shadow-sm">
-          About Bini.js
-        </h1>
-        <p className="text-lg text-gray-500">
-          A modern React framework powered by Vite and built for developers.
+    <div className="max-w-4xl mx-auto my-12 p-10 bg-white rounded-xl shadow-lg">
+      <div className="text-center mb-8">
+        <h1 className="text-4xl font-bold text-indigo-700 mb-2">About Bini.js</h1>
+        <p className="text-lg text-gray-600">Modern React framework built on Vite with file-based API routes</p>
+      </div>
+      
+      <div className="p-6 bg-blue-50 border border-blue-100 rounded-lg my-8">
+        <p className="text-gray-700 mb-4">
+          Bini.js combines Vite's speed with React's simplicity, offering a Next.js-like 
+          experience with faster builds, built-in API routes, and instant feedback.
+        </p>
+        <p className="text-gray-700">
+          <strong>API Routes:</strong> File-based API routes in <code>src/api/</code> work in both development and production!
+        </p>
+        <p className="text-gray-700 mt-4">
+          <strong>Database Ready:</strong> Easily add Firebase, MongoDB, or any database to your API routes when needed.
         </p>
       </div>
 
-      {/* Info Section */}
-      <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-6 text-gray-700 leading-relaxed">
-        <p>
-          Bini.js combines the speed of Vite with the simplicity of React and
-          Tailwind, giving developers a Next.js-like experience with even faster builds.
-        </p>
-        <p className="mt-3">
-          From file-based routing to built-in styling support and code injection, 
-          Bini.js is designed to make app development effortless and modern.
-        </p>
-      </div>
-
-      {/* Styling Info Card */}
-      <div className="text-center border-t border-gray-100 pt-6">
-        <h3 className="text-xl font-semibold text-indigo-600 mb-2">
-          ⚙️ Current Styling Mode
-        </h3>
-        <p className="text-gray-700 bg-gray-50 inline-block px-4 py-2 rounded-lg border border-gray-200 shadow-sm">
-          ${answers.styling}
-        </p>
-      </div>
-
-      {/* Navigation Link */}
-      <div className="pt-6 text-center">
-        <Link
-          to="/"
-          className="link"
+      <div className="text-center mt-8 pt-8 border-t border-gray-200">
+        <Link 
+          to="/" 
+          className="inline-block px-6 py-3 bg-gradient-to-r from-indigo-500 to-purple-600 text-white font-medium rounded-lg transition-transform hover:-translate-y-0.5"
         >
-          ← Back to Home
+          ← Home
         </Link>
-      </div>
-
-      {/* Footer */}
-      <div className="text-center text-sm text-gray-400 pt-6 border-t border-gray-100">
-        <p>
-          © ${new Date().getFullYear()} <span className="font-semibold">Bini.js</span> — Fast, Elegant, Developer-Friendly
-        </p>
       </div>
     </div>
   );
-}`;
+}`);
 
-  fs.writeFileSync(path.join(srcPath, "pages", `About.${ext}`), aboutPage);
-
-  // Generate App component with routing
-  const appFile = `import React from 'react';
+  // App Component
+  fs.writeFileSync(path.join(srcPath, `App.${ext}`), `import React from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import './styles/globals.css';
-import { codeInjector } from './injection/injector';
 import Home from './pages/Home';
 import About from './pages/About';
 
 export default function App() {
+  const isDev = import.meta.env.DEV;
+  
   return (
     <>
       <Router>
@@ -447,258 +424,134 @@ export default function App() {
           <Route path="/about" element={<About />} />
         </Routes>
       </Router>
-      <div style={{
-        position: 'fixed',
-        bottom: 20,
-        right: 20,
-        background: '#111',
-        color: '#fff',
-        padding: '10px 20px',
-        borderRadius: '8px',
-        fontSize: '14px',
-        fontWeight: 'bold',
-        boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
-        zIndex: 9999
-      }}>
-        ▲ Bini.js v${BINIJS_VERSION}
-      </div>
+      {isDev && (
+        <div className="bini-badge">
+          ▲ Bini.js v${BINIJS_VERSION}
+        </div>
+      )}
     </>
   );
-}`;
+}`);
 
-  fs.writeFileSync(path.join(srcPath, `App.${ext}`), appFile);
+  // Main Entry
+  fs.writeFileSync(path.join(srcPath, `main.${ext}`), `import React from 'react';
+import { createRoot } from 'react-dom/client';
+import App from './App';
 
-  // Generate global styles
+const container = document.getElementById('root');
+const root = createRoot(container);
+root.render(<App />);
+
+if (import.meta.env.DEV) {
+  import.meta.hot?.accept();
+}`);
+
+  // Global Styles
   const globalStyles = answers.styling === "Tailwind" 
     ? `@tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-* {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
+@layer base {
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: system-ui, -apple-system, sans-serif;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    min-height: 100vh;
+    padding: 2rem;
+  }
 }
 
+@layer components {
+  .bini-badge {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    background: #111;
+    color: #fff;
+    padding: 10px 20px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: bold;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    z-index: 9999;
+  }
+}`
+    : `* { box-sizing: border-box; margin: 0; padding: 0; }
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  font-family: system-ui, sans-serif;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: #333;
   min-height: 100vh;
   padding: 2rem;
 }
-
-.link {
-  display: inline-block;
-  padding: 0.75rem 1.5rem;
-  background-image: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
-  text-decoration: none;
-  border-radius: 0.5rem;
-  transition: all 0.2s ease-in-out;
-  font-weight: 500;
-  box-shadow: 0 4px 15px rgba(0,0,0,0.1);
-}
-
-.link:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 20px rgba(0,0,0,0.15);
-}`
-    : `/* Global Styles Fallback for CSS Modules / None */
-* { box-sizing: border-box; margin: 0; padding: 0; }
-body {
-  font-family: system-ui, sans-serif;
-  background: #f0f0f5;
-  min-height: 100vh;
-}
-#root { display: flex; justify-content: center; align-items: flex-start; min-height: 100vh; padding: 2rem; }
-
-/* Basic layout styles */
-.max-w-4xl { max-width: 900px; }
-.max-w-3xl { max-width: 700px; }
-.mx-auto { margin-left: auto; margin-right: auto; }
-.mt-12 { margin-top: 3rem; }
-.p-10 { padding: 2.5rem; }
-.space-y-8 > :not([hidden]) ~ :not([hidden]) {
-  margin-top: 2rem;
-  margin-bottom: 0;
-}
-.space-y-2 > :not([hidden]) ~ :not([hidden]) { 
-  margin-top: 0.5rem; 
-  margin-bottom: 0; 
-}
-.bg-white { background-color: #fff; }
-.rounded-2xl { border-radius: 1rem; }
-.shadow-lg { box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05); }
-
-/* Colors and Typography */
-.text-center { text-align: center; }
-.text-4xl { font-size: 2.25rem; }
-.font-extrabold { font-weight: 800; }
-.text-indigo-700 { color: #4338ca; }
-.text-lg { font-size: 1.125rem; }
-.text-gray-500 { color: #6b7280; }
-.text-indigo-600 { color: #4f46e5; }
-.text-gray-700 { color: #374151; }
-.bg-indigo-50 { background-color: #eef2ff; }
-.border-indigo-100 { border-color: #e0e7ff; }
-.rounded-xl { border-radius: 0.75rem; }
-.p-6 { padding: 1.5rem; }
-.border-t { border-top: 1px solid #e5e7eb; }
-.pt-6 { padding-top: 1.5rem; }
-
-/* Link Component Styling */
-.link { 
-  display: inline-block;
-  color: white;
-  text-decoration: none; 
-  background-color: #4f46e5;
-  padding: 0.75rem 1.5rem;
-  border-radius: 0.5rem;
-  font-weight: 500;
-  transition: background-color 0.2s;
-}
-.link:hover {
-  background-color: #4338ca;
+.bini-badge {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  background: #111;
+  color: #fff;
+  padding: 10px 20px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: bold;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+  z-index: 9999;
 }`;
 
   fs.writeFileSync(path.join(srcPath, "styles", "globals.css"), globalStyles);
 
   // TypeScript config
   if (isTS) {
-    const tsConfig = {
-      "compilerOptions": {
-        "target": "ES2020",
-        "useDefineForClassFields": true,
-        "lib": ["ES2020", "DOM", "DOM.Iterable"],
-        "module": "ESNext",
-        "skipLibCheck": true,
-        "moduleResolution": "bundler",
-        "allowImportingTsExtensions": true,
-        "resolveJsonModule": true,
-        "isolatedModules": true,
-        "noEmit": true,
-        "jsx": "react-jsx",
-        "strict": true,
-        "noUnusedLocals": true,
-        "noUnusedParameters": true,
-        "noFallthroughCasesInSwitch": true
+    fs.writeFileSync(path.join(projectPath, "tsconfig.json"), JSON.stringify({
+      compilerOptions: {
+        target: "ES2020",
+        lib: ["ES2020", "DOM", "DOM.Iterable"],
+        module: "ESNext",
+        skipLibCheck: true,
+        moduleResolution: "bundler",
+        resolveJsonModule: true,
+        isolatedModules: true,
+        noEmit: true,
+        jsx: "react-jsx",
+        strict: true
       },
-      "include": ["src"],
-      "references": [{ "path": "./tsconfig.node.json" }]
-    };
-
-    const tsConfigNode = {
-      "compilerOptions": {
-        "composite": true,
-        "skipLibCheck": true,
-        "module": "ESNext",
-        "moduleResolution": "bundler",
-        "allowSyntheticDefaultImports": true
-      },
-      "include": ["vite.config.ts"]
-    };
-
-    fs.writeFileSync(path.join(projectPath, "tsconfig.json"), JSON.stringify(tsConfig, null, 2));
-    fs.writeFileSync(path.join(projectPath, "tsconfig.node.json"), JSON.stringify(tsConfigNode, null, 2));
+      include: ["src"]
+    }, null, 2));
   }
 
   // Tailwind config
   if (answers.styling === "Tailwind") {
-    const tailwindConfig = `/** @type {import('tailwindcss').Config} */
+    fs.writeFileSync(path.join(projectPath, "tailwind.config.js"), 
+      `/** @type {import('tailwindcss').Config} */
 export default {
   content: [
     "./index.html",
-    "./src/**/*.{js,ts,jsx,tsx}",
+    "./src/**/*.{js,jsx,ts,tsx}",
   ],
   theme: {
     extend: {},
   },
   plugins: [],
-};`;
-    
-    const postcssConfig = `export default {
+};`);
+    fs.writeFileSync(path.join(projectPath, "postcss.config.js"), 
+      `export default {
   plugins: {
     tailwindcss: {},
     autoprefixer: {},
-  },
-};`;
-    
-    fs.writeFileSync(path.join(projectPath, "tailwind.config.js"), tailwindConfig);
-    fs.writeFileSync(path.join(projectPath, "postcss.config.js"), postcssConfig);
+  }
+};`);
   }
 
-  // Vite config
-  const viteConfig = `import { defineConfig } from 'vite'
+  // Vite config with Windows fix and console output
+  fs.writeFileSync(path.join(projectPath, "vite.config.js"), `import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import fs from 'fs'
+import path from 'path'
+import { pathToFileURL } from 'url'
+import os from 'os'
 
-// https://vitejs.dev/config/
-export default defineConfig({
-  plugins: [react()],
-  server: {
-    port: 3000,
-    open: true,
-  },
-  build: {
-    outDir: 'dist',
-    sourcemap: true,
-  },
-  ${isTS ? "esbuild: {\n    loader: 'tsx',\n  }," : ""}
-})`;
-
-  fs.writeFileSync(path.join(projectPath, "vite.config.js"), viteConfig);
-
-  // Package.json for Vite
-  const packageJson = {
-    name: projectName,
-    type: "module",
-    version: "0.1.0",
-    scripts: {
-      dev: "node startDev.js",  // Use custom script for dev
-      build: "vite build",
-      preview: "vite preview",
-      "dev:vite": "vite"  // Direct Vite access if needed
-    },
-    dependencies: {
-      react: "^18.3.1",
-      "react-dom": "^18.3.1",
-      "react-router-dom": "^6.26.0"
-    },
-    devDependencies: {
-      "@vitejs/plugin-react": "^4.3.3",
-      vite: "^5.4.8",
-      ...(isTS && {
-        "@types/react": "^18.3.12",
-        "@types/react-dom": "^18.3.1",
-        "typescript": "^5.5.3"
-      }),
-      ...(answers.styling === "Tailwind" && {
-        "tailwindcss": "^3.4.17",
-        "postcss": "^8.4.49",
-        "autoprefixer": "^10.4.20"
-      })
-    }
-  };
-
-  fs.writeFileSync(path.join(projectPath, "package.json"), JSON.stringify(packageJson, null, 2));
-
-  // Setup code injection (always enabled for framework)
-  setupCodeInjection(projectPath, answers);
-
-// Updated startDev.js for Vite with custom output processing
-const startDevScript = `import { spawn } from 'child_process';
-import os from 'os';
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
-import { execSync } from 'child_process';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-const BINIJS_VERSION = "5.0.2";
+const BINIJS_VERSION = "${BINIJS_VERSION}";
 const PORT = 3000;
-const MODULES_CACHE_PATH = path.join(os.homedir(), '.bini-cache', 'node_modules_base');
 
 function getNetworkIp() {
   const interfaces = os.networkInterfaces();
@@ -712,234 +565,400 @@ function getNetworkIp() {
   return 'localhost';
 }
 
-function ensureDependencies() {
-  const nodeModulesPath = path.join(process.cwd(), 'node_modules');
-  if (fs.existsSync(nodeModulesPath)) {
-    return;
-  }
-
-  if (fs.existsSync(MODULES_CACHE_PATH)) {
-    console.log('📦 Copying prebuilt modules from cache...');
-    
-    if (os.platform() === 'win32') {
-      execSync('xcopy "' + MODULES_CACHE_PATH + '" "' + nodeModulesPath + '\\\\" /E /H /Y', { stdio: 'inherit' });
-    } else {
-      execSync('cp -a "' + MODULES_CACHE_PATH + '" "' + nodeModulesPath + '"', { stdio: 'inherit' });
-    }
-    
-    console.log('✅ Modules ready. Starting development server...');
-  } else {
-    console.log('⚠️ Cache not found. Running npm install...');
-    execSync('npm install', { stdio: 'inherit' });
-  }
-}
-
-function showBiniBanner() {
+function showBiniBanner(mode) {
   const localIp = getNetworkIp();
+  const isDev = mode === 'dev';
   
-  console.log('\\n▲ Bini.js v' + BINIJS_VERSION);
-  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-  console.log('  Local:   http://localhost:' + PORT);
-  console.log('  Network: http://' + localIp + ':' + PORT);
-  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\\n');
+  console.log('');
+  console.log('  ▲ Bini.js v' + BINIJS_VERSION);
+  console.log('  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  console.log('    → Local:   http://localhost:' + PORT);
+  console.log('    → Network: http://' + localIp + ':' + PORT);
+  console.log('  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  console.log('');
 }
 
-function startVite() {
-  ensureDependencies();
+function apiPlugin() {
+  let isProduction = false
   
-  // Show Bini.js banner
-  showBiniBanner();
-
-  // Start Vite dev server and intercept its output
-  const viteProcess = spawn('npx', ['vite'], { 
-    stdio: 'pipe',
-    shell: true 
-  });
-
-  // Intercept Vite's stdout and modify the messages
-  viteProcess.stdout.on('data', (data) => {
-    const output = data.toString();
+  return {
+    name: 'api-plugin',
     
-    // Replace VITE with Bini.js in the output
-    const modifiedOutput = output
-      .replace(/VITE v(\\d+\\.\\d+\\.\\d+)/g, 'Bini.js v' + BINIJS_VERSION)
-      .replace(/ready in (\\d+ ms)/g, 'ready in $1')
-      .replace(/➜/g, '  →') // Clean up the arrow
-      .replace(/Local:\\s+http:\\/\\/localhost:\\d+/g, '') // Remove duplicate local URL
-      .replace(/Network:\\s+use --host to expose/g, '') // Remove network hint
-      .replace(/press h \\+ enter to show help/g, ''); // Remove help text
-
-    // Only print non-empty lines
-    const lines = modifiedOutput.split('\\n').filter(line => line.trim() !== '');
-    if (lines.length > 0) {
-      console.log(lines.join('\\n'));
+    config(config, { command }) {
+      isProduction = command === 'build'
+    },
+    
+    configureServer(server) {
+      showBiniBanner('dev');
+      
+      server.middlewares.use('/api', async (req, res) => {
+        try {
+          const url = new URL(req.url, \`http://\${req.headers.host}\`)
+          const routePath = url.pathname.replace('/api/', '') || 'index'
+          
+          // Look for API handler - ONLY .js files
+          const apiDir = path.join(process.cwd(), 'src/api')
+          const possibleFiles = [
+            path.join(apiDir, \`\${routePath}.js\`),
+            path.join(apiDir, routePath, 'index.js')
+          ]
+          
+          let handlerPath = null
+          for (const filePath of possibleFiles) {
+            if (fs.existsSync(filePath)) {
+              handlerPath = filePath
+              break
+            }
+          }
+          
+          if (!handlerPath) {
+            res.statusCode = 404
+            res.end(JSON.stringify({ error: 'API route not found' }))
+            return
+          }
+          
+          // Convert Windows path to file:// URL for ESM imports
+          const handlerUrl = pathToFileURL(handlerPath).href
+          
+          // Import the JavaScript handler
+          const handlerModule = await import(handlerUrl)
+          const handler = handlerModule.default
+          
+          if (typeof handler !== 'function') {
+            res.statusCode = 500
+            res.end(JSON.stringify({ error: 'Invalid API handler' }))
+            return
+          }
+          
+          // Parse request body
+          let body = {}
+          if (['POST', 'PUT', 'PATCH'].includes(req.method)) {
+            body = await new Promise((resolve) => {
+              let data = ''
+              req.on('data', chunk => data += chunk)
+              req.on('end', () => {
+                try {
+                  resolve(JSON.parse(data || '{}'))
+                } catch {
+                  resolve({})
+                }
+              })
+            })
+          }
+          
+          // Create request object
+          const request = {
+            method: req.method,
+            url: req.url,
+            headers: req.headers,
+            body,
+            query: Object.fromEntries(url.searchParams)
+          }
+          
+          // Create response object
+          const response = {
+            status: (code) => {
+              res.statusCode = code
+              return response
+            },
+            json: (data) => {
+              res.setHeader('Content-Type', 'application/json')
+              res.end(JSON.stringify(data, null, 2))
+            },
+            send: (data) => {
+              res.end(data)
+            }
+          }
+          
+          // Execute handler
+          const result = await handler(request, response)
+          if (result && !res.writableEnded) {
+            response.json(result)
+          }
+          
+        } catch (error) {
+          console.error('API Error:', error)
+          res.statusCode = 500
+          res.end(JSON.stringify({ error: 'Internal Server Error' }))
+        }
+      })
+    },
+    
+    configurePreviewServer(server) {
+      showBiniBanner('preview');
+      
+      // Same logic for preview mode
+      server.middlewares.use('/api', async (req, res) => {
+        try {
+          const url = new URL(req.url, \`http://\${req.headers.host}\`)
+          const routePath = url.pathname.replace('/api/', '') || 'index'
+          
+          const apiDir = path.join(process.cwd(), 'src/api')
+          const possibleFiles = [
+            path.join(apiDir, \`\${routePath}.js\`),
+            path.join(apiDir, routePath, 'index.js')
+          ]
+          
+          let handlerPath = null
+          for (const filePath of possibleFiles) {
+            if (fs.existsSync(filePath)) {
+              handlerPath = filePath
+              break
+            }
+          }
+          
+          if (!handlerPath) {
+            res.statusCode = 404
+            res.end(JSON.stringify({ error: 'API route not found' }))
+            return
+          }
+          
+          // Convert Windows path to file:// URL
+          const handlerUrl = pathToFileURL(handlerPath).href
+          
+          const handlerModule = await import(handlerUrl)
+          const handler = handlerModule.default
+          
+          if (typeof handler !== 'function') {
+            res.statusCode = 500
+            res.end(JSON.stringify({ error: 'Invalid API handler' }))
+            return
+          }
+          
+          let body = {}
+          if (['POST', 'PUT', 'PATCH'].includes(req.method)) {
+            body = await new Promise((resolve) => {
+              let data = ''
+              req.on('data', chunk => data += chunk)
+              req.on('end', () => {
+                try {
+                  resolve(JSON.parse(data || '{}'))
+                } catch {
+                  resolve({})
+                }
+              })
+            })
+          }
+          
+          const request = {
+            method: req.method,
+            url: req.url,
+            headers: req.headers,
+            body,
+            query: Object.fromEntries(url.searchParams)
+          }
+          
+          const response = {
+            status: (code) => {
+              res.statusCode = code
+              return response
+            },
+            json: (data) => {
+              res.setHeader('Content-Type', 'application/json')
+              res.end(JSON.stringify(data, null, 2))
+            }
+          }
+          
+          const result = await handler(request, response)
+          if (result && !res.writableEnded) {
+            response.json(result)
+          }
+          
+        } catch (error) {
+          console.error('Preview API Error:', error)
+          res.statusCode = 500
+          res.end(JSON.stringify({ error: 'Internal Server Error' }))
+        }
+      })
     }
-  });
-
-  // Pass through stderr unchanged
-  viteProcess.stderr.on('data', (data) => {
-    process.stderr.write(data);
-  });
-
-  viteProcess.on('error', (error) => {
-    console.error('Failed to start Vite:', error);
-  });
-
-  viteProcess.on('close', (code) => {
-    if (code !== 0) {
-      console.log('Vite process exited with code ' + code);
-    }
-  });
+  }
 }
 
-startVite();
-`;
+export default defineConfig({
+  plugins: [react(), apiPlugin()],
+  server: { 
+    port: PORT, 
+    open: true,
+    host: true
+  },
+  preview: {
+    port: PORT,
+    open: true,
+    host: true
+  },
+  build: { 
+    outDir: 'dist'
+  }
+})`);
 
-fs.writeFileSync(path.join(projectPath, "startDev.js"), startDevScript);
+  // Package.json
+  fs.writeFileSync(path.join(projectPath, "package.json"), JSON.stringify({
+    name: projectName,
+    type: "module",
+    version: "1.0.0",
+    scripts: {
+      "dev": "vite",
+      "build": "vite build",
+      "start": "vite preview --host",
+      "preview": "vite preview"
+    },
+    dependencies: {
+      react: "^18.3.1",
+      "react-dom": "^18.3.1",
+      "react-router-dom": "^7.1.1"
+    },
+    devDependencies: {
+      "@vitejs/plugin-react": "^4.3.4",
+      vite: "^6.0.5",
+      ...(isTS && {
+        "@types/react": "^18.3.18",
+        "@types/react-dom": "^18.3.5",
+        typescript: "^5.7.2"
+      }),
+      ...(answers.styling === "Tailwind" && {
+        tailwindcss: "^3.4.17",
+        postcss: "^8.4.49",
+        autoprefixer: "^10.4.20"
+      })
+    }
+  }, null, 2));
 
-  // README
-  const readme = `# ${projectName}
+  // Environment template for databases
+  fs.writeFileSync(path.join(projectPath, ".env.example"), `# Add your environment variables here
+# For Firebase, MongoDB, or other databases when needed
 
-A Bini.js application - Vite-powered React framework
+# Example Firebase config (optional):
+# VITE_FIREBASE_API_KEY=your_api_key_here
+# VITE_FIREBASE_AUTH_DOMAIN=your-project.firebaseapp.com
+# VITE_FIREBASE_PROJECT_ID=your-project-id
 
-## ✨ Features
+# Example database URL (optional):
+# VITE_DATABASE_URL=your_database_url_here
+`);
 
-- ⚡ Lightning-fast Vite compilation
-- 🔄 Client-side routing with React Router
-${answers.ssr ? '- 🖥️ Server-Side Rendering' : ''}
-- 🎨 ${answers.styling} styling
-- 🔥 Hot Module Replacement (HMR)
-${isTS ? '- 📘 TypeScript support' : ''}
-- 💉 Built-in runtime code injection system
+  // README with database instructions
+  fs.writeFileSync(path.join(projectPath, "README.md"), `# ${projectName}
 
-## 🚀 Getting Started
+⚡ Lightning-fast Bini.js app with file-based API routes.
 
-1.  **Install dependencies:**
-    \`\`\`bash
-    npm install
-    \`\`\`
+## 🚀 Development
 
-2.  **Run the development server:**
-    \`\`\`bash
-    npm run dev
-    \`\`\`
-    This will show the Bini.js branded output with your server URLs.
+\`\`\`bash
+npm install
+npm run dev
+\`\`\`
 
-## 📦 Project Structure
+## 📦 Production 
+
+\`\`\`bash
+npm run build
+npm run start  # Opens vite preview (super fast!)
+\`\`\`
+
+## 🌐 API Routes
+
+File-based API routes (like Next.js):
 
 \`\`\`
-${projectName}/
-├── src/
-│   ├── pages/         # Page components
-│   ├── components/    # Reusable React components
-│   ├── styles/        # Global styles
-│   ├── injection/     # Code injection system
-│   ├── App.${ext}         # Main app component
-│   └── main.${ext}        # Application entry point
-├── index.html         # HTML template
-├── vite.config.js     # Vite configuration
-└── package.json
+src/api/
+├── hello.js       → /api/hello
+├── users.js       → /api/users  
+├── database-example.js → /api/database-example
+└── posts/
+    ├── index.js   → /api/posts
+    └── [id].js    → /api/posts/123
 \`\`\`
 
-## 💉 Code Injection
+## 🗄️ Database Integration
 
-The code injection system allows runtime code updates:
+**Ready for Firebase, MongoDB, or any database!**
 
-\`\`\`javascript
-// Inject custom script
-window.biniInjector.injectCode({
-  id: 'custom-script',
-  code: 'console.log("Hello from injected code!")',
-  type: 'script'
-});
+When you need real database operations:
 
-// Inject custom styles
-window.biniInjector.injectCode({
-  id: 'custom-styles',
-  code: 'body { background: red !important; }',
-  type: 'style'
-});
-\`\`\`
+1. **Install your database package**:
+   \`\`\`bash
+   npm install firebase  # for Firebase
+   # or
+   npm install mongodb   # for MongoDB
+   \`\`\`
 
-## 📝 Available Scripts
+2. **Add environment variables** to \`.env\`:
+   \`\`\`env
+   VITE_FIREBASE_API_KEY=your_key
+   VITE_FIREBASE_AUTH_DOMAIN=your_domain
+   \`\`\`
 
-- \`npm run dev\` - Start Vite dev server with Bini.js branding
-- \`npm run build\` - Build for production
-- \`npm run preview\` - Preview production build
-- \`npm run dev:vite\` - Start Vite directly (without Bini.js branding)
+3. **Update your API routes** - see \`src/api/database-example.js\` for reference
 
-## Learn More
+## 🎯 Features
 
-Built with ❤️ using Bini.js v${BINIJS_VERSION}
-`;
+- ⚡ Lightning-fast HMR with Vite
+- 🔌 File-based API routes (like Next.js)
+- 🗄️ Database-ready architecture
+- 🎨 ${answers.styling} support
+- 📱 Responsive design
 
-  fs.writeFileSync(path.join(projectPath, "README.md"), readme);
+**All API routes work in both development and production!**
 
-  console.log(`\n✅ Successfully created ${projectName} with Vite!`);
-  console.log(`\n📦 Project includes:`);
-  console.log(`    - Vite Dev Server with HMR`);
-  console.log(`    - React Router for routing`);
-  console.log(`    - Vite for fast compilation`);
-  console.log(`    - Built-in runtime code injection system`);
-  if (answers.ssr) console.log(`    - Server-Side Rendering`);
-  if (answers.features !== "None") console.log(`    - ${answers.features}`);
-  console.log(`    - ${answers.styling} styling`);
-  console.log(`\n🚀 Next steps:`);
-  console.log(`    cd ${projectName}`);
-  console.log(`    npm install`);
-  console.log(`    npm run dev`);
+Built with Bini.js v${BINIJS_VERSION}
+`);
+
+  console.log(`\n✅ Project created: ${projectName}`);
+  console.log(`\n🚀 Get started:\n   cd ${projectName}\n   npm install\n   npm run dev`);
+  console.log(`\n🌐 API routes available:\n   /api/hello\n   /api/users\n   /api/posts\n   /api/posts/1`);
+  console.log(`\n🗄️  Database ready: Add Firebase/MongoDB when needed`);
+  console.log(`\n⚡ Production preview:\n   npm run build\n   npm run start`);
 }
 
 async function main() {
   console.log(LOGO);
   
-  const { projectName } = await inquirer.prompt([
-    {
-      type: "input",
-      name: "projectName",
-      message: "What is your project named?",
-      default: "my-bini-app",
-      validate: (input) => {
-        if (!input) return "Project name cannot be empty";
-        if (!/^[a-z0-9-_]+$/.test(input)) {
-          return "Project name can only contain lowercase letters, numbers, hyphens, and underscores";
-        }
-        return true;
-      },
+  const { projectName } = await inquirer.prompt([{
+    type: "input",
+    name: "projectName",
+    message: "Project name:",
+    default: "my-bini-app",
+    validate: (input) => {
+      if (!input) return "Name required";
+      if (!/^[a-z0-9-_]+$/.test(input)) {
+        return "Use lowercase, numbers, hyphens, underscores only";
+      }
+      return true;
     },
-  ]);
+  }]);
 
   const answers = await askQuestions();
   
-  const projectPath = path.join(process.cwd(), projectName);
-
-  // Cache building logic
+  // Cache management
   if (!isCacheAvailable()) {
-    const tempPath = path.join(os.tmpdir(), `bini-cache-temp-${Date.now()}`);
+    const tempPath = path.join(os.tmpdir(), `bini-cache-${Date.now()}`);
     mkdirRecursive(tempPath);
     
-    const minimalPackageJson = {
+    const deps = {
       dependencies: {
         react: "^18.3.1",
         "react-dom": "^18.3.1",
-        "react-router-dom": "^6.26.0"
+        "react-router-dom": "^7.1.1"
       },
       devDependencies: {
-        "@vitejs/plugin-react": "^4.3.3",
-        vite: "^5.4.8",
+        "@vitejs/plugin-react": "^4.3.4",
+        vite: "^6.0.5",
         tailwindcss: "^3.4.17",
         postcss: "^8.4.49",
         autoprefixer: "^10.4.20",
-      },
+        typescript: "^5.7.2",
+        "@types/react": "^18.3.18",
+        "@types/react-dom": "^18.3.5"
+      }
     };
-    fs.writeFileSync(path.join(tempPath, "package.json"), JSON.stringify(minimalPackageJson, null, 2));
+    fs.writeFileSync(path.join(tempPath, "package.json"), JSON.stringify(deps, null, 2));
 
     try {
       buildCache(tempPath);
     } catch (e) {
-      console.error('Project generation aborted due to cache failure.');
+      console.error('Aborted due to cache error.');
       fs.rmSync(tempPath, { recursive: true, force: true });
-      return; 
+      return;
     } finally {
       fs.rmSync(tempPath, { recursive: true, force: true });
     }
@@ -948,4 +967,4 @@ async function main() {
   generateProject(projectName, answers);
 }
 
-main();
+main().catch(console.error);
