@@ -19,7 +19,7 @@ const LOGO = `
 ██████╗ ██╗███╗   ██╗██╗      ██╗███████╗
 ██╔══██╗██║████╗  ██║██║      ██║██╔════╝
 ██████╔╝██║██╔██╗ ██║██║      ██║███████╗
-██╔══██╗██║██║╚██╗██║██║ ██   ██║╚════██║
+██╔══██╗██║██║╚██╗██║██║ ██╗  ██║╚════██║
 ██████╔╝██║██║ ╚████║██║ ╚█████╔╝███████║
 ╚═════╝ ╚═╝╚═╝  ╚═══╝╚═╝  ╚════╝ ╚══════╝
              Developed By Binidu
@@ -83,214 +83,36 @@ async function askQuestions() {
   ]);
 }
 
-function generateAPIRoutes(projectPath, answers) {
-  // ALWAYS use .js for API files to avoid import issues
-  const ext = 'js';
-  const apiPath = path.join(projectPath, 'src/api');
-  const postsApiPath = path.join(apiPath, 'posts');
-  
-  mkdirRecursive(postsApiPath);
-
-  // Hello API - Simple and ready for extension
-  fs.writeFileSync(path.join(apiPath, `hello.${ext}`), `export default function handler(req, res) {
-  return {
-    message: 'Hello from Bini.js API!',
-    timestamp: new Date().toISOString(),
-    method: req.method,
-    environment: process.env.NODE_ENV || 'development'
-  }
-}`);
-
-  // Users API - Ready for database integration
-  fs.writeFileSync(path.join(apiPath, `users.${ext}`), `// Users API - Ready for Firebase/MongoDB integration
-// Add your database logic here when needed
-
-let users = [
-  { id: 1, name: 'John Doe', email: 'john@bini.js' },
-  { id: 2, name: 'Jane Smith', email: 'jane@bini.js' }
-]
-
-export default function handler(req, res) {
-  switch (req.method) {
-    case 'GET':
-      return {
-        users,
-        total: users.length,
-        timestamp: new Date().toISOString()
-      }
-    
-    case 'POST':
-      const newUser = {
-        id: users.length + 1,
-        ...req.body,
-        createdAt: new Date().toISOString()
-      }
-      users.push(newUser)
-      return {
-        user: newUser,
-        message: 'User created successfully'
-      }
-    
-    case 'PUT':
-      // Add your update logic here
-      return res.status(501).json({ error: 'Update not implemented - add your database logic' })
-    
-    case 'DELETE':
-      // Add your delete logic here
-      return res.status(501).json({ error: 'Delete not implemented - add your database logic' })
-    
-    default:
-      return res.status(405).json({ error: 'Method not allowed' })
-  }
-}`);
-
-  // Posts API - Ready for extension
-  fs.writeFileSync(path.join(postsApiPath, `index.${ext}`), `// Posts API - Add Firebase/MongoDB when needed
-
-let posts = [
-  { id: 1, title: 'First Post', content: 'Hello world!' },
-  { id: 2, title: 'Second Post', content: 'API routes are awesome!' }
-]
-
-export default function handler(req, res) {
-  if (req.method === 'GET') {
-    return { 
-      posts,
-      note: 'Add database integration for production use'
-    }
-  }
-  
-  if (req.method === 'POST') {
-    // Add database creation logic here
-    return res.status(501).json({ error: 'Add database integration for POST operations' })
-  }
-  
-  return res.status(405).json({ error: 'Method not allowed' })
-}`);
-
-  // Dynamic post route
-  fs.writeFileSync(path.join(postsApiPath, `[id].${ext}`), `// Dynamic post route - Ready for database integration
-
-let posts = [
-  { id: 1, title: 'First Post', content: 'Hello world!' },
-  { id: 2, title: 'Second Post', content: 'API routes are awesome!' }
-]
-
-export default function handler(req, res) {
-  const postId = parseInt(req.query.id)
-  const post = posts.find(p => p.id === postId)
-  
-  if (!post) {
-    return res.status(404).json({ error: 'Post not found' })
-  }
-  
-  if (req.method === 'GET') {
-    return { post }
-  }
-  
-  if (req.method === 'PUT') {
-    // Add database update logic here
-    return res.status(501).json({ error: 'Add database integration for update operations' })
-  }
-  
-  if (req.method === 'DELETE') {
-    // Add database delete logic here
-    return res.status(501).json({ error: 'Add database integration for delete operations' })
-  }
-  
-  return res.status(405).json({ error: 'Method not allowed' })
-}`);
-
-  // Database integration example
-  fs.writeFileSync(path.join(apiPath, `database-example.${ext}`), `// Example: How to add Firebase to your API routes
-// Remove this file or use it as a reference
-
-/*
-// 1. Install Firebase: npm install firebase
-import { initializeApp } from 'firebase/app'
-import { getFirestore, collection, getDocs, addDoc, updateDoc, deleteDoc, doc } from 'firebase/firestore'
-
-// 2. Add your Firebase config to .env
-const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID
-}
-
-// 3. Initialize Firebase
-const app = initializeApp(firebaseConfig)
-const db = getFirestore(app)
-
-// 4. Use in your API handlers
-export default async function handler(req, res) {
-  try {
-    switch (req.method) {
-      case 'GET':
-        const snapshot = await getDocs(collection(db, 'users'))
-        const users = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
-        return res.json({ users })
-      
-      case 'POST':
-        const newUser = { ...req.body, createdAt: new Date().toISOString() }
-        const docRef = await addDoc(collection(db, 'users'), newUser)
-        return res.json({ id: docRef.id, ...newUser })
-      
-      case 'PUT':
-        const { id, ...updateData } = req.body
-        await updateDoc(doc(db, 'users', id), updateData)
-        return res.json({ message: 'User updated' })
-      
-      case 'DELETE':
-        await deleteDoc(doc(db, 'users', req.body.id))
-        return res.json({ message: 'User deleted' })
-      
-      default:
-        return res.status(405).json({ error: 'Method not allowed' })
-    }
-  } catch (error) {
-    console.error('Database error:', error)
-    return res.status(500).json({ error: 'Database operation failed' })
-  }
-}
-*/
-
-// Current implementation (in-memory)
-let items = [{ id: 1, name: 'Example item' }]
-
-export default function handler(req, res) {
-  // Replace this with Firebase/MongoDB when ready
-  return res.json({ 
-    items,
-    message: 'Replace with real database for production'
-  })
-}`);
-}
-
 function generateProject(projectName, answers) {
   const projectPath = path.join(process.cwd(), projectName);
-  const srcPath = path.join(projectPath, "src");
+  const appPath = path.join(projectPath, "src/app");
+  const publicPath = path.join(projectPath, "public");
+  const biniPath = path.join(projectPath, ".bini");
   
-  mkdirRecursive(srcPath);
-  ["pages", "components", "styles", "api", "api/posts"].forEach(dir => 
-    mkdirRecursive(path.join(srcPath, dir))
-  );
+  mkdirRecursive(appPath);
+  mkdirRecursive(publicPath);
+  mkdirRecursive(biniPath);
+  
+  // Create bini internal files
+  const biniInternalPath = path.join(biniPath, "internal");
+  mkdirRecursive(biniInternalPath);
 
   const ext = answers.typescript ? "tsx" : "jsx";
   const isTS = answers.typescript;
 
-  // Generate API routes
-  generateAPIRoutes(projectPath, answers);
+  // Generate bini dev server and plugins in .bini folder
+  generateBiniInternals(projectPath, answers, ext);
 
-  // HTML Template
+  // Generate SVG logos in public folder
+  generateSVGLogos(publicPath);
+
+  // Next.js-like HTML Template
   fs.writeFileSync(path.join(projectPath, "index.html"), `<!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Bini.js App</title>
+    <!-- BINI_META_TAGS -->
   </head>
   <body>
     <div id="root"></div>
@@ -298,147 +120,138 @@ function generateProject(projectName, answers) {
   </body>
 </html>`);
 
-  // Home Page
-  fs.writeFileSync(path.join(srcPath, "pages", `Home.${ext}`), `import React from 'react';
-import { Link } from 'react-router-dom';
+  // FIXED: Next.js-like Root Layout - Proper TypeScript syntax
+  if (isTS) {
+    fs.writeFileSync(path.join(appPath, `layout.${ext}`), `import React from 'react';
+import './globals.css';
+
+interface RootLayoutProps {
+  children: React.ReactNode;
+}
+
+export const metadata = {
+  title: 'Bini.js App',
+  description: 'Modern React application built with Bini.js',
+};
+
+export default function RootLayout({ children }: RootLayoutProps) {
+  return (
+    <html lang="en">
+      <head>
+        {/* React will inject meta tags here */}
+      </head>
+      <body>
+        <div id="root">
+          <main className="main-content">
+            {children}
+          </main>
+        </div>
+      </body>
+    </html>
+  );
+}`);
+  } else {
+    // JavaScript version
+    fs.writeFileSync(path.join(appPath, `layout.${ext}`), `import React from 'react';
+import './globals.css';
+
+export const metadata = {
+  title: 'Bini.js App',
+  description: 'Modern React application built with Bini.js',
+};
+
+export default function RootLayout({ children }) {
+  return (
+    <html lang="en">
+      <head>
+        {/* React will inject meta tags here */}
+      </head>
+      <body>
+        <div id="root">
+          <main className="main-content">
+            {children}
+          </main>
+        </div>
+      </body>
+    </html>
+  );
+}`);
+  }
+
+  // FIXED: Main Page - No inline styles, uses Tailwind classes only
+  fs.writeFileSync(path.join(appPath, `page.${ext}`), `import React from 'react';
 
 export default function Home() {
-  const testApi = async () => {
-    try {
-      const response = await fetch('/api/hello');
-      const data = await response.json();
-      alert('API Response: ' + JSON.stringify(data, null, 2));
-    } catch (error) {
-      alert('API Error: ' + error.message);
-    }
-  };
-
-  const testUsersApi = async () => {
-    try {
-      const response = await fetch('/api/users');
-      const data = await response.json();
-      alert('Users API: ' + JSON.stringify(data, null, 2));
-    } catch (error) {
-      alert('API Error: ' + error.message);
-    }
+  const handleTestAlert = () => {
+    alert('Bini.js is ready! Check the README for API routes and advanced features.');
   };
 
   return (
-    <div className="max-w-4xl mx-auto my-12 p-10 bg-white rounded-xl shadow-lg">
-      <div className="text-center mb-8">
-        <h1 className="text-4xl font-bold text-indigo-700 mb-2">Welcome to Bini.js! 🚀</h1>
-        <p className="text-lg text-gray-600">Vite-powered React framework with built-in API routes</p>
-      </div>
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-8">
+      <div className="max-w-4xl w-full">
+        <div className="text-center mb-12">
+          <div className="flex justify-center mb-6">
+            <img src="/bini-logo.svg" alt="Bini.js Logo" className="h-16" />
+          </div>
+          <h1 className="text-5xl font-bold text-gray-900 mb-4">
+            Welcome to <span className="text-indigo-600">Bini.js</span>
+          </h1>
+          <p className="text-xl text-gray-600 mb-8">
+            Next.js-like React framework with built-in API routes
+          </p>
+        </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 my-8">
-        <div className="p-6 bg-blue-50 border border-blue-100 rounded-lg transition-all hover:bg-blue-100 hover:-translate-y-1">
-          <h3 className="text-xl font-semibold text-indigo-700 mb-2">⚡ Lightning Fast</h3>
-          <p className="text-gray-600">Powered by Vite for instant HMR and blazing builds</p>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-12">
+          <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-100">
+            <div className="text-2xl mb-3">⚡</div>
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">Layout First</h3>
+            <p className="text-gray-600">All SEO and meta tags configured in layout file</p>
+          </div>
+          
+          <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-100">
+            <div className="text-2xl mb-3">🚀</div>
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">File-based Routing</h3>
+            <p className="text-gray-600">Create pages by adding files to src/app</p>
+          </div>
+          
+          <div className="bg-white rounded-xl shadow-lg p-6 border border-gray-100">
+            <div className="text-2xl mb-3">🔒</div>
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">API Routes</h3>
+            <p className="text-gray-600">Built-in file-based API routes like Next.js</p>
+          </div>
         </div>
-        <div className="p-6 bg-blue-50 border border-blue-100 rounded-lg transition-all hover:bg-blue-100 hover:-translate-y-1">
-          <h3 className="text-xl font-semibold text-indigo-700 mb-2">🔌 Built-in API</h3>
-          <p className="text-gray-600">File-based API routes like Next.js</p>
-        </div>
-        <div className="p-6 bg-blue-50 border border-blue-100 rounded-lg transition-all hover:bg-blue-100 hover:-translate-y-1">
-          <h3 className="text-xl font-semibold text-indigo-700 mb-2">🎨 Extensible</h3>
-          <p className="text-gray-600">Add Firebase, MongoDB, or any database when needed</p>
-        </div>
-      </div>
 
-      <div className="text-center mt-8 pt-8 border-t border-gray-200 space-x-4">
-        <Link 
-          to="/about" 
-          className="inline-block px-6 py-3 bg-gradient-to-r from-indigo-500 to-purple-600 text-white font-medium rounded-lg transition-transform hover:-translate-y-0.5"
-        >
-          About →
-        </Link>
-        <button 
-          onClick={testApi}
-          className="inline-block px-6 py-3 bg-green-500 text-white font-medium rounded-lg transition-transform hover:-translate-y-0.5"
-        >
-          Test Hello API
-        </button>
-        <button 
-          onClick={testUsersApi}
-          className="inline-block px-6 py-3 bg-blue-500 text-white font-medium rounded-lg transition-transform hover:-translate-y-0.5"
-        >
-          Test Users API
-        </button>
+        <div className="text-center">
+          <div className="bg-white rounded-xl shadow-lg p-8 border border-gray-100">
+            <h3 className="text-2xl font-semibold text-gray-900 mb-4">Get Started</h3>
+            <p className="text-gray-600 mb-6">
+              Add new pages by creating files in <code className="bg-gray-100 px-2 py-1 rounded text-sm font-mono">src/app</code>
+            </p>
+            <div className="flex justify-center gap-4">
+              <button 
+                onClick={handleTestAlert}
+                className="px-6 py-3 bg-indigo-600 text-white font-medium rounded-lg hover:bg-indigo-700 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+              >
+                Test Alert
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );
 }`);
 
-  // About Page
-  fs.writeFileSync(path.join(srcPath, "pages", `About.${ext}`), `import React from 'react';
-import { Link } from 'react-router-dom';
-
-export default function About() {
-  return (
-    <div className="max-w-4xl mx-auto my-12 p-10 bg-white rounded-xl shadow-lg">
-      <div className="text-center mb-8">
-        <h1 className="text-4xl font-bold text-indigo-700 mb-2">About Bini.js</h1>
-        <p className="text-lg text-gray-600">Modern React framework built on Vite with file-based API routes</p>
-      </div>
-      
-      <div className="p-6 bg-blue-50 border border-blue-100 rounded-lg my-8">
-        <p className="text-gray-700 mb-4">
-          Bini.js combines Vite's speed with React's simplicity, offering a Next.js-like 
-          experience with faster builds, built-in API routes, and instant feedback.
-        </p>
-        <p className="text-gray-700">
-          <strong>API Routes:</strong> File-based API routes in <code>src/api/</code> work in both development and production!
-        </p>
-        <p className="text-gray-700 mt-4">
-          <strong>Database Ready:</strong> Easily add Firebase, MongoDB, or any database to your API routes when needed.
-        </p>
-      </div>
-
-      <div className="text-center mt-8 pt-8 border-t border-gray-200">
-        <Link 
-          to="/" 
-          className="inline-block px-6 py-3 bg-gradient-to-r from-indigo-500 to-purple-600 text-white font-medium rounded-lg transition-transform hover:-translate-y-0.5"
-        >
-          ← Home
-        </Link>
-      </div>
-    </div>
-  );
-}`);
-
-  // App Component
-  fs.writeFileSync(path.join(srcPath, `App.${ext}`), `import React from 'react';
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
-import './styles/globals.css';
-import Home from './pages/Home';
-import About from './pages/About';
-
-export default function App() {
-  const isDev = import.meta.env.DEV;
-  
-  return (
-    <>
-      <Router>
-        <Routes>
-          <Route path="/" element={<Home />} />
-          <Route path="/about" element={<About />} />
-        </Routes>
-      </Router>
-      {isDev && (
-        <div className="bini-badge">
-          ▲ Bini.js v${BINIJS_VERSION}
-        </div>
-      )}
-    </>
-  );
-}`);
-
-  // Main Entry
-  fs.writeFileSync(path.join(srcPath, `main.${ext}`), `import React from 'react';
+  // Main Entry Point
+  fs.writeFileSync(path.join(projectPath, "src", `main.${ext}`), `import React from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
 
 const container = document.getElementById('root');
+if (!container) {
+  throw new Error('Root container not found');
+}
+
 const root = createRoot(container);
 root.render(<App />);
 
@@ -446,77 +259,49 @@ if (import.meta.env.DEV) {
   import.meta.hot?.accept();
 }`);
 
+  // Simple App Component
+  fs.writeFileSync(path.join(projectPath, "src", `App.${ext}`), `import React from 'react';
+import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import './app/globals.css';
+import Home from './app/page';
+
+export default function App() {
+  return (
+    <Router>
+      <Routes>
+        <Route path="/" element={<Home />} />
+      </Routes>
+    </Router>
+  );
+}`);
+
   // Global Styles
-  const globalStyles = answers.styling === "Tailwind" 
-    ? `@tailwind base;
-@tailwind components;
-@tailwind utilities;
-
-@layer base {
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body {
-    font-family: system-ui, -apple-system, sans-serif;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    min-height: 100vh;
-    padding: 2rem;
-  }
-}
-
-@layer components {
-  .bini-badge {
-    position: fixed;
-    bottom: 20px;
-    right: 20px;
-    background: #111;
-    color: #fff;
-    padding: 10px 20px;
-    border-radius: 8px;
-    font-size: 14px;
-    font-weight: bold;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-    z-index: 9999;
-  }
-}`
-    : `* { box-sizing: border-box; margin: 0; padding: 0; }
-body {
-  font-family: system-ui, sans-serif;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  min-height: 100vh;
-  padding: 2rem;
-}
-.bini-badge {
-  position: fixed;
-  bottom: 20px;
-  right: 20px;
-  background: #111;
-  color: #fff;
-  padding: 10px 20px;
-  border-radius: 8px;
-  font-size: 14px;
-  font-weight: bold;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-  z-index: 9999;
-}`;
-
-  fs.writeFileSync(path.join(srcPath, "styles", "globals.css"), globalStyles);
+  const globalStyles = generateGlobalStyles(answers.styling);
+  fs.writeFileSync(path.join(appPath, "globals.css"), globalStyles);
 
   // TypeScript config
   if (isTS) {
-    fs.writeFileSync(path.join(projectPath, "tsconfig.json"), JSON.stringify({
-      compilerOptions: {
-        target: "ES2020",
-        lib: ["ES2020", "DOM", "DOM.Iterable"],
-        module: "ESNext",
-        skipLibCheck: true,
-        moduleResolution: "bundler",
-        resolveJsonModule: true,
-        isolatedModules: true,
-        noEmit: true,
-        jsx: "react-jsx",
-        strict: true
-      },
-      include: ["src"]
-    }, null, 2));
+    fs.writeFileSync(path.join(projectPath, "tsconfig.json"), `{
+  "compilerOptions": {
+    "target": "ES2020",
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "strict": true,
+    "forceConsistentCasingInFileNames": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"]
+    }
+  },
+  "include": ["src"],
+  "exclude": ["node_modules", "dist", ".bini"]
+}`);
   }
 
   // Tailwind config
@@ -533,7 +318,8 @@ export default {
   },
   plugins: [],
 };`);
-    fs.writeFileSync(path.join(projectPath, "postcss.config.js"), 
+    
+    fs.writeFileSync(path.join(projectPath, "postcss.config.mjs"), 
       `export default {
   plugins: {
     tailwindcss: {},
@@ -542,16 +328,665 @@ export default {
 };`);
   }
 
-  // Vite config with Windows fix and console output
+  // Bini.js config
+  fs.writeFileSync(path.join(projectPath, "bini.config.ts"), `import { defineConfig } from 'bini'
+
+export default defineConfig({
+  // Build output directory (like Next.js .next folder)
+  outDir: '.bini',
+  
+  // Development server port
+  port: 3000,
+  
+  // API routes configuration
+  api: {
+    // API routes directory
+    dir: 'src/api',
+    // Body size limit for API routes
+    bodySizeLimit: '1mb'
+  },
+  
+  // Static files configuration
+  static: {
+    // Static files directory
+    dir: 'public',
+    // Static files cache duration
+    maxAge: 3600
+  },
+  
+  // Build optimization
+  build: {
+    // Minify output
+    minify: true,
+    // Source maps for debugging
+    sourcemap: true
+  }
+})`);
+
+  // Bini environment types
+  fs.writeFileSync(path.join(projectPath, "bini-env.d.ts"), `/// <reference types="bini/client" />
+
+declare global {
+  namespace NodeJS {
+    interface ProcessEnv {
+      // Add your environment variables here
+      NODE_ENV: 'development' | 'production'
+      VITE_APP_NAME: string
+      VITE_APP_URL: string
+    }
+  }
+}
+
+export {}`);
+
+  // FIXED: Enhanced ESLint config with no-inline-styles rule
+  fs.writeFileSync(path.join(projectPath, "eslint.config.mjs"), `import js from '@eslint/js'
+import globals from 'globals'
+import reactHooks from 'eslint-plugin-react-hooks'
+import reactRefresh from 'eslint-plugin-react-refresh'
+
+export default [
+  { ignores: ['dist', '.bini', 'node_modules'] },
+  {
+    files: ['**/*.{js,jsx,ts,tsx}'],
+    languageOptions: {
+      ecmaVersion: 2020,
+      globals: globals.browser,
+      parserOptions: {
+        ecmaVersion: 'latest',
+        ecmaFeatures: { jsx: true },
+        sourceType: 'module',
+      },
+    },
+    plugins: {
+      'react-hooks': reactHooks,
+      'react-refresh': reactRefresh,
+    },
+    rules: {
+      ...js.configs.recommended.rules,
+      ...reactHooks.configs.recommended.rules,
+      'no-unused-vars': ['error', { 
+        argsIgnorePattern: '^_',
+        varsIgnorePattern: '^_' 
+      }],
+      'react-refresh/only-export-components': [
+        'warn',
+        { allowConstantExport: true },
+      ],
+      'no-console': 'warn',
+      'prefer-const': 'error',
+      'react/no-unknown-property': ['error', { ignore: ['css'] }],
+    },
+  },
+]`);
+
+  // Gitignore
+  fs.writeFileSync(path.join(projectPath, ".gitignore"), `# Dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Build outputs
+dist/
+.bini/
+
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+logs
+*.log`);
+
+  // Vite config
   fs.writeFileSync(path.join(projectPath, "vite.config.js"), `import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
-import fs from 'fs'
+import { biniBadgePlugin } from './.bini/internal/plugins/badge'
+import { biniSSRPlugin } from './.bini/internal/plugins/ssr'
+import { biniAPIPlugin } from './.bini/internal/plugins/api'
+
+export default defineConfig({
+  plugins: [
+    react(), 
+    biniSSRPlugin(), 
+    biniBadgePlugin(), 
+    biniAPIPlugin()
+  ],
+  server: { 
+    port: 3000, 
+    open: true,
+    host: true,
+    cors: true
+  },
+  preview: {
+    port: 3000,
+    open: true,
+    host: true
+  },
+  build: { 
+    outDir: '.bini/dist',
+    sourcemap: true,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          vendor: ['react', 'react-dom'],
+          router: ['react-router-dom']
+        }
+      }
+    }
+  },
+  resolve: {
+    alias: {
+      '@': '/src',
+    }
+  },
+  css: {
+    modules: {
+      localsConvention: 'camelCase'
+    },
+    devSourcemap: true
+  }
+})`);
+
+  // Package.json
+  const packageJson = {
+    name: projectName,
+    type: "module",
+    version: "1.0.0",
+    scripts: {
+      "dev": "vite",
+      "build": "vite build",
+      "start": "vite preview --host",
+      "preview": "vite preview",
+      "type-check": isTS ? "tsc --noEmit" : "echo 'TypeScript not enabled'",
+      "lint": "eslint . --ext .js,.jsx,.ts,.tsx"
+    },
+    dependencies: {
+      react: "^18.3.1",
+      "react-dom": "^18.3.1",
+      "react-router-dom": "^7.1.1"
+    },
+    devDependencies: {
+      "@vitejs/plugin-react": "^4.3.4",
+      vite: "^6.0.5",
+      "@eslint/js": "^9.9.0",
+      "eslint-plugin-react-hooks": "^5.0.0",
+      "eslint-plugin-react-refresh": "^0.4.9",
+      globals: "^15.9.0",
+      ...(isTS && {
+        "@types/react": "^18.3.18",
+        "@types/react-dom": "^18.3.5",
+        typescript: "^5.7.2"
+      })
+    }
+  };
+
+  // Add styling-specific dependencies
+  if (answers.styling === "Tailwind") {
+    packageJson.devDependencies.tailwindcss = "^3.4.17";
+    packageJson.devDependencies.postcss = "^8.4.49";
+    packageJson.devDependencies.autoprefixer = "^10.4.20";
+  }
+
+  fs.writeFileSync(path.join(projectPath, "package.json"), JSON.stringify(packageJson, null, 2));
+
+  // README
+  fs.writeFileSync(path.join(projectPath, "README.md"), `# ${projectName}
+
+⚡ Lightning-fast Bini.js app with Next.js-like file structure.
+
+## 🚀 Quick Start
+
+\`\`\`bash
+npm install
+npm run dev
+\`\`\`
+
+Opens http://localhost:3000 with Bini.js development server.
+
+## 📦 Production Build
+
+\`\`\`bash
+npm run build
+npm run start  # Preview production build
+\`\`\`
+
+## 🏗️ Project Structure
+
+\`\`\`
+${projectName}/
+├── src/
+│   └── app/           # Next.js app directory
+│       ├── layout.${ext}    # Root layout (SEO, meta tags)
+│       ├── page.${ext}      # Home page
+│       └── globals.css      # Global styles
+├── public/            # Static assets (images, fonts, etc.)
+│   ├── bini-logo.svg  # Bini.js logo
+│   └── favicon.svg    # App favicon
+├── .bini/             # Build outputs and internal plugins
+├── bini.config.ts     # Bini.js configuration
+├── bini-env.d.ts      # Environment type definitions
+├── eslint.config.mjs  # ESLint configuration
+├── tsconfig.json      # TypeScript configuration
+├── vite.config.js     # Vite configuration with Bini plugins
+└── package.json       # Dependencies and scripts
+\`\`\`
+
+## 🎨 Styling: ${answers.styling}
+
+${answers.styling === "Tailwind" ? "✅ Tailwind CSS configured and ready" : ""}
+${answers.styling === "CSS Modules" ? "✅ CSS Modules enabled" : ""}
+${answers.styling === "None" ? "✅ Basic CSS with responsive design" : ""}
+
+## 🖥️ Layout-First Architecture
+
+All global configuration is centralized in \`src/app/layout.${ext}\`:
+
+- **SEO Meta Tags**: Title, description, keywords
+- **Favicon**: Auto-generated triangle SVG favicon
+- **Global Styles**: CSS imports and base styles
+
+### Customizing Meta Tags
+
+Edit the \`metadata\` object in \`src/app/layout.${ext}\`:
+
+\`\`\`${ext}
+export const metadata = {
+  title: 'My Custom Site',
+  description: 'My custom description for SEO',
+  keywords: 'custom,keywords,here',
+  authors: [{ name: 'Site Owner' }],
+};
+\`\`\`
+
+**Note**: Meta tags are server-side rendered and visible in page source for SEO.
+
+## 📄 Adding Pages
+
+Create new pages by adding files to \`src/app/\`:
+
+\`\`\`${ext}
+// src/app/about/page.${ext}
+export default function About() {
+  return (
+    <div>
+      <h1>About Page</h1>
+      <p>This is the about page</p>
+    </div>
+  );
+}
+\`\`\`
+
+## 🔌 API Routes
+
+Create API routes in \`src/api/\`:
+
+\`\`\`javascript
+// src/api/hello.js
+export default function handler(req, res) {
+  return {
+    message: 'Hello from Bini.js API!',
+    timestamp: new Date().toISOString()
+  }
+}
+\`\`\`
+
+Access at: \`/api/hello\`
+
+## 🛠️ Configuration
+
+### Bini.js Config (\`bini.config.ts\`)
+\`\`\`typescript
+export default defineConfig({
+  outDir: '.bini',     # Build output directory
+  port: 3000,          # Development server port
+  api: {
+    dir: 'src/api',    # API routes directory
+  }
+})
+\`\`\`
+
+### Environment Variables
+Create \`.env\` file:
+\`\`\`
+VITE_APP_NAME="${projectName}"
+VITE_APP_URL=http://localhost:3000
+\`\`\`
+
+## 🎯 Features
+
+- ⚡ **Next.js Structure**: Familiar app directory structure
+- 🖥️ **Layout First**: All global config in layout.${ext}
+- 🔌 **File-based API**: Next.js-style API routes
+- 📱 **Responsive**: Mobile-first design
+- 🎨 **Auto-generated Logos**: Bini.js triangle logos in SVG
+- 🔧 **TypeScript**: ${isTS ? 'Enabled' : 'Ready to add'}
+- 🚀 **Production Ready**: Optimized builds
+- 🎨 **Bini.js Badge**: Development badge in bottom-right corner
+- 🔍 **SEO Ready**: Server-side rendered meta tags
+- 🔄 **Hot Reload**: Meta tags update automatically on changes
+
+## 📁 File Overview
+
+- \`src/app/layout.${ext}\` - Root layout with SEO and meta tags
+- \`src/app/page.${ext}\` - Home page component
+- \`src/app/globals.css\` - Global styles and CSS imports
+- \`public/bini-logo.svg\` - Bini.js logo for the website
+- \`public/favicon.svg\` - Triangle favicon for the app
+- \`.bini/\` - Build outputs and internal plugins
+- \`bini.config.ts\` - Framework configuration
+- \`bini-env.d.ts\` - TypeScript environment definitions
+- \`vite.config.js\` - Vite configuration with Bini plugins
+
+## 🔧 Development
+
+\`\`\`bash
+# Development server with Bini.js features
+npm run dev
+
+# Production build
+npm run build
+
+# Preview production build
+npm run start
+
+# Type checking (if TypeScript)
+npm run type-check
+
+# Lint code
+npm run lint
+\`\`\`
+
+---
+
+**Built with Bini.js v${BINIJS_VERSION}** • [Documentation](https://bini.js.org)
+`);
+
+  console.log(`\n✅ Project created: ${projectName}`);
+  console.log(`\n📁 Next.js-like structure created:`);
+  console.log(`   src/app/layout.${ext} - Root layout with SEO`);
+  console.log(`   src/app/page.${ext} - Home page`);
+  console.log(`   public/bini-logo.svg - Bini.js logo`);
+  console.log(`   public/favicon.svg - Triangle favicon`);
+  console.log(`   .bini/ - Build outputs and internal plugins`);
+  console.log(`\n🚀 Get started:\n   cd ${projectName}\n   npm install\n   npm run dev`);
+  console.log(`\n🎨 Styling: ${answers.styling}`);
+  console.log(`\n📚 Check README.md for API routes and advanced features`);
+}
+
+function generateSVGLogos(publicPath) {
+  // Bini.js Logo (for website)
+  const biniLogoSVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 60">
+  <polygon points="20,10 40,50 0,50" fill="#00CFFF"></polygon>
+  <text x="60" y="42" font-size="32" font-family="Poppins, sans-serif" font-weight="600" fill="#222">Bini.js</text>
+</svg>`;
+  
+  // Favicon (triangle with gradient)
+  const faviconSVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <polygon points="50,10 90,90 10,90" fill="url(#grad)"></polygon>
+  <defs>
+    <linearGradient id="grad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#00CFFF"></stop>
+      <stop offset="100%" stop-color="#0077FF"></stop>
+    </linearGradient>
+  </defs>
+</svg>`;
+
+  fs.writeFileSync(path.join(publicPath, "bini-logo.svg"), biniLogoSVG);
+  fs.writeFileSync(path.join(publicPath, "favicon.svg"), faviconSVG);
+  
+  console.log('✅ Generated SVG logos in public folder');
+}
+
+function generateBiniInternals(projectPath, answers, ext) {
+  const biniInternalPath = path.join(projectPath, ".bini/internal");
+  const pluginsPath = path.join(biniInternalPath, "plugins");
+  
+  mkdirRecursive(pluginsPath);
+
+  // Bini Badge Plugin
+  fs.writeFileSync(path.join(pluginsPath, "badge.js"), `const BINIJS_VERSION = "${BINIJS_VERSION}";
+
+export function biniBadgePlugin() {
+  return {
+    name: 'bini-badge-injector',
+    
+    transformIndexHtml: {
+      order: 'post',
+      handler(html) {
+        if (process.env.NODE_ENV !== 'production') {
+          const badgeScript = \`
+            <style>
+              .bini-dev-badge {
+                position: fixed;
+                bottom: 20px;
+                right: 20px;
+                background: #111;
+                color: #fff;
+                padding: 10px 20px;
+                border-radius: 8px;
+                font-size: 14px;
+                font-weight: bold;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+                z-index: 9999;
+                font-family: system-ui, -apple-system, sans-serif;
+                user-select: none;
+                pointer-events: none;
+                animation: fadeIn 0.5s ease-in;
+              }
+              @keyframes fadeIn {
+                from { opacity: 0; transform: translateY(10px); }
+                to { opacity: 1; transform: translateY(0); }
+              }
+            </style>
+            <script>
+              (function() {
+                window.addEventListener('DOMContentLoaded', function() {
+                  const badge = document.createElement('div');
+                  badge.className = 'bini-dev-badge';
+                  badge.innerHTML = '▲ Bini.js v${BINIJS_VERSION}';
+                  document.body.appendChild(badge);
+                  
+                  // Auto-remove in production build
+                  if (process.env.NODE_ENV === 'production') {
+                    badge.remove();
+                  }
+                });
+              })();
+            </script>
+          \`;
+          
+          return html.replace('</body>', badgeScript + '</body>');
+        }
+        return html;
+      }
+    }
+  }
+}`);
+
+  // Bini SSR Plugin - Only shows tags implemented in layout
+  fs.writeFileSync(path.join(pluginsPath, "ssr.js"), `const BINIJS_VERSION = "${BINIJS_VERSION}";
+import fs from 'fs';
+import path from 'path';
+
+function parseMetadata(layoutContent) {
+  const metaTags = {};
+
+  try {
+    // Extract metadata object from layout file
+    const metadataMatch = layoutContent.match(/export\\s+const\\s+metadata\\s*=\\s*({[\\s\\S]*?})(?=\\s*export|\\s*function|\\s*const|\\s*$)/);
+    
+    if (metadataMatch) {
+      const metadataStr = metadataMatch[1];
+      
+      // Helper to extract property values - only extract what's actually defined
+      const extractProperty = (str, prop) => {
+        const regex = new RegExp(\`\${prop}:\\\\s*['"]([^'"]+)['"]\`, 'i');
+        const match = str.match(regex);
+        return match ? match[1] : null;
+      };
+
+      // Extract individual properties only if they exist
+      const title = extractProperty(metadataStr, 'title');
+      if (title) metaTags.title = title;
+      
+      const description = extractProperty(metadataStr, 'description');
+      if (description) metaTags.description = description;
+      
+      const keywords = extractProperty(metadataStr, 'keywords');
+      if (keywords) metaTags.keywords = keywords;
+      
+      // Handle authors array only if it exists
+      const authorsMatch = metadataStr.match(/authors:\\s*\\[\\s*{\\s*name:\\s*['"]([^'"]+)['"]/);
+      if (authorsMatch) metaTags.author = authorsMatch[1];
+      
+      const viewport = extractProperty(metadataStr, 'viewport');
+      if (viewport) metaTags.viewport = viewport;
+      
+      console.log('🔄 Bini.js: Successfully parsed metadata from layout');
+    }
+  } catch (error) {
+    console.log('Bini.js: Error parsing metadata');
+  }
+
+  return metaTags;
+}
+
+function getCurrentMetadata() {
+  const layoutPath = path.join(process.cwd(), 'src/app/layout.tsx');
+  
+  try {
+    if (fs.existsSync(layoutPath)) {
+      const layoutContent = fs.readFileSync(layoutPath, 'utf-8');
+      return parseMetadata(layoutContent);
+    } else {
+      console.log('Bini.js: Layout file not found');
+    }
+  } catch (error) {
+    console.log('Bini.js: Error reading layout file:', error.message);
+  }
+
+  // Return empty object - no defaults
+  return {};
+}
+
+export function biniSSRPlugin() {
+  return {
+    name: 'bini-ssr-plugin',
+    
+    configureServer(server) {
+      // Watch layout file for changes
+      const layoutPath = path.join(process.cwd(), 'src/app/layout.tsx');
+      
+      if (fs.existsSync(layoutPath)) {
+        server.watcher.add(layoutPath);
+        
+        server.watcher.on('change', (file) => {
+          if (file === layoutPath) {
+            console.log('🔄 Bini.js: Layout file changed - meta tags will update');
+            
+            // Small delay to ensure file is written
+            setTimeout(() => {
+              server.ws.send({
+                type: 'full-reload',
+                path: '*'
+              });
+            }, 100);
+          }
+        });
+      }
+    },
+    
+    transformIndexHtml: {
+      order: 'pre',
+      handler(html, ctx) {
+        const metaTags = getCurrentMetadata();
+        
+        // Generate meta tags HTML - ONLY what's defined in layout
+        let metaTagsHTML = '';
+        
+        // Always include charset, viewport and favicon
+        metaTagsHTML += \`
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="\${metaTags.viewport || 'width=device-width, initial-scale=1.0'}" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />\`;
+        
+        // Only include title if defined
+        if (metaTags.title) {
+          metaTagsHTML += \`
+    <title>\${metaTags.title}</title>\`;
+        }
+        
+        // Only include description if defined
+        if (metaTags.description) {
+          metaTagsHTML += \`
+    <meta name="description" content="\${metaTags.description}" />\`;
+        }
+        
+        // Only include keywords if defined
+        if (metaTags.keywords) {
+          metaTagsHTML += \`
+    <meta name="keywords" content="\${metaTags.keywords}" />\`;
+        }
+        
+        // Only include author if defined
+        if (metaTags.author) {
+          metaTagsHTML += \`
+    <meta name="author" content="\${metaTags.author}" />\`;
+        }
+        
+        // Bini.js runtime (always included)
+        metaTagsHTML += \`
+    
+    <!-- Bini.js runtime -->
+    <script>
+      window.__BINI_RUNTIME__ = { version: '\${BINIJS_VERSION}' };
+    </script>\`;
+        
+        return html.replace('<!-- BINI_META_TAGS -->', metaTagsHTML);
+      }
+    },
+    
+    // Handle HMR updates
+    handleHotUpdate({ server, file }) {
+      if (file.endsWith('layout.tsx')) {
+        console.log('🔄 Bini.js: Layout hot update detected');
+        
+        // Use full reload for layout changes
+        setTimeout(() => {
+          server.ws.send({
+            type: 'full-reload',
+            path: '*'
+          });
+        }, 50);
+        
+        return []; // Skip default HMR processing
+      }
+    }
+  }
+}`);
+
+  // Bini API Plugin
+  fs.writeFileSync(path.join(pluginsPath, "api.js"), `import fs from 'fs'
 import path from 'path'
 import { pathToFileURL } from 'url'
 import os from 'os'
 
 const BINIJS_VERSION = "${BINIJS_VERSION}";
-const PORT = 3000;
 
 function getNetworkIp() {
   const interfaces = os.networkInterfaces();
@@ -567,347 +1002,238 @@ function getNetworkIp() {
 
 function showBiniBanner(mode) {
   const localIp = getNetworkIp();
-  const isDev = mode === 'dev';
   
   console.log('');
   console.log('  ▲ Bini.js v' + BINIJS_VERSION);
   console.log('  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-  console.log('    → Local:   http://localhost:' + PORT);
-  console.log('    → Network: http://' + localIp + ':' + PORT);
+  console.log('    → Local:   http://localhost:3000');
+  console.log('    → Network: http://' + localIp + ':3000');
   console.log('  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   console.log('');
 }
 
-function apiPlugin() {
-  let isProduction = false
-  
+export function biniAPIPlugin() {
   return {
-    name: 'api-plugin',
-    
-    config(config, { command }) {
-      isProduction = command === 'build'
-    },
+    name: 'bini-api-plugin',
     
     configureServer(server) {
       showBiniBanner('dev');
       
       server.middlewares.use('/api', async (req, res) => {
         try {
-          const url = new URL(req.url, \`http://\${req.headers.host}\`)
-          const routePath = url.pathname.replace('/api/', '') || 'index'
+          const url = new URL(req.url, \`http://\${req.headers.host}\`);
+          let routePath = url.pathname.replace('/api/', '') || 'index';
           
-          // Look for API handler - ONLY .js files
-          const apiDir = path.join(process.cwd(), 'src/api')
-          const possibleFiles = [
+          // Remove trailing slash
+          if (routePath.endsWith('/')) {
+            routePath = routePath.slice(0, -1);
+          }
+          
+          const apiDir = path.join(process.cwd(), 'src/api');
+          let handlerPath = null;
+          
+          // Check if API route exists
+          const possiblePaths = [
             path.join(apiDir, \`\${routePath}.js\`),
-            path.join(apiDir, routePath, 'index.js')
-          ]
+            path.join(apiDir, routePath, 'index.js'),
+          ];
           
-          let handlerPath = null
-          for (const filePath of possibleFiles) {
+          for (const filePath of possiblePaths) {
             if (fs.existsSync(filePath)) {
-              handlerPath = filePath
-              break
+              handlerPath = filePath;
+              break;
             }
           }
           
           if (!handlerPath) {
-            res.statusCode = 404
-            res.end(JSON.stringify({ error: 'API route not found' }))
-            return
+            res.statusCode = 404;
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({ 
+              error: 'API route not found',
+              path: routePath
+            }));
+            return;
           }
           
           // Convert Windows path to file:// URL for ESM imports
-          const handlerUrl = pathToFileURL(handlerPath).href
+          const handlerUrl = pathToFileURL(handlerPath).href;
           
           // Import the JavaScript handler
-          const handlerModule = await import(handlerUrl)
-          const handler = handlerModule.default
+          const handlerModule = await import(handlerUrl + '?t=' + Date.now());
+          const handler = handlerModule.default;
           
           if (typeof handler !== 'function') {
-            res.statusCode = 500
-            res.end(JSON.stringify({ error: 'Invalid API handler' }))
-            return
+            res.statusCode = 500;
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({ error: 'Invalid API handler - export a default function' }));
+            return;
           }
           
           // Parse request body
-          let body = {}
-          if (['POST', 'PUT', 'PATCH'].includes(req.method)) {
+          let body = {};
+          if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
             body = await new Promise((resolve) => {
-              let data = ''
-              req.on('data', chunk => data += chunk)
+              let data = '';
+              req.on('data', chunk => data += chunk);
               req.on('end', () => {
                 try {
-                  resolve(JSON.parse(data || '{}'))
+                  resolve(data ? JSON.parse(data) : {});
                 } catch {
-                  resolve({})
+                  resolve({});
                 }
-              })
-            })
+              });
+            });
           }
           
-          // Create request object
+          // Enhanced request object
           const request = {
             method: req.method,
             url: req.url,
             headers: req.headers,
             body,
-            query: Object.fromEntries(url.searchParams)
-          }
+            query: Object.fromEntries(url.searchParams),
+            params: {}
+          };
           
-          // Create response object
+          // Enhanced response object
           const response = {
             status: (code) => {
-              res.statusCode = code
-              return response
+              res.statusCode = code;
+              return response;
+            },
+            setHeader: (name, value) => {
+              res.setHeader(name, value);
+              return response;
             },
             json: (data) => {
-              res.setHeader('Content-Type', 'application/json')
-              res.end(JSON.stringify(data, null, 2))
+              res.setHeader('Content-Type', 'application/json');
+              res.end(JSON.stringify(data, null, 2));
             },
             send: (data) => {
-              res.end(data)
+              if (typeof data === 'object') {
+                res.setHeader('Content-Type', 'application/json');
+                res.end(JSON.stringify(data));
+              } else {
+                res.end(data);
+              }
+            },
+            end: (data) => {
+              res.end(data);
             }
-          }
+          };
           
           // Execute handler
-          const result = await handler(request, response)
+          const result = await handler(request, response);
           if (result && !res.writableEnded) {
-            response.json(result)
+            response.json(result);
           }
           
         } catch (error) {
-          console.error('API Error:', error)
-          res.statusCode = 500
-          res.end(JSON.stringify({ error: 'Internal Server Error' }))
+          console.error('🚨 API Error:', error);
+          res.statusCode = 500;
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify({ 
+            error: 'Internal Server Error',
+            message: error.message,
+            stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+          }));
         }
-      })
-    },
-    
-    configurePreviewServer(server) {
-      showBiniBanner('preview');
-      
-      // Same logic for preview mode
-      server.middlewares.use('/api', async (req, res) => {
-        try {
-          const url = new URL(req.url, \`http://\${req.headers.host}\`)
-          const routePath = url.pathname.replace('/api/', '') || 'index'
-          
-          const apiDir = path.join(process.cwd(), 'src/api')
-          const possibleFiles = [
-            path.join(apiDir, \`\${routePath}.js\`),
-            path.join(apiDir, routePath, 'index.js')
-          ]
-          
-          let handlerPath = null
-          for (const filePath of possibleFiles) {
-            if (fs.existsSync(filePath)) {
-              handlerPath = filePath
-              break
-            }
-          }
-          
-          if (!handlerPath) {
-            res.statusCode = 404
-            res.end(JSON.stringify({ error: 'API route not found' }))
-            return
-          }
-          
-          // Convert Windows path to file:// URL
-          const handlerUrl = pathToFileURL(handlerPath).href
-          
-          const handlerModule = await import(handlerUrl)
-          const handler = handlerModule.default
-          
-          if (typeof handler !== 'function') {
-            res.statusCode = 500
-            res.end(JSON.stringify({ error: 'Invalid API handler' }))
-            return
-          }
-          
-          let body = {}
-          if (['POST', 'PUT', 'PATCH'].includes(req.method)) {
-            body = await new Promise((resolve) => {
-              let data = ''
-              req.on('data', chunk => data += chunk)
-              req.on('end', () => {
-                try {
-                  resolve(JSON.parse(data || '{}'))
-                } catch {
-                  resolve({})
-                }
-              })
-            })
-          }
-          
-          const request = {
-            method: req.method,
-            url: req.url,
-            headers: req.headers,
-            body,
-            query: Object.fromEntries(url.searchParams)
-          }
-          
-          const response = {
-            status: (code) => {
-              res.statusCode = code
-              return response
-            },
-            json: (data) => {
-              res.setHeader('Content-Type', 'application/json')
-              res.end(JSON.stringify(data, null, 2))
-            }
-          }
-          
-          const result = await handler(request, response)
-          if (result && !res.writableEnded) {
-            response.json(result)
-          }
-          
-        } catch (error) {
-          console.error('Preview API Error:', error)
-          res.statusCode = 500
-          res.end(JSON.stringify({ error: 'Internal Server Error' }))
-        }
-      })
+      });
     }
+  }
+}`);
+}
+
+function generateGlobalStyles(styling) {
+  if (styling === "Tailwind") {
+    return `@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * { 
+    box-sizing: border-box; 
+    margin: 0; 
+    padding: 0; 
+  }
+  
+  html {
+    font-family: system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  
+  body {
+    line-height: 1.5;
+    color: #1f2937;
+  }
+  
+  #root {
+    min-height: 100vh;
+  }
+  
+  .main-content {
+    min-height: 100vh;
   }
 }
 
-export default defineConfig({
-  plugins: [react(), apiPlugin()],
-  server: { 
-    port: PORT, 
-    open: true,
-    host: true
-  },
-  preview: {
-    port: PORT,
-    open: true,
-    host: true
-  },
-  build: { 
-    outDir: 'dist'
+@layer components {
+  .btn-primary {
+    @apply px-6 py-3 bg-indigo-600 text-white font-medium rounded-lg hover:bg-indigo-700 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2;
   }
-})`);
+  
+  .card {
+    @apply bg-white rounded-xl shadow-lg p-6 border border-gray-100;
+  }
+}`;
+  } else if (styling === "CSS Modules") {
+    return `* { 
+  box-sizing: border-box; 
+  margin: 0; 
+  padding: 0; 
+}
 
-  // Package.json
-  fs.writeFileSync(path.join(projectPath, "package.json"), JSON.stringify({
-    name: projectName,
-    type: "module",
-    version: "1.0.0",
-    scripts: {
-      "dev": "vite",
-      "build": "vite build",
-      "start": "vite preview --host",
-      "preview": "vite preview"
-    },
-    dependencies: {
-      react: "^18.3.1",
-      "react-dom": "^18.3.1",
-      "react-router-dom": "^7.1.1"
-    },
-    devDependencies: {
-      "@vitejs/plugin-react": "^4.3.4",
-      vite: "^6.0.5",
-      ...(isTS && {
-        "@types/react": "^18.3.18",
-        "@types/react-dom": "^18.3.5",
-        typescript: "^5.7.2"
-      }),
-      ...(answers.styling === "Tailwind" && {
-        tailwindcss: "^3.4.17",
-        postcss: "^8.4.49",
-        autoprefixer: "^10.4.20"
-      })
-    }
-  }, null, 2));
+body {
+  font-family: system-ui, -apple-system, sans-serif;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  min-height: 100vh;
+  color: #1f2937;
+}
 
-  // Environment template for databases
-  fs.writeFileSync(path.join(projectPath, ".env.example"), `# Add your environment variables here
-# For Firebase, MongoDB, or other databases when needed
+#root {
+  min-height: 100vh;
+}
 
-# Example Firebase config (optional):
-# VITE_FIREBASE_API_KEY=your_api_key_here
-# VITE_FIREBASE_AUTH_DOMAIN=your-project.firebaseapp.com
-# VITE_FIREBASE_PROJECT_ID=your-project-id
+.main-content {
+  min-height: 100vh;
+}`;
+  } else {
+    // None styling
+    return `* { 
+  box-sizing: border-box; 
+  margin: 0; 
+  padding: 0; 
+}
 
-# Example database URL (optional):
-# VITE_DATABASE_URL=your_database_url_here
-`);
+body {
+  font-family: system-ui, -apple-system, sans-serif;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  min-height: 100vh;
+  color: #1f2937;
+}
 
-  // README with database instructions
-  fs.writeFileSync(path.join(projectPath, "README.md"), `# ${projectName}
+#root {
+  min-height: 100vh;
+}
 
-⚡ Lightning-fast Bini.js app with file-based API routes.
-
-## 🚀 Development
-
-\`\`\`bash
-npm install
-npm run dev
-\`\`\`
-
-## 📦 Production 
-
-\`\`\`bash
-npm run build
-npm run start  # Opens vite preview (super fast!)
-\`\`\`
-
-## 🌐 API Routes
-
-File-based API routes (like Next.js):
-
-\`\`\`
-src/api/
-├── hello.js       → /api/hello
-├── users.js       → /api/users  
-├── database-example.js → /api/database-example
-└── posts/
-    ├── index.js   → /api/posts
-    └── [id].js    → /api/posts/123
-\`\`\`
-
-## 🗄️ Database Integration
-
-**Ready for Firebase, MongoDB, or any database!**
-
-When you need real database operations:
-
-1. **Install your database package**:
-   \`\`\`bash
-   npm install firebase  # for Firebase
-   # or
-   npm install mongodb   # for MongoDB
-   \`\`\`
-
-2. **Add environment variables** to \`.env\`:
-   \`\`\`env
-   VITE_FIREBASE_API_KEY=your_key
-   VITE_FIREBASE_AUTH_DOMAIN=your_domain
-   \`\`\`
-
-3. **Update your API routes** - see \`src/api/database-example.js\` for reference
-
-## 🎯 Features
-
-- ⚡ Lightning-fast HMR with Vite
-- 🔌 File-based API routes (like Next.js)
-- 🗄️ Database-ready architecture
-- 🎨 ${answers.styling} support
-- 📱 Responsive design
-
-**All API routes work in both development and production!**
-
-Built with Bini.js v${BINIJS_VERSION}
-`);
-
-  console.log(`\n✅ Project created: ${projectName}`);
-  console.log(`\n🚀 Get started:\n   cd ${projectName}\n   npm install\n   npm run dev`);
-  console.log(`\n🌐 API routes available:\n   /api/hello\n   /api/users\n   /api/posts\n   /api/posts/1`);
-  console.log(`\n🗄️  Database ready: Add Firebase/MongoDB when needed`);
-  console.log(`\n⚡ Production preview:\n   npm run build\n   npm run start`);
+.main-content {
+  min-height: 100vh;
+}`;
+  }
 }
 
 async function main() {
@@ -943,6 +1269,10 @@ async function main() {
       devDependencies: {
         "@vitejs/plugin-react": "^4.3.4",
         vite: "^6.0.5",
+        "@eslint/js": "^9.9.0",
+        "eslint-plugin-react-hooks": "^5.0.0", 
+        "eslint-plugin-react-refresh": "^0.4.9",
+        globals: "^15.9.0",
         tailwindcss: "^3.4.17",
         postcss: "^8.4.49",
         autoprefixer: "^10.4.20",
