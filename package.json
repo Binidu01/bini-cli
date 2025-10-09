@@ -1,10 +1,13 @@
 {
   "name": "create-bini-app",
-  "version": "7.0.2",
-  "description": "A powerful CLI tool to scaffold modern Bini.js (React/Vite) applications with runtime code injection.",
+  "version": "9.0.0",
+  "description": "▲ Build lightning-fast, source-protected React apps — powered by Vite.",
+  "tagline": "Build lightning-fast, source-protected React apps — powered by Vite.",
   "main": "create-bini-app.js",
   "bin": {
-    "create-bini-app": "create-bini-app.js"
+    "create-bini-app": "create-bini-app.js",
+    "bini": "create-bini-app.js",
+    "binijs": "create-bini-app.js"
   },
   "files": [
     "create-bini-app.js",
@@ -13,7 +16,9 @@
   ],
   "scripts": {
     "start": "node create-bini-app.js",
-    "test": "echo \"Error: No tests specified\" && exit 1"
+    "dev": "node create-bini-app.js",
+    "test": "echo \"Error: No tests specified\" && exit 1",
+    "prepublishOnly": "echo 'Testing package before publish...' && node create-bini-app.js --version"
   },
   "keywords": [
     "bini",
@@ -23,11 +28,17 @@
     "framework",
     "cli",
     "generator",
-    "code-injection",
-    "tailwindcss",
+    "source-protected",
+    "seo-friendly",
+    "head-ssr",
     "typescript",
-    "ssr",
-    "react-router"
+    "tailwindcss",
+    "secure-framework",
+    "api-routes",
+    "enterprise",
+    "saas",
+    "fintech",
+    "healthcare"
   ],
   "homepage": "https://github.com/Binidu01/bini-cli",
   "repository": {
@@ -44,6 +55,15 @@
   },
   "engines": {
     "node": ">=18.0.0"
-  }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "funding": {
+    "type": "individual",
+    "url": "https://github.com/sponsors/Binidu01"
+  },
+  "contributors": [
+    "rbinidu@gmail.com"
+  ]
 }
-
