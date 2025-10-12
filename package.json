@@ -1,8 +1,9 @@
 {
   "name": "create-bini-app",
-  "version": "9.0.0",
-  "description": "▲ Build lightning-fast, source-protected React apps — powered by Vite.",
-  "tagline": "Build lightning-fast, source-protected React apps — powered by Vite.",
+  "type": "module",
+  "version": "9.0.3",
+  "description": "▲ Build lightning-fast, source-protected React apps with automatic file-based routing — powered by Vite.",
+  "tagline": "The first source-code-protected React framework with Next.js-like routing and head-only SSR",
   "main": "create-bini-app.js",
   "bin": {
     "create-bini-app": "create-bini-app.js",
@@ -12,58 +13,188 @@
   "files": [
     "create-bini-app.js",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "CHANGELOG.md"
   ],
   "scripts": {
     "start": "node create-bini-app.js",
     "dev": "node create-bini-app.js",
     "test": "echo \"Error: No tests specified\" && exit 1",
-    "prepublishOnly": "echo 'Testing package before publish...' && node create-bini-app.js --version"
+    "prepublishOnly": "echo 'Testing package before publish...' && node create-bini-app.js --version",
+    "lint": "echo 'Linting not configured'",
+    "build": "echo 'No build step required for CLI'",
+    "version": "node create-bini-app.js --version"
   },
   "keywords": [
     "bini",
     "binijs",
+    "bini.js",
     "react",
     "vite",
     "framework",
     "cli",
     "generator",
+    "create-app",
+    "boilerplate",
+    "starter",
+    "template",
     "source-protected",
+    "code-protection",
+    "obfuscation",
+    "seo",
     "seo-friendly",
     "head-ssr",
+    "meta-tags",
+    "automatic-routing",
+    "file-based-routing",
+    "nextjs-like",
+    "nextjs-alternative",
     "typescript",
     "tailwindcss",
-    "secure-framework",
+    "css-modules",
     "api-routes",
+    "hot-reload",
+    "hmr",
+    "fast",
+    "lightning-fast",
+    "vite-powered",
     "enterprise",
     "saas",
     "fintech",
-    "healthcare"
+    "healthcare",
+    "ecommerce",
+    "dashboard",
+    "admin",
+    "react-framework",
+    "fullstack",
+    "full-stack",
+    "web-development",
+    "web-framework",
+    "javascript",
+    "frontend",
+    "backend",
+    "isomorphic",
+    "universal",
+    "pwa",
+    "spa",
+    "developer-tools",
+    "dx",
+    "developer-experience",
+    "production-ready",
+    "secure",
+    "security",
+    "modern",
+    "2024",
+    "2025"
   ],
-  "homepage": "https://github.com/Binidu01/bini-cli",
+  "homepage": "https://bini.js.org",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Binidu01/bini-cli.git"
+    "url": "git+https://github.com/Binidu01/bini-cli.git",
+    "directory": "/"
   },
   "bugs": {
-    "url": "https://github.com/Binidu01/bini-cli/issues"
+    "url": "https://github.com/Binidu01/bini-cli/issues",
+    "email": "rbinidu@gmail.com"
   },
-  "author": "Binidu",
+  "author": {
+    "name": "Binidu",
+    "email": "rbinidu@gmail.com",
+    "url": "https://github.com/Binidu01"
+  },
   "license": "MIT",
   "dependencies": {
     "inquirer": "^9.2.23"
   },
+  "devDependencies": {
+    "eslint": "^8.57.0",
+    "prettier": "^3.2.5"
+  },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
   },
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
   },
-  "funding": {
-    "type": "individual",
-    "url": "https://github.com/sponsors/Binidu01"
-  },
+  "funding": [
+    {
+      "type": "individual",
+      "url": "https://github.com/sponsors/Binidu01"
+    },
+    {
+      "type": "ko-fi",
+      "url": "https://ko-fi.com/binidu"
+    }
+  ],
   "contributors": [
-    "rbinidu@gmail.com"
-  ]
+    {
+      "name": "Binidu",
+      "email": "rbinidu@gmail.com",
+      "url": "https://github.com/Binidu01"
+    }
+  ],
+  "maintainers": [
+    {
+      "name": "Binidu",
+      "email": "rbinidu@gmail.com"
+    }
+  ],
+  "os": [
+    "darwin",
+    "linux",
+    "win32"
+  ],
+  "cpu": [
+    "x64",
+    "arm64",
+    "ia32"
+  ],
+  "private": false,
+  "preferGlobal": true,
+  "peerDependencies": {},
+  "optionalDependencies": {},
+  "release": {
+    "branches": [
+      "main",
+      "next",
+      "beta"
+    ]
+  },
+  "config": {
+    "commitizen": {
+      "path": "./node_modules/cz-conventional-changelog"
+    }
+  },
+  "badge": {
+    "label": "Bini.js",
+    "message": "9.0.3",
+    "color": "00CFFF"
+  },
+  "metadata": {
+    "framework": "Bini.js",
+    "type": "cli-generator",
+    "category": "react-framework",
+    "features": [
+      "automatic-routing",
+      "source-protection",
+      "head-ssr",
+      "api-routes",
+      "typescript",
+      "tailwind",
+      "hot-reload"
+    ],
+    "platforms": [
+      "web",
+      "desktop",
+      "mobile"
+    ],
+    "compatibility": {
+      "react": "^18.3.1",
+      "vite": "^6.0.5",
+      "typescript": "^5.7.2",
+      "tailwindcss": "^3.4.17"
+    }
+  }
 }
