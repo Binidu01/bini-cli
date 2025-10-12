@@ -41,7 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [9.0.3] - 2025-01-XX
+## [9.0.3] - 2025-10-12
 
 ### 🎯 Added
 - **Automatic File-Based Routing** - True Next.js-like routing with zero configuration
@@ -71,7 +71,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [9.0.2] - 2025-01-XX
+## [9.0.2] - 2025-10-11
 
 ### 🔧 Fixed
 - **Router Plugin** - Now properly handles nested routes (e.g., `/about`)
@@ -91,7 +91,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [9.0.1] - 2025-01-XX
+## [9.0.1] - 2025-10-10
 
 ### 🔧 Fixed
 - **Command-Line Flags** - Fixed TypeScript and styling flag detection
@@ -111,7 +111,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [9.0.0] - 2025-01-XX
+## [9.0.0] - 2025-10-09
 
 ### 🎉 Initial Release
 
