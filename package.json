@@ -1,7 +1,7 @@
 {
   "name": "create-bini-app",
   "type": "module",
-  "version": "9.0.3",
+  "version": "9.0.6",
   "description": "▲ Build lightning-fast, source-protected React apps with automatic file-based routing — powered by Vite.",
   "tagline": "The first source-code-protected React framework with Next.js-like routing and head-only SSR",
   "main": "create-bini-app.js",
@@ -13,8 +13,8 @@
   "files": [
     "create-bini-app.js",
     "README.md",
-    "LICENSE",
-    "CHANGELOG.md"
+    "CHANGELOG.md",
+    "LICENSE"
   ],
   "scripts": {
     "start": "node create-bini-app.js",
@@ -41,6 +41,7 @@
     "source-protected",
     "code-protection",
     "obfuscation",
+    "security",
     "seo",
     "seo-friendly",
     "head-ssr",
@@ -82,9 +83,7 @@
     "developer-experience",
     "production-ready",
     "secure",
-    "security",
     "modern",
-    "2024",
     "2025"
   ],
   "homepage": "https://bini.js.org",
@@ -169,32 +168,38 @@
   },
   "badge": {
     "label": "Bini.js",
-    "message": "9.0.3",
+    "message": "9.0.6",
     "color": "00CFFF"
   },
   "metadata": {
     "framework": "Bini.js",
     "type": "cli-generator",
     "category": "react-framework",
+    "version": "9.0.6",
     "features": [
+      "source-code-protection",
       "automatic-routing",
-      "source-protection",
       "head-ssr",
       "api-routes",
-      "typescript",
-      "tailwind",
-      "hot-reload"
+      "typescript-support",
+      "tailwind-css",
+      "css-modules",
+      "hot-module-replacement",
+      "production-server",
+      "api-everywhere",
+      "minified-output",
+      "no-source-maps"
     ],
     "platforms": [
-      "web",
-      "desktop",
-      "mobile"
+      "web"
     ],
     "compatibility": {
       "react": "^18.3.1",
       "vite": "^6.0.5",
       "typescript": "^5.7.2",
-      "tailwindcss": "^3.4.17"
+      "tailwindcss": "^3.4.17",
+      "express": "^4.21.1",
+      "nodejs": "^18.0.0"
     }
   }
 }
