@@ -6,6 +6,7 @@ import path from "path";
 import os from "os";
 import { execSync, spawn } from 'child_process';
 import { fileURLToPath } from 'url';
+import sharp from "sharp";
 
 // ES module equivalents
 const __filename = fileURLToPath(import.meta.url);
@@ -239,12 +240,10 @@ async function checkNetworkConnectivity() {
 function executeCommand(command, options = {}) {
   const isWindows = process.platform === 'win32';
   const shell = isWindows ? 'cmd.exe' : '/bin/sh';
-  const shellFlag = isWindows ? '/c' : '-c';
   
   try {
     return execSync(command, {
       shell,
-      shellFlag,
       stdio: options.stdio || 'pipe',
       timeout: options.timeout || 120000,
       cwd: options.cwd,
@@ -424,13 +423,189 @@ async function askQuestions(flags) {
   return { typescript, styling };
 }
 
+async function generateFaviconFiles(publicPath) {
+  // Use your exact ß icon SVG for favicon
+  const betaSVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" fill="none">
+  <!-- Gradient Definition -->
+  <defs>
+    <linearGradient id="grad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#00CFFF"/>
+      <stop offset="100%" stop-color="#0077FF"/>
+    </linearGradient>
+  </defs>
+
+  <!-- ß Icon with Gradient -->
+  <text x="50%" y="50%" 
+    dominant-baseline="middle" 
+    text-anchor="middle"
+    font-family="Segoe UI, Arial, sans-serif"
+    font-size="90"
+    font-weight="700"
+    fill="url(#grad)">
+    ß
+  </text>
+</svg>`;
+
+  // Use your exact OG image SVG
+  const ogImageSVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" fill="none">
+  <!-- White Background -->
+  <rect width="1200" height="630" fill="#ffffff"/>
+
+  <!-- Gradient Definition -->
+  <defs>
+    <linearGradient id="grad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#00CFFF"/>
+      <stop offset="100%" stop-color="#0077FF"/>
+    </linearGradient>
+  </defs>
+
+  <!-- ß Icon with Gradient -->
+  <text x="50%" y="50%" 
+    dominant-baseline="middle" 
+    text-anchor="middle"
+    font-family="Segoe UI, Arial, sans-serif"
+    font-size="450"
+    font-weight="700"
+    fill="url(#grad)">
+    ß
+  </text>
+</svg>`;
+
+  // Use your exact website logo SVG
+  const biniLogoSVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 150" fill="none">
+  <!-- Gradient Definition -->
+  <defs>
+    <linearGradient id="grad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#00CFFF"/>
+      <stop offset="100%" stop-color="#0077FF"/>
+    </linearGradient>
+  </defs>
+
+  <!-- ß Icon with Gradient -->
+  <text x="40" y="105"
+    font-family="Segoe UI, Arial, sans-serif"
+    font-size="90"
+    font-weight="700"
+    fill="url(#grad)">
+    ß
+  </text>
+
+  <!-- Bini.js Text in Black -->
+  <text x="100" y="108"
+    font-family="Segoe UI, Arial, sans-serif"
+    font-size="60"
+    font-weight="700"
+    fill="#000000">
+    Bini.js
+  </text>
+</svg>`;
+
+  // Write SVGs (using your exact designs)
+  secureWriteFile(path.join(publicPath, "bini-logo.svg"), biniLogoSVG);
+  secureWriteFile(path.join(publicPath, "favicon.svg"), betaSVG);
+
+  try {
+    // Convert SVGs to PNGs using sharp
+    const pngSizes = [16, 32, 64, 180, 512];
+    
+    for (const size of pngSizes) {
+      const output = path.join(publicPath, `favicon-${size}x${size}.png`);
+      await sharp(Buffer.from(betaSVG))
+        .resize(size, size, { fit: 'contain', background: { r: 255, g: 255, b: 255, alpha: 0 } })
+        .png()
+        .toFile(output);
+    }
+
+    // Default favicon PNG
+    await sharp(Buffer.from(betaSVG))
+      .resize(512, 512, { fit: 'contain', background: { r: 255, g: 255, b: 255, alpha: 0 } })
+      .png()
+      .toFile(path.join(publicPath, "favicon.png"));
+
+    // Apple touch icon
+    await sharp(Buffer.from(betaSVG))
+      .resize(180, 180, { fit: 'contain', background: { r: 255, g: 255, b: 255, alpha: 0 } })
+      .png()
+      .toFile(path.join(publicPath, "apple-touch-icon.png"));
+
+    // OG image - ß icon
+    await sharp(Buffer.from(ogImageSVG))
+      .resize(1200, 630)
+      .png()
+      .toFile(path.join(publicPath, "og-image.png"));
+
+    console.log("✅ Favicons and logos generated successfully!");
+    
+  } catch (error) {
+    console.warn('⚠️ PNG generation failed, creating placeholder files:', error.message);
+    
+    // Fallback: Create placeholder PNGs
+    const placeholderPNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+    const pngSizes = [16, 32, 64, 180, 512];
+    
+    for (const size of pngSizes) {
+      secureWriteFile(path.join(publicPath, `favicon-${size}x${size}.png`), Buffer.from(placeholderPNG, 'base64'));
+    }
+    
+    secureWriteFile(path.join(publicPath, "favicon.png"), Buffer.from(placeholderPNG, 'base64'));
+    secureWriteFile(path.join(publicPath, "apple-touch-icon.png"), Buffer.from(placeholderPNG, 'base64'));
+    secureWriteFile(path.join(publicPath, "og-image.png"), Buffer.from(placeholderPNG, 'base64'));
+    
+    console.log("✅ Basic favicon placeholders created");
+  }
+}
+
+function generateWebManifest(projectPath) {
+  const manifest = {
+    name: "Bini.js App",
+    short_name: "BiniApp", 
+    description: "Modern React application built with Bini.js",
+    start_url: "/",
+    display: "standalone",
+    background_color: "#ffffff",
+    theme_color: "#00CFFF",
+    icons: [
+      {
+        src: "/favicon-16x16.png",
+        sizes: "16x16",
+        type: "image/png"
+      },
+      {
+        src: "/favicon-32x32.png", 
+        sizes: "32x32",
+        type: "image/png"
+      },
+      {
+        src: "/favicon-64x64.png",
+        sizes: "64x64", 
+        type: "image/png"
+      },
+      {
+        src: "/favicon-180x180.png",
+        sizes: "180x180",
+        type: "image/png"
+      },
+      {
+        src: "/favicon-512x512.png",
+        sizes: "512x512",
+        type: "image/png"
+      }
+    ]
+  };
+
+  secureWriteFile(
+    path.join(projectPath, "public", "site.webmanifest"), 
+    JSON.stringify(manifest, null, 2)
+  );
+}
+
 function generateBiniInternals(projectPath, useTypeScript) {
   const biniInternalPath = path.join(projectPath, "bini/internal");
   const pluginsPath = path.join(biniInternalPath, "plugins");
   
   mkdirRecursive(pluginsPath);
 
-  // Router Plugin - fix version interpolation
+  // Router Plugin
   secureWriteFile(path.join(pluginsPath, "router.js"), `import fs from 'fs';
 import path from 'path';
 
@@ -561,7 +736,7 @@ class ErrorBoundary extends React.Component {
               display: 'inline-block',
               marginTop: '1rem',
               padding: '0.75rem 1.5rem',
-              background: '#4F46E5',
+              background: '#00CFFF',
               color: 'white',
               textDecoration: 'none',
               borderRadius: '0.5rem',
@@ -627,7 +802,7 @@ function EmptyPage({ pagePath }) {
         <a href="/" style={{ 
           display: 'inline-block',
           padding: '0.75rem 1.5rem',
-          background: '#4F46E5',
+          background: '#00CFFF',
           color: 'white',
           textDecoration: 'none',
           borderRadius: '0.5rem',
@@ -698,7 +873,7 @@ function NotFound() {
       justifyContent: 'center',
       flexDirection: 'column',
       fontFamily: 'system-ui, -apple-system, sans-serif',
-      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+      background: 'linear-gradient(135deg, #00CFFF 0%, #0077FF 100%)',
       color: 'white'
     }}>
       <h1 style={{ fontSize: '4rem', marginBottom: '1rem', fontWeight: 'bold' }}>404</h1>
@@ -709,7 +884,7 @@ function NotFound() {
       <a href="/" style={{ 
         padding: '1rem 2rem',
         background: 'white',
-        color: '#667eea',
+        color: '#00CFFF',
         textDecoration: 'none',
         borderRadius: '0.5rem',
         fontWeight: '600',
@@ -857,7 +1032,7 @@ export function biniRouterPlugin() {
   }
 }`);
 
-  // Preview Plugin - fix version interpolation
+  // Preview Plugin - Updated with ß icon
   secureWriteFile(path.join(pluginsPath, "preview.js"), `import os from 'os'
 
 const BINIJS_VERSION = "${BINIJS_VERSION}";
@@ -885,7 +1060,7 @@ export function biniPreviewPlugin() {
       const port = server.config.preview.port || 3000;
       
       console.log('');
-      console.log('  ▲ Bini.js Production Preview v' + BINIJS_VERSION);
+      console.log('  \x1b[38;2;0;207;255mß\x1b[0m Bini.js Production Preview v' + BINIJS_VERSION);
       console.log('  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
       console.log(\`    → Local:   http://localhost:\${port}\`);
       console.log(\`    → Network: http://\${localIp}:\${port}\`);
@@ -900,9 +1075,11 @@ export function biniPreviewPlugin() {
   }
 }`);
 
-  // Badge Plugin - fix version interpolation
+  // Badge Plugin - Enhanced version with ß icon
   secureWriteFile(path.join(pluginsPath, "badge.js"), `const BINIJS_VERSION = "${BINIJS_VERSION}";
 import os from 'os';
+import path from 'path';
+import fs from 'fs';
 
 function getNetworkIp() {
   const interfaces = os.networkInterfaces();
@@ -918,35 +1095,94 @@ function getNetworkIp() {
   return lan || candidates[0] || 'localhost';
 }
 
+function getRoutes() {
+  const appDir = path.join(process.cwd(), 'src/app');
+  const routes = [];
+  
+  if (!fs.existsSync(appDir)) return routes;
+  
+  function scanDir(dir, baseRoute = '') {
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    
+    for (const entry of entries) {
+      if (entry.name.startsWith('.') || entry.name === 'node_modules') continue;
+      
+      const fullPath = path.join(dir, entry.name);
+      
+      if (entry.isDirectory()) {
+        const pageFiles = ['page.tsx', 'page.jsx', 'page.ts', 'page.js'];
+        const hasPage = pageFiles.some(f => fs.existsSync(path.join(fullPath, f)));
+        
+        if (hasPage) {
+          const routePath = baseRoute + '/' + entry.name;
+          routes.push(routePath === '/' ? '/' : routePath);
+        }
+        
+        scanDir(fullPath, baseRoute + '/' + entry.name);
+      }
+    }
+  }
+  
+  if (fs.existsSync(path.join(appDir, 'page.tsx')) || fs.existsSync(path.join(appDir, 'page.jsx'))) {
+    routes.push('/');
+  }
+  
+  scanDir(appDir);
+  return routes.sort();
+}
+
 export function biniBadgePlugin() {
   let localIp = 'localhost';
   let port = 3000;
+  let routes = [];
   
   return {
     name: 'bini-badge-injector',
     
     configResolved(config) {
-      port = config.server.port || 3000;
+      port = config.server?.port || 3000;
       localIp = getNetworkIp();
+      routes = getRoutes();
     },
     
     configureServer(server) {
-      // Show the network URLs when dev server starts
       server.httpServer?.once('listening', () => {
         console.log('');
-        console.log('  ▲ Bini.js Development Server v' + BINIJS_VERSION);
+        console.log('  \x1b[38;2;0;207;255mß\x1b[0m Bini.js Development Server v' + BINIJS_VERSION);
         console.log('  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
         console.log(\`    → Local:   http://localhost:\${port}\`);
         console.log(\`    → Network: http://\${localIp}:\${port}\`);
         console.log('  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
         console.log('');
       });
+      
+      // Watch for route changes
+      const appDir = path.join(process.cwd(), 'src/app');
+      if (fs.existsSync(appDir)) {
+        server.watcher.add(appDir);
+        
+        server.watcher.on('add', (file) => {
+          if (/page\\.(tsx|jsx|ts|js)$/.test(file)) {
+            routes = getRoutes();
+          }
+        });
+        
+        server.watcher.on('unlink', (file) => {
+          if (/page\\.(tsx|jsx|ts|js)$/.test(file)) {
+            routes = getRoutes();
+          }
+        });
+      }
     },
     
     transformIndexHtml: {
       order: 'post',
       handler(html) {
         if (process.env.NODE_ENV !== 'production') {
+          const routesJson = JSON.stringify(routes);
+          const routesHtml = routes.map(route => \`<div class="bini-badge-route">\${route}</div>\`).join('');
+          const versionInfo = BINIJS_VERSION;
+          
           const badgeScript = \`
             <style>
               .bini-dev-badge {
@@ -963,26 +1199,174 @@ export function biniBadgePlugin() {
                 z-index: 9999;
                 font-family: system-ui, -apple-system, sans-serif;
                 user-select: none;
-                pointer-events: none;
+                pointer-events: auto;
                 animation: fadeIn 0.5s ease-in;
+                cursor: pointer;
+                max-width: 300px;
+                transition: all 0.3s ease;
               }
+              
+              .bini-dev-badge:hover {
+                box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+              }
+              
+              .bini-dev-badge.expanded {
+                padding: 0;
+                border-radius: 12px;
+                overflow: hidden;
+              }
+              
+              .bini-badge-header {
+                padding: 12px 16px;
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                cursor: pointer;
+              }
+              
+              .bini-badge-title {
+                display: flex;
+                align-items: center;
+                gap: 6px;
+                font-weight: bold;
+              }
+              
+              .bini-badge-content {
+                display: none;
+                max-height: 0;
+                overflow: hidden;
+                transition: max-height 0.3s ease;
+              }
+              
+              .bini-dev-badge.expanded .bini-badge-content {
+                display: block;
+                max-height: 500px;
+                border-top: 1px solid #333;
+              }
+              
+              .bini-badge-section {
+                padding: 12px 16px;
+                border-bottom: 1px solid #333;
+                font-size: 12px;
+              }
+              
+              .bini-badge-section:last-child {
+                border-bottom: none;
+              }
+              
+              .bini-badge-label {
+                color: #888;
+                font-size: 11px;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+                margin-bottom: 4px;
+              }
+              
+              .bini-badge-value {
+                color: #0fb;
+                font-family: 'Monaco', 'Courier New', monospace;
+                word-break: break-all;
+              }
+              
+              .bini-badge-routes {
+                display: flex;
+                flex-direction: column;
+                gap: 4px;
+              }
+              
+              .bini-badge-route {
+                color: #0fb;
+                font-family: 'Monaco', 'Courier New', monospace;
+                font-size: 11px;
+                padding: 4px 0;
+              }
+              
+              .bini-badge-toggle {
+                color: #888;
+                font-size: 12px;
+                cursor: pointer;
+              }
+              
+              .bini-icon {
+                color: #00CFFF;
+                font-weight: bold;
+              }
+              
               @keyframes fadeIn {
                 from { opacity: 0; transform: translateY(10px); }
                 to { opacity: 1; transform: translateY(0); }
               }
+              
+              @media (max-width: 640px) {
+                .bini-dev-badge {
+                  bottom: 12px;
+                  right: 12px;
+                  padding: 10px 16px;
+                  font-size: 12px;
+                  max-width: 280px;
+                }
+                
+                .bini-badge-section {
+                  padding: 10px 12px;
+                  font-size: 11px;
+                }
+              }
             </style>
+            <div class="bini-dev-badge" id="bini-dev-badge">
+              <div class="bini-badge-header" onclick="document.getElementById('bini-dev-badge').classList.toggle('expanded')">
+                <span class="bini-badge-title">
+                  <span class="bini-icon">ß</span> Bini.js <span style="font-size: 12px; color: #888;">v\${versionInfo}</span>
+                </span>
+                <span class="bini-badge-toggle">⌄</span>
+              </div>
+              
+              <div class="bini-badge-content">
+                <div class="bini-badge-section">
+                  <div class="bini-badge-label">🔗 Local URL</div>
+                  <div class="bini-badge-value">http://localhost:\${port}</div>
+                </div>
+                
+                <div class="bini-badge-section">
+                  <div class="bini-badge-label">🌐 Network URL</div>
+                  <div class="bini-badge-value">http://\${localIp}:\${port}</div>
+                </div>
+                
+                <div class="bini-badge-section">
+                  <div class="bini-badge-label">📊 Memory</div>
+                  <div class="bini-badge-value" id="bini-memory">--</div>
+                </div>
+                
+                <div class="bini-badge-section">
+                  <div class="bini-badge-label">📁 Routes (\${routes.length})</div>
+                  <div class="bini-badge-routes">
+                    \${routesHtml}
+                  </div>
+                </div>
+                
+                <div class="bini-badge-section">
+                  <div class="bini-badge-label">⚡ Status</div>
+                  <div class="bini-badge-value">✓ Ready</div>
+                </div>
+              </div>
+            </div>
+            
             <script>
               (function() {
                 window.addEventListener('DOMContentLoaded', function() {
-                  const badge = document.createElement('div');
-                  badge.className = 'bini-dev-badge';
-                  badge.innerHTML = '▲ Bini.js v${BINIJS_VERSION}';
-                  document.body.appendChild(badge);
-                  
-                  if (process.env.NODE_ENV === 'production') {
-                    badge.remove();
+                  function updateMemory() {
+                    if (performance.memory) {
+                      const used = Math.round(performance.memory.usedJSHeapSize / 1048576);
+                      const limit = Math.round(performance.memory.jsHeapSizeLimit / 1048576);
+                      document.getElementById('bini-memory').textContent = used + 'MB / ' + limit + 'MB';
+                    }
                   }
+                  
+                  updateMemory();
+                  setInterval(updateMemory, 2000);
                 });
+                
+                window.__BINI_ROUTES__ = \${routesJson};
+                window.__BINI_VERSION__ = '\${versionInfo}';
               })();
             </script>
           \`;
@@ -995,43 +1379,106 @@ export function biniBadgePlugin() {
   }
 }`);
 
-  // SSR Plugin - fix version interpolation
+  // SSR Plugin
   secureWriteFile(path.join(pluginsPath, "ssr.js"), `const BINIJS_VERSION = "${BINIJS_VERSION}";
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 function parseMetadata(layoutContent) {
-  const metaTags = {};
+  const metaTags = {
+    title: 'Bini.js App',
+    description: 'Modern React application built with Bini.js',
+    keywords: '',
+    viewport: 'width=device-width, initial-scale=1.0',
+    openGraph: {},
+    twitter: {},
+    icons: {}
+  };
 
   try {
+    // Extract the entire metadata object
     const metadataMatch = layoutContent.match(/export\\s+const\\s+metadata\\s*=\\s*({[\\s\\S]*?})(?=\\s*export|\\s*function|\\s*const|\\s*$)/);
     
     if (metadataMatch) {
       const metadataStr = metadataMatch[1];
       
-      const extractProperty = (str, prop) => {
+      // Helper function to extract properties
+      const extractString = (str, prop) => {
         const regex = new RegExp(\`\${prop}:\\\\s*['"]([^'"]+)['"]\`, 'i');
         const match = str.match(regex);
         return match ? match[1] : null;
       };
 
-      const title = extractProperty(metadataStr, 'title');
-      if (title) metaTags.title = title;
+      const extractArray = (str, prop) => {
+        const regex = new RegExp(\`\${prop}:\\\\s*\\\\[([^\\\\]]+)\\\\]\`, 'i');
+        const match = str.match(regex);
+        if (match) {
+          // Simple array parsing - extract quoted values
+          const arrayContent = match[1];
+          const items = arrayContent.match(/['"]([^'"]+)['"]/g) || [];
+          return items.map(item => item.replace(/['"]/g, ''));
+        }
+        return null;
+      };
+
+      const extractObject = (str, prop) => {
+        const regex = new RegExp(\`\${prop}:\\\\s*{([^}]+)}\`, 'i');
+        const match = str.match(regex);
+        if (match) {
+          const objContent = match[1];
+          return {
+            title: extractString(objContent, 'title'),
+            description: extractString(objContent, 'description'),
+            url: extractString(objContent, 'url'),
+            images: extractArray(objContent, 'images') || []
+          };
+        }
+        return null;
+      };
+
+      // Basic metadata
+      metaTags.title = extractString(metadataStr, 'title') || metaTags.title;
+      metaTags.description = extractString(metadataStr, 'description') || metaTags.description;
       
-      const description = extractProperty(metadataStr, 'description');
-      if (description) metaTags.description = description;
-      
-      const keywords = extractProperty(metadataStr, 'keywords');
-      if (keywords) metaTags.keywords = keywords;
-      
+      // Keywords (array)
+      const keywordsArray = extractArray(metadataStr, 'keywords');
+      if (keywordsArray) {
+        metaTags.keywords = keywordsArray.join(', ');
+      }
+
+      // Authors
       const authorsMatch = metadataStr.match(/authors:\\s*\\[\\s*{\\s*name:\\s*['"]([^'"]+)['"]/);
       if (authorsMatch) metaTags.author = authorsMatch[1];
-      
-      const viewport = extractProperty(metadataStr, 'viewport');
-      if (viewport) metaTags.viewport = viewport;
-      
+
+      // Viewport
+      metaTags.viewport = extractString(metadataStr, 'viewport') || metaTags.viewport;
+
+      // OpenGraph
+      const og = extractObject(metadataStr, 'openGraph');
+      if (og) metaTags.openGraph = og;
+
+      // Twitter
+      const twitter = extractObject(metadataStr, 'twitter');
+      if (twitter) metaTags.twitter = twitter;
+
+      // Icons
+      const iconsMatch = metadataStr.match(/icons:\\s*{([^}]+)}/);
+      if (iconsMatch) {
+        const iconsContent = iconsMatch[1];
+        metaTags.icons = {
+          icon: extractString(iconsContent, 'icon'),
+          shortcut: extractString(iconsContent, 'shortcut'),
+          apple: extractString(iconsContent, 'apple')
+        };
+      }
+
     }
   } catch (error) {
+    console.warn('⚠️ Metadata parsing error:', error.message);
   }
 
   return metaTags;
@@ -1039,17 +1486,23 @@ function parseMetadata(layoutContent) {
 
 function getCurrentMetadata() {
   const layoutPath = path.join(process.cwd(), 'src/app/layout.tsx');
+  const layoutPathJS = path.join(process.cwd(), 'src/app/layout.jsx');
   
   try {
+    let layoutContent = '';
     if (fs.existsSync(layoutPath)) {
-      const layoutContent = fs.readFileSync(layoutPath, 'utf-8');
-      return parseMetadata(layoutContent);
+      layoutContent = fs.readFileSync(layoutPath, 'utf-8');
+    } else if (fs.existsSync(layoutPathJS)) {
+      layoutContent = fs.readFileSync(layoutPathJS, 'utf-8');
     } else {
+      return {};
     }
+    
+    return parseMetadata(layoutContent);
   } catch (error) {
+    console.warn('⚠️ Could not read layout file:', error.message);
+    return {};
   }
-
-  return {};
 }
 
 export function biniSSRPlugin() {
@@ -1058,12 +1511,15 @@ export function biniSSRPlugin() {
     
     configureServer(server) {
       const layoutPath = path.join(process.cwd(), 'src/app/layout.tsx');
+      const layoutPathJS = path.join(process.cwd(), 'src/app/layout.jsx');
       
-      if (fs.existsSync(layoutPath)) {
-        server.watcher.add(layoutPath);
+      const layoutFiles = [layoutPath, layoutPathJS].filter(fs.existsSync);
+      
+      layoutFiles.forEach(layoutFile => {
+        server.watcher.add(layoutFile);
         
         server.watcher.on('change', (file) => {
-          if (file === layoutPath) {
+          if (layoutFiles.includes(file)) {
             setTimeout(() => {
               server.ws.send({
                 type: 'full-reload',
@@ -1072,7 +1528,7 @@ export function biniSSRPlugin() {
             }, 100);
           }
         });
-      }
+      });
     },
     
     transformIndexHtml: {
@@ -1082,16 +1538,23 @@ export function biniSSRPlugin() {
         
         let metaTagsHTML = '';
         
+        // Basic meta tags
         metaTagsHTML += \`
     <meta charset="UTF-8" />
-    <meta name="viewport" content="\${metaTags.viewport || 'width=device-width, initial-scale=1.0'}" />
-    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />\`;
+    <meta name="viewport" content="\${metaTags.viewport}" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="icon" href="/favicon.png" type="image/png" />
+    <link rel="icon" href="/favicon-16x16.png" type="image/png" sizes="16x16" />
+    <link rel="icon" href="/favicon-32x32.png" type="image/png" sizes="32x32" />
+    <link rel="icon" href="/favicon-64x64.png" type="image/png" sizes="64x64" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />\`;
         
-        if (metaTags.title) {
-          metaTagsHTML += \`
+        // Title
+        metaTagsHTML += \`
     <title>\${metaTags.title}</title>\`;
-        }
         
+        // Basic meta
         if (metaTags.description) {
           metaTagsHTML += \`
     <meta name="description" content="\${metaTags.description}" />\`;
@@ -1107,6 +1570,45 @@ export function biniSSRPlugin() {
     <meta name="author" content="\${metaTags.author}" />\`;
         }
         
+        // OpenGraph meta tags
+        if (metaTags.openGraph && metaTags.openGraph.title) {
+          metaTagsHTML += \`
+    <meta property="og:title" content="\${metaTags.openGraph.title}" />
+    <meta property="og:description" content="\${metaTags.openGraph.description || metaTags.description}" />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="\${metaTags.openGraph.url || 'https://bini.js.org'}" />
+    <meta property="og:site_name" content="\${metaTags.openGraph.title}" />\`;
+          
+          if (metaTags.openGraph.images && metaTags.openGraph.images.length > 0) {
+            metaTagsHTML += \`
+    <meta property="og:image" content="\${metaTags.openGraph.images[0]}" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="\${metaTags.openGraph.title}" />\`;
+          }
+        }
+        
+        // Twitter Card meta tags
+        if (metaTags.twitter && metaTags.twitter.title) {
+          metaTagsHTML += \`
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="\${metaTags.twitter.title}" />
+    <meta name="twitter:description" content="\${metaTags.twitter.description || metaTags.description}" />
+    <meta name="twitter:creator" content="\${metaTags.twitter.creator || '@binidu01'}" />\`;
+          
+          if (metaTags.twitter.images && metaTags.twitter.images.length > 0) {
+            metaTagsHTML += \`
+    <meta name="twitter:image" content="\${metaTags.twitter.images[0]}" />\`;
+          }
+        }
+        
+        // Additional meta tags for better SEO
+        metaTagsHTML += \`
+    <meta name="theme-color" content="#00CFFF" />
+    <meta name="robots" content="index, follow" />
+    <link rel="canonical" href="\${metaTags.openGraph?.url || 'https://bini.js.org'}" />\`;
+        
+        // Bini.js runtime
         metaTagsHTML += \`
     
     <!-- Bini.js runtime -->
@@ -1118,8 +1620,16 @@ export function biniSSRPlugin() {
       }
     },
     
+    buildStart() {
+      // Ensure favicon files are available
+      const publicDir = path.join(process.cwd(), 'public');
+      if (!fs.existsSync(publicDir)) {
+        fs.mkdirSync(publicDir, { recursive: true });
+      }
+    },
+    
     handleHotUpdate({ server, file }) {
-      if (file.endsWith('layout.tsx')) {
+      if (file.endsWith('layout.tsx') || file.endsWith('layout.jsx')) {
         setTimeout(() => {
           server.ws.send({
             type: 'full-reload',
@@ -1133,7 +1643,7 @@ export function biniSSRPlugin() {
   }
 }`);
 
-  // API Plugin - fix version interpolation
+  // API Plugin
   secureWriteFile(path.join(pluginsPath, "api.js"), `import fs from 'fs'
 import path from 'path'
 import { pathToFileURL } from 'url'
@@ -1396,26 +1906,6 @@ export function biniAPIPlugin(options = {}) {
 }`);
 }
 
-function generateSVGLogos(publicPath) {
-  const biniLogoSVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 60">
-  <polygon points="20,10 40,50 0,50" fill="#00CFFF"></polygon>
-  <text x="60" y="42" font-size="32" font-family="Poppins, sans-serif" font-weight="600" fill="#222">Bini.js</text>
-</svg>`;
-  
-  const faviconSVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
-  <polygon points="50,10 90,90 10,90" fill="url(#grad)"></polygon>
-  <defs>
-    <linearGradient id="grad" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#00CFFF"></stop>
-      <stop offset="100%" stop-color="#0077FF"></stop>
-    </linearGradient>
-  </defs>
-</svg>`;
-
-  secureWriteFile(path.join(publicPath, "bini-logo.svg"), biniLogoSVG);
-  secureWriteFile(path.join(publicPath, "favicon.svg"), faviconSVG);
-}
-
 function generateCSSModulesFiles(projectPath) {
   const appPath = path.join(projectPath, "src/app");
   
@@ -1458,7 +1948,7 @@ function generateCSSModulesFiles(projectPath) {
 }
 
 .accent {
-  color: #4f46e5;
+  color: #00CFFF;
 }
 
 .subtitle {
@@ -1561,7 +2051,7 @@ function generateCSSModulesFiles(projectPath) {
 .button {
   display: inline-block;
   padding: 0.75rem 1.5rem;
-  background: #4f46e5;
+  background: #00CFFF;
   color: white;
   font-weight: 600;
   border-radius: 0.5rem;
@@ -1573,7 +2063,7 @@ function generateCSSModulesFiles(projectPath) {
 }
 
 .button:hover {
-  background: #4338ca;
+  background: #00b8e6;
 }
 
 @media (max-width: 640px) {
@@ -1586,7 +2076,7 @@ function generateCSSModulesFiles(projectPath) {
   }
   
   .subtitle {
-    font-size: 1rem;
+    fontSize: 1rem;
   }
   
   .grid {
@@ -1604,7 +2094,6 @@ function generateCSSModulesFiles(projectPath) {
 }
 
 function generateGlobalStyles(styling) {
-  // Same base styles for all options with blue background #ecf3ff
   const baseStyles = `* { 
   box-sizing: border-box; 
   margin: 0; 
@@ -1636,7 +2125,7 @@ body {
 .btn-primary {
   display: inline-block;
   padding: 12px 24px;
-  background: #4f46e5;
+  background: #00CFFF;
   color: white;
   font-weight: 600;
   border-radius: 8px;
@@ -1648,7 +2137,7 @@ body {
 }
 
 .btn-primary:hover {
-  background: #4338ca;
+  background: #00b8e6;
 }
 
 .card {
@@ -1760,7 +2249,6 @@ body {
 
 ${baseStyles}`;
   } else {
-    // CSS Modules and None get the same base styles
     return baseStyles;
   }
 }
@@ -1770,7 +2258,12 @@ function generatePackageJson(projectName, useTypeScript, styling) {
     react: "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^7.1.1",
-    "express": "^4.21.1"
+    "fastify": "^4.28.1",
+    "@fastify/static": "^7.0.4",
+    "@fastify/helmet": "^11.1.1",
+    "@fastify/cors": "^9.0.1",
+    "@fastify/rate-limit": "^8.0.2",
+    "sharp": "^0.33.2"
   };
 
   const baseDevDependencies = {
@@ -1782,15 +2275,13 @@ function generatePackageJson(projectName, useTypeScript, styling) {
     "globals": "^15.9.0"
   };
 
-  // Add TypeScript dependencies only if TypeScript is enabled
   if (useTypeScript) {
     baseDevDependencies["@types/react"] = "^18.3.18";
     baseDevDependencies["@types/react-dom"] = "^18.3.5";
-    baseDevDependencies["@types/express"] = "^5.0.0";
+    baseDevDependencies["@types/node"] = "^20.17.9";
     baseDevDependencies["typescript"] = "^5.7.2";
   }
 
-  // Add styling dependencies
   if (styling === "Tailwind") {
     baseDevDependencies.tailwindcss = "^3.4.17";
     baseDevDependencies.postcss = "^8.4.49";
@@ -1817,7 +2308,7 @@ function generatePackageJson(projectName, useTypeScript, styling) {
 function generateAppFiles(projectPath, mainExt, useTypeScript, styling) {
   const appPath = path.join(projectPath, "src/app");
   
-  // Layout file - conditional TypeScript
+  // Layout file
   if (useTypeScript) {
     secureWriteFile(path.join(appPath, `layout.${mainExt}`), `import React from 'react';
 import './globals.css';
@@ -1829,11 +2320,61 @@ interface RootLayoutProps {
 export const metadata = {
   title: 'Bini.js App',
   description: 'Modern React application built with Bini.js',
+  keywords: [
+    'Bini.js',
+    'React framework', 
+    'Vite',
+    'TailwindCSS',
+    'frontend framework',
+    'modern web development'
+  ],
+  authors: [{ name: 'Binidu Ranasinghe', url: 'https://bini.js.org' }],
+  metadataBase: new URL('https://bini.js.org'),
+  openGraph: {
+    title: 'Bini.js — The Next-Gen React Framework',
+    description: 'Bini.js brings speed, protection, and simplicity to modern React development.',
+    url: 'https://bini.js.org',
+    siteName: 'Bini.js',
+    locale: 'en_US',
+    type: 'website',
+    images: [
+      {
+        url: '/og-image.png',
+        width: 1200,
+        height: 630,
+        alt: 'Bini.js — Modern React Framework',
+      },
+    ],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'Bini.js — The Next-Gen React Framework', 
+    description: 'Blazing-fast React apps powered by Vite and TailwindCSS.',
+    creator: '@binidu01',
+    images: ['/og-image.png'],
+  },
+  icons: {
+    icon: [
+      { url: '/favicon.svg', type: 'image/svg+xml' },
+      { url: '/favicon-16x16.png', type: 'image/png', sizes: '16x16' },
+      { url: '/favicon-32x32.png', type: 'image/png', sizes: '32x32' },
+    ],
+    shortcut: [
+      { url: '/favicon.png' }
+    ],
+    apple: [
+      { url: '/apple-touch-icon.png', sizes: '180x180', type: 'image/png' },
+    ],
+  },
+  manifest: '/site.webmanifest',
 };
 
 export default function RootLayout({ children }: RootLayoutProps) {
   return (
     <html lang="en">
+      <head>
+        {/* Additional head tags can be added here */}
+      </head>
       <body>
         <div id="root">
           <main className="main-content">
@@ -1851,11 +2392,61 @@ import './globals.css';
 export const metadata = {
   title: 'Bini.js App',
   description: 'Modern React application built with Bini.js',
+  keywords: [
+    'Bini.js',
+    'React framework', 
+    'Vite',
+    'TailwindCSS',
+    'frontend framework',
+    'modern web development'
+  ],
+  authors: [{ name: 'Binidu Ranasinghe', url: 'https://bini.js.org' }],
+  metadataBase: new URL('https://bini.js.org'),
+  openGraph: {
+    title: 'Bini.js — The Next-Gen React Framework',
+    description: 'Bini.js brings speed, protection, and simplicity to modern React development.',
+    url: 'https://bini.js.org',
+    siteName: 'Bini.js',
+    locale: 'en_US',
+    type: 'website',
+    images: [
+      {
+        url: '/og-image.png',
+        width: 1200,
+        height: 630,
+        alt: 'Bini.js — Modern React Framework',
+      },
+    ],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'Bini.js — The Next-Gen React Framework', 
+    description: 'Blazing-fast React apps powered by Vite and TailwindCSS.',
+    creator: '@binidu01',
+    images: ['/og-image.png'],
+  },
+  icons: {
+    icon: [
+      { url: '/favicon.svg', type: 'image/svg+xml' },
+      { url: '/favicon-16x16.png', type: 'image/png', sizes: '16x16' },
+      { url: '/favicon-32x32.png', type: 'image/png', sizes: '32x32' },
+    ],
+    shortcut: [
+      { url: '/favicon.png' }
+    ],
+    apple: [
+      { url: '/apple-touch-icon.png', sizes: '180x180', type: 'image/png' },
+    ],
+  },
+  manifest: '/site.webmanifest',
 };
 
 export default function RootLayout({ children }) {
   return (
     <html lang="en">
+      <head>
+        {/* Additional head tags can be added here */}
+      </head>
       <body>
         <div id="root">
           <main className="main-content">
@@ -1868,10 +2459,8 @@ export default function RootLayout({ children }) {
 }`);
   }
 
-  // Home page with consistent styling across all approaches
   let homePageContent = `import React from 'react';`;
 
-  // Add CSS Modules import if using CSS Modules
   if (styling === "CSS Modules") {
     homePageContent += `\nimport styles from './page.module.css';`;
   }
@@ -1885,7 +2474,6 @@ export default function Home() {
 
   return (`;
 
-  // Container div with blue background #ecf3ff
   if (styling === "Tailwind") {
     homePageContent += `
     <div className="min-h-screen bg-blue-50 flex items-center justify-center p-8">`;
@@ -1897,7 +2485,6 @@ export default function Home() {
     <div className="min-h-screen flex-center p-8 bg-blue">`;
   }
 
-  // Wrapper div
   if (styling === "Tailwind") {
     homePageContent += `
       <div className="max-w-4xl w-full">`;
@@ -1909,7 +2496,6 @@ export default function Home() {
       <div className="max-w-4xl w-full">`;
   }
 
-  // Header section
   if (styling === "Tailwind") {
     homePageContent += `
         <div className="text-center mb-12">
@@ -1917,7 +2503,7 @@ export default function Home() {
             <img src="/bini-logo.svg" alt="Bini.js Logo" className="h-16" />
           </div>
           <h1 className="text-5xl font-bold text-gray-900 mb-4">
-            Welcome to <span className="text-indigo-600">Bini.js</span>
+            Welcome to <span className="text-cyan-500">Bini.js</span>
           </h1>
           <p className="text-xl text-gray-600 mb-8">
             Next.js-like React framework with built-in API routes
@@ -1943,7 +2529,7 @@ export default function Home() {
             <img src="/bini-logo.svg" alt="Bini.js Logo" style={{ height: '4rem' }} />
           </div>
           <h1 className="text-large text-gray-900 mb-4">
-            Welcome to <span style={{ color: '#4f46e5' }}>Bini.js</span>
+            Welcome to <span style={{ color: '#00CFFF' }}>Bini.js</span>
           </h1>
           <p className="text-medium text-gray mb-8">
             Next.js-like React framework with built-in API routes
@@ -1951,7 +2537,6 @@ export default function Home() {
         </div>`;
   }
 
-  // Grid section - now responsive for all styling options
   if (styling === "Tailwind") {
     homePageContent += `
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-12">
@@ -2017,7 +2602,6 @@ export default function Home() {
         </div>`;
   }
 
-  // CTA section
   if (styling === "Tailwind") {
     homePageContent += `
         <div className="text-center">
@@ -2029,7 +2613,7 @@ export default function Home() {
             <div className="flex justify-center gap-4">
               <button 
                 onClick={handleTestAlert}
-                className="px-6 py-3 bg-indigo-600 text-white font-medium rounded-lg hover:bg-indigo-700 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+                className="px-6 py-3 bg-cyan-500 text-white font-medium rounded-lg hover:bg-cyan-600 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-offset-2"
               >
                 Test Alert
               </button>
@@ -2074,7 +2658,6 @@ export default function Home() {
         </div>`;
   }
 
-  // Close all divs and component
   homePageContent += `
       </div>
     </div>
@@ -2083,7 +2666,6 @@ export default function Home() {
 
   secureWriteFile(path.join(appPath, `page.${mainExt}`), homePageContent);
 
-  // Main entry file
   secureWriteFile(path.join(projectPath, "src", `main.${mainExt}`), `import React from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
@@ -2100,7 +2682,6 @@ if (import.meta.env.DEV) {
   import.meta.hot?.accept();
 }`);
 
-  // App component
   if (useTypeScript) {
     secureWriteFile(path.join(projectPath, "src", `App.${mainExt}`), `import React from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
@@ -2134,7 +2715,7 @@ function NotFound() {
       <a href="/" style={{ 
         marginTop: '2rem', 
         padding: '0.75rem 1.5rem',
-        background: '#4F46E5',
+        background: '#00CFFF',
         color: 'white',
         textDecoration: 'none',
         borderRadius: '0.5rem'
@@ -2177,7 +2758,7 @@ function NotFound() {
       <a href="/" style={{ 
         marginTop: '2rem', 
         padding: '0.75rem 1.5rem',
-        background: '#4F46E5',
+        background: '#00CFFF',
         color: 'white',
         textDecoration: 'none',
         borderRadius: '0.5rem'
@@ -2191,7 +2772,6 @@ function NotFound() {
 }
 
 function generateConfigFiles(projectPath, useTypeScript, configExt, styling) {
-  // TypeScript config only if TypeScript is enabled
   if (useTypeScript) {
     secureWriteFile(path.join(projectPath, "tsconfig.json"), `{
   "compilerOptions": {
@@ -2217,7 +2797,6 @@ function generateConfigFiles(projectPath, useTypeScript, configExt, styling) {
   "exclude": ["node_modules", "dist", ".bini"]
 }`);
     
-    // TypeScript environment file
     secureWriteFile(path.join(projectPath, "bini-env.d.ts"), `/// <reference types="bini/client" />
 declare global {
   namespace NodeJS {
@@ -2231,7 +2810,7 @@ declare global {
 export {}`);
   }
 
-  // Vite config - always use MJS
+  // Updated Vite config without the custom error overlay
   secureWriteFile(path.join(projectPath, `vite.config.${configExt}`), `import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { biniRouterPlugin } from './bini/internal/plugins/router.js'
@@ -2289,7 +2868,6 @@ export default defineConfig(({ command }) => ({
   }
 }))`);
 
-  // Bini config - always use MJS
   secureWriteFile(path.join(projectPath, `bini.config.${configExt}`), `export default {
   outDir: '.bini',
   port: 3000,
@@ -2307,7 +2885,6 @@ export default defineConfig(({ command }) => ({
   }
 }`);
 
-  // ESLint config - always use MJS
   secureWriteFile(path.join(projectPath, "eslint.config.mjs"), `import js from '@eslint/js'
 import globals from 'globals'
 import reactHooks from 'eslint-plugin-react-hooks'
@@ -2348,7 +2925,6 @@ export default [
   },
 ]`);
 
-  // Styling configs - use JS for Tailwind (compatibility)
   if (styling === "Tailwind") {
     secureWriteFile(path.join(projectPath, "tailwind.config.js"), 
       `/** @type {import('tailwindcss').Config} */
@@ -2380,7 +2956,7 @@ export default {
 }
 
 async function generateProject(projectName, answers, flags = {}) {
-  const progress = new ProgressLogger(8);
+  const progress = new ProgressLogger(9);
   
   try {
     progress.start('Checking system resources');
@@ -2418,10 +2994,15 @@ async function generateProject(projectName, answers, flags = {}) {
     generateBiniInternals(projectPath, useTypeScript);
     progress.success();
 
-    progress.start('Creating application files');
-    generateSVGLogos(publicPath);
+    progress.start('Generating favicons and logos');
+    await generateFaviconFiles(publicPath);
+    progress.success();
 
-    // HTML file
+    progress.start('Creating web manifest');
+    generateWebManifest(projectPath);
+    progress.success();
+
+    progress.start('Creating application files');
     secureWriteFile(path.join(projectPath, "index.html"), `<!DOCTYPE html>
 <html lang="en">
   <head>
@@ -2437,7 +3018,6 @@ async function generateProject(projectName, answers, flags = {}) {
 
     generateAppFiles(projectPath, ext.main, useTypeScript, answers.styling);
 
-    // Generate CSS Modules files if needed
     if (answers.styling === "CSS Modules") {
       generateCSSModulesFiles(projectPath);
     }
@@ -2448,180 +3028,122 @@ async function generateProject(projectName, answers, flags = {}) {
     progress.start('Generating configuration files');
     generateConfigFiles(projectPath, useTypeScript, ext.config, answers.styling);
 
-    // Package.json
     const packageJson = generatePackageJson(projectName, useTypeScript, answers.styling);
     secureWriteFile(path.join(projectPath, "package.json"), JSON.stringify(packageJson, null, 2), { force: flags.force });
 
-    // Production Server (using .js for compatibility)
+    // Production Server with Fastify - FIXED for client-side routing
     secureWriteFile(path.join(projectPath, "api-server.js"),
 `#!/usr/bin/env node
-import express from 'express';
-import fs from 'fs';
-import path from 'path';
+import fastify from 'fastify';
+import fastifyStatic from '@fastify/static';
+import fastifyHelmet from '@fastify/helmet';
+import fastifyCors from '@fastify/cors';
+import fastifyRateLimiter from '@fastify/rate-limit';
 import { fileURLToPath } from 'url';
+import path from 'path';
 import { createServer } from 'net';
 import os from 'os';
 import { spawn } from 'child_process';
+import fs from 'fs/promises';
+import zlib from 'zlib';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const app = express();
 const DEFAULT_PORT = process.env.PORT || 3000;
+const NODE_ENV = process.env.NODE_ENV || 'production';
+const ENABLE_CORS = process.env.CORS_ENABLED === 'true';
+const RATE_LIMIT = parseInt(process.env.RATE_LIMIT || '100');
+
+const handlerCache = new Map();
+const gzipCache = new Map();
+
+let distPath = path.join(__dirname, '.bini/dist');
+
+let isShuttingDown = false;
+const activeRequests = new Set();
+
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);
+
+async function shutdown(signal) {
+  if (isShuttingDown) return;
+  isShuttingDown = true;
+  
+  console.log(\`\\n⏹️  \${signal} received. Graceful shutdown...\`);
+  console.log(\`📊 Active requests: \${activeRequests.size}\`);
+  
+  const shutdownTimeout = setTimeout(() => {
+    console.log('⚠️  Shutdown timeout - force closing');
+    process.exit(1);
+  }, 30000);
+  
+  const checkRequests = setInterval(() => {
+    if (activeRequests.size === 0) {
+      clearInterval(checkRequests);
+      clearTimeout(shutdownTimeout);
+      console.log('✅ All requests completed. Exiting.');
+      process.exit(0);
+    }
+  }, 100);
+}
 
 async function getAvailablePort(startPort = DEFAULT_PORT) {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const server = createServer();
+    server.once('error', (err) => {
+      if (err.code === 'EADDRINUSE') {
+        server.close();
+        resolve(getAvailablePort(startPort + 1));
+      } else {
+        reject(err);
+      }
+    });
     
-    server.listen(startPort, () => {
+    server.once('listening', () => {
       server.close(() => {
         resolve(startPort);
       });
     });
     
-    server.on('error', () => {
-      resolve(getAvailablePort(startPort + 1));
-    });
+    server.listen(startPort, '0.0.0.0');
   });
 }
 
 function openBrowser(url) {
   try {
-    let command;
-    let args = [];
+    let command, args = [];
+    const platform = process.platform;
     
-    switch (process.platform) {
-      case 'darwin':
-        command = 'open';
-        args = [url];
-        break;
-      case 'win32':
-        command = 'cmd';
-        args = ['/c', 'start', '', url];
-        break;
-      default:
-        command = 'xdg-open';
-        args = [url];
-        break;
+    if (platform === 'darwin') {
+      command = 'open';
+      args = [url];
+    } else if (platform === 'win32') {
+      command = 'cmd';
+      args = ['/c', 'start', '', url];
+    } else {
+      command = 'xdg-open';
+      args = [url];
     }
     
     const child = spawn(command, args, { 
       stdio: 'ignore', 
-      detached: true,
+      detached: true, 
       windowsHide: true 
     });
     
     child.unref();
-    console.log('🌐 Auto-opening browser...');
-    
-    child.on('error', () => {
-      console.log('⚠️  Could not auto-open browser. Please open manually:', url);
+    child.on('error', (err) => {
+      console.log('⚠️  Could not auto-open browser:', err.message);
     });
     
+    console.log('🌐 Auto-opening browser...');
+    return true;
   } catch (error) {
     console.log('⚠️  Could not auto-open browser. Please open manually:', url);
+    return false;
   }
 }
-
-app.use(express.json({ limit: '1mb' }));
-app.use(express.static(path.join(__dirname, '.bini/dist')));
-
-async function handleApiRoute(req, res) {
-  try {
-    const url = new URL(req.url, \`http://\${req.headers.host}\`);
-    let routePath = url.pathname.replace('/api/', '') || 'index';
-    
-    if (routePath.endsWith('/')) {
-      routePath = routePath.slice(0, -1);
-    }
-    
-    const apiDir = path.join(process.cwd(), 'src/api');
-    const handlerPath = path.join(apiDir, routePath + '.js');
-    
-    if (!fs.existsSync(handlerPath)) {
-      res.status(404).json({ 
-        error: 'API route not found',
-        path: routePath
-      });
-      return;
-    }
-    
-    const handlerUrl = new URL('file://' + handlerPath).href;
-    const handlerModule = await import(handlerUrl + '?t=' + Date.now());
-    const handler = handlerModule.default;
-    
-    if (typeof handler !== 'function') {
-      res.status(500).json({ error: 'Invalid API handler - export a default function' });
-      return;
-    }
-    
-    const request = {
-      method: req.method,
-      url: req.url,
-      headers: req.headers,
-      body: req.body,
-      query: Object.fromEntries(url.searchParams),
-      params: {},
-      ip: req.ip || req.connection.remoteAddress
-    };
-    
-    const response = {
-      status: (code) => {
-        res.status(code);
-        return response;
-      },
-      setHeader: (name, value) => {
-        res.setHeader(name, value);
-        return response;
-      },
-      json: (data) => {
-        res.setHeader('Content-Type', 'application/json');
-        res.end(JSON.stringify(data, null, 2));
-      },
-      send: (data) => {
-        if (typeof data === 'object') {
-          res.setHeader('Content-Type', 'application/json');
-          res.end(JSON.stringify(data));
-        } else {
-          res.end(data);
-        }
-      },
-      end: (data) => {
-        res.end(data);
-      }
-    };
-    
-    const timeoutPromise = new Promise((_, reject) => 
-      setTimeout(() => reject(new Error('Request timeout')), 30000)
-    );
-    
-    const handlerPromise = handler(request, response);
-    const result = await Promise.race([handlerPromise, timeoutPromise]);
-    
-    if (result && !res.headersSent) {
-      response.json(result);
-    }
-    
-  } catch (error) {
-    console.error('🚨 Production API Error:', error);
-    if (error.message === 'Request timeout') {
-      res.status(504).json({ error: 'Request timeout' });
-    } else {
-      res.status(500).json({ 
-        error: 'Internal Server Error',
-        message: error.message
-      });
-    }
-  }
-}
-
-app.use('/api', handleApiRoute);
-
-app.get('*', (req, res) => {
-  if (!req.path.startsWith('/api')) {
-    res.sendFile(path.join(__dirname, '.bini/dist/index.html'));
-  }
-});
 
 function getNetworkIp() {
   const interfaces = os.networkInterfaces();
@@ -2637,6 +3159,325 @@ function getNetworkIp() {
   return lan || candidates[0] || 'localhost';
 }
 
+async function loadApiHandler(routePath) {
+  if (handlerCache.has(routePath)) {
+    return handlerCache.get(routePath);
+  }
+
+  try {
+    const apiDir = path.join(process.cwd(), 'src/api');
+    const handlerPath = path.join(apiDir, routePath + '.js');
+    
+    await fs.access(handlerPath);
+    
+    const handlerUrl = new URL('file://' + handlerPath).href;
+    const handlerModule = await import(handlerUrl + '?t=' + Math.random());
+    const handler = handlerModule.default;
+    
+    if (typeof handler !== 'function') {
+      throw new Error('Invalid API handler');
+    }
+    
+    handlerCache.set(routePath, handler);
+    return handler;
+  } catch (error) {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  }
+}
+
+async function createFastifyServer() {
+  const app = fastify({
+    logger: NODE_ENV === 'development' ? {
+      level: 'info',
+      transport: {
+        target: 'pino-pretty',
+        options: {
+          colorize: true
+        }
+      }
+    } : false,
+    bodyLimit: 1048576,
+    trustProxy: 1,
+    requestIdHeader: 'x-request-id',
+    disableRequestLogging: true,
+    connectionTimeout: 60000,
+    keepAliveTimeout: 65000,
+    requestTimeout: 60000,
+    http2SessionTimeout: 600000
+  });
+
+  app.addHook('onClose', async (instance) => {
+    console.log('\\n🛑 Server is shutting down...');
+    handlerCache.clear();
+  });
+
+  await app.register(fastifyHelmet, {
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'", "'unsafe-inline'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", 'data:', 'https:'],
+        connectSrc: ["'self'"],
+        fontSrc: ["'self'"],
+        objectSrc: ["'none'"],
+        upgradeInsecureRequests: []
+      }
+    },
+    hsts: {
+      maxAge: 31536000,
+      includeSubDomains: true,
+      preload: true
+    },
+    referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
+    xContentTypeOptions: true,
+    xFrameOptions: { action: 'deny' },
+    xXssProtection: true
+  });
+
+  if (ENABLE_CORS) {
+    await app.register(fastifyCors, {
+      origin: true,
+      credentials: true,
+      methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
+      exposedHeaders: ['Content-Length', 'X-Request-Id']
+    });
+  }
+
+  await app.register(fastifyRateLimiter, {
+    max: RATE_LIMIT,
+    timeWindow: '15 minutes',
+    cache: 10000,
+    allowList: ['127.0.0.1', '::1'],
+    skipOnError: true
+  });
+
+  app.addHook('onRequest', async (req, reply) => {
+    const reqId = \`\${Date.now()}-\${Math.random().toString(36).substr(2, 9)}\`;
+    activeRequests.add(reqId);
+    req.requestId = reqId;
+  });
+
+  app.addHook('onResponse', async (req, reply) => {
+    activeRequests.delete(req.requestId);
+  });
+
+  // Register static file serving first
+  await app.register(fastifyStatic, {
+    root: distPath,
+    prefix: '/',
+    constraints: {},
+    maxAge: NODE_ENV === 'production' ? '1y' : 0,
+    etag: true,
+    lastModified: true,
+    wildcard: false, // Important: set to false to avoid conflict
+    preCompressed: true,
+    index: ['index.html'], // Allow index.html serving
+    dotfiles: 'deny',
+    acceptRanges: true
+  });
+
+  app.addHook('onSend', async (req, reply, payload) => {
+    if (!reply.sent && !req.url.startsWith('/api/') && req.url !== '/health' && req.url !== '/metrics') {
+      const acceptEncoding = req.headers['accept-encoding'] || '';
+      
+      if (acceptEncoding.includes('gzip') && (typeof payload === 'string' || Buffer.isBuffer(payload))) {
+        reply.header('Vary', 'Accept-Encoding');
+        reply.header('Content-Encoding', 'gzip');
+        
+        const compressed = await new Promise((resolve, reject) => {
+          zlib.gzip(payload, { level: 6 }, (err, result) => {
+            if (err) reject(err);
+            else resolve(result);
+          });
+        });
+        return compressed;
+      }
+    }
+    return payload;
+  });
+
+  app.get('/health', async (req, reply) => {
+    reply.header('Cache-Control', 'no-cache, no-store, must-revalidate');
+    reply.header('Pragma', 'no-cache');
+    reply.header('Expires', '0');
+    
+    return { 
+      status: 'ok', 
+      timestamp: new Date().toISOString(),
+      uptime: process.uptime(),
+      memory: {
+        used: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
+        total: Math.round(process.memoryUsage().heapTotal / 1024 / 1024),
+        rss: Math.round(process.memoryUsage().rss / 1024 / 1024)
+      },
+      node: {
+        version: process.version,
+        env: NODE_ENV
+      }
+    };
+  });
+
+  app.get('/metrics', async (req, reply) => {
+    reply.header('Cache-Control', 'no-cache');
+    
+    return {
+      server: {
+        uptime: process.uptime(),
+        activeRequests: activeRequests.size,
+        handlersCached: handlerCache.size
+      },
+      memory: process.memoryUsage(),
+      versions: process.versions,
+      platform: process.platform,
+      arch: process.arch
+    };
+  });
+
+  app.route({
+    method: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    url: '/api/*',
+    handler: async (req, reply) => {
+      try {
+        const url = new URL(req.url, \`http://\${req.headers.host}\`);
+        let routePath = url.pathname.replace('/api/', '') || 'index';
+        
+        if (routePath.endsWith('/')) {
+          routePath = routePath.slice(0, -1);
+        }
+
+        const handler = await loadApiHandler(routePath);
+        
+        if (!handler) {
+          reply.status(404).type('application/json');
+          return { 
+            error: 'API route not found', 
+            path: routePath,
+            availableRoutes: Array.from(handlerCache.keys())
+          };
+        }
+
+        const query = {};
+        for (const [k, v] of url.searchParams) query[k] = v;
+
+        const request = {
+          method: req.method,
+          headers: req.headers,
+          body: req.body || {},
+          query,
+          ip: req.ip,
+          url: req.url,
+          params: {}
+        };
+
+        let responded = false;
+        const response = {
+          status: (code) => { 
+            reply.status(code); 
+            return response; 
+          },
+          setHeader: (k, v) => { 
+            reply.header(k, v); 
+            return response; 
+          },
+          json: (data) => { 
+            responded = true; 
+            reply.type('application/json').send(data); 
+          },
+          send: (data) => { 
+            responded = true; 
+            if (typeof data === 'object') {
+              reply.type('application/json').send(data);
+            } else {
+              reply.send(data);
+            }
+          },
+          end: (data) => { 
+            responded = true; 
+            if (data) reply.send(data); 
+          }
+        };
+
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('API handler timeout')), 10000)
+        );
+
+        const handlerPromise = Promise.resolve().then(() => handler(request, response));
+        const result = await Promise.race([handlerPromise, timeoutPromise]);
+        
+        if (!responded && result) {
+          reply.type('application/json').send(result);
+        }
+
+      } catch (error) {
+        console.error('🚨 API Error:', error.message);
+        
+        if (!reply.sent) {
+          if (error.message === 'Request timeout') {
+            reply.status(504).type('application/json');
+            reply.send({ error: 'Request timeout', message: 'API handler took too long to respond' });
+          } else {
+            reply.status(500).type('application/json');
+            reply.send({ 
+              error: 'Internal Server Error', 
+              message: error.message,
+              ...(NODE_ENV === 'development' && { stack: error.stack })
+            });
+          }
+        }
+      }
+    }
+  });
+
+  // SPA fallback - serve index.html for all non-API routes that don't match static files
+  app.setNotFoundHandler(async (req, reply) => {
+    if (req.url.startsWith('/api/')) {
+      reply.status(404).type('application/json');
+      return { 
+        error: 'Not found', 
+        message: 'API endpoint does not exist',
+        path: req.url
+      };
+    }
+    
+    // For client-side routes, serve index.html
+    try {
+      const indexHtmlPath = path.join(distPath, 'index.html');
+      await fs.access(indexHtmlPath);
+      reply.type('text/html');
+      return await fs.readFile(indexHtmlPath, 'utf-8');
+    } catch (error) {
+      reply.status(404).type('text/html');
+      return \`
+        <html>
+          <body>
+            <h1>404 Not Found</h1>
+            <p>The page you're looking for doesn't exist.</p>
+          </body>
+        </html>
+      \`;
+    }
+  });
+
+  app.setErrorHandler(async (error, req, reply) => {
+    console.error('🚨 Server Error:', error.message);
+    
+    reply.status(500).type('application/json');
+    return {
+      error: 'Internal Server Error',
+      message: 'Something went wrong',
+      ...(NODE_ENV === 'development' && { 
+        details: error.message,
+        stack: error.stack 
+      })
+    };
+  });
+
+  return app;
+}
+
 async function startServer() {
   try {
     const port = await getAvailablePort(DEFAULT_PORT);
@@ -2644,34 +3485,69 @@ async function startServer() {
     const localUrl = \`http://localhost:\${port}\`;
     const networkUrl = \`http://\${localIp}:\${port}\`;
     
-    app.listen(port, () => {
-      console.log('');
-      console.log('  ▲ Bini.js Production Server');
-      console.log('  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-      console.log(\`    → Local:   \${localUrl}\`);
-      console.log(\`    → Network: \${networkUrl}\`);
-      console.log('  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-      console.log('');
-      console.log('  📦 Serving from: .bini/dist/');
-      console.log('  🔌 API routes:   Enabled');
-      console.log('  🚀 Auto-opens:   Browser');
-      console.log('  ⏹️  Stop:         Ctrl+C');
-      console.log('');
-      
-      setTimeout(() => {
-        openBrowser(localUrl);
-      }, 1000);
-    });
+    console.log('\\n🚀 Starting Bini.js Production Server...');
     
+    const app = await createFastifyServer();
+    
+    const startTime = Date.now();
+    await app.listen({ port, host: '0.0.0.0' });
+    const bootTime = Date.now() - startTime;
+
+    console.log('');
+    console.log('  \\x1b[38;2;0;207;255mß\\x1b[0m Bini.js Production-Ready Fastify Server');
+    console.log('  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.log(\`    → Local:   \${localUrl}\`);
+    console.log(\`    → Network: \${networkUrl}\`);
+    console.log('  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.log('');
+    console.log(\`  ✅ Server:          Fastify (Production)\`);
+    console.log(\`  🔒 Security:        \${ENABLE_CORS ? 'CORS + Helmet' : 'Helmet'}\`);
+    console.log(\`  🛡️  Rate limiting:   \${RATE_LIMIT} req/15min\`);
+    console.log(\`  ⚡ Boot time:       \${bootTime}ms\`);
+    console.log(\`  🔄 Graceful:        Enabled\`);
+    console.log(\`  📊 Metrics:         \${localUrl}/metrics\`);
+    console.log(\`  🏥 Health:          \${localUrl}/health\`);
+    console.log(\`  🔌 API Routes:      \${localUrl}/api/*\`);
+    console.log(\`  📁 Static files:    .bini/dist/\`);
+    console.log(\`  🚀 Client Routing:  Enabled (SPA support)\`);
+    console.log('');
+    
+    setTimeout(() => {
+      console.log('🌐 Attempting to auto-open browser...');
+      const opened = openBrowser(localUrl);
+      if (!opened) {
+        console.log(\`📋 Please open manually: \${localUrl}\`);
+      }
+    }, 1000);
+
   } catch (error) {
     console.error('❌ Failed to start server:', error.message);
+    
+    if (error.code === 'EADDRINUSE') {
+      console.error(\`💡 Port \${DEFAULT_PORT} is already in use. Try:\`);
+      console.error(\`   - Using a different port: PORT=3001 npm start\`);
+      console.error(\`   - Finding what's using the port: npx kill-port \${DEFAULT_PORT}\`);
+    }
+    
     process.exit(1);
   }
 }
 
-startServer().catch(console.error);`, { force: flags.force });
+process.on('uncaughtException', (error) => {
+  console.error('💥 Uncaught Exception:', error);
+  process.exit(1);
+});
 
-    // API example (using .js for compatibility)
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('💥 Unhandled Rejection at:', promise, 'reason:', reason);
+  process.exit(1);
+});
+
+startServer().catch((error) => {
+  console.error('💥 Failed to start:', error);
+  process.exit(1);
+});`, { force: flags.force });
+
     const apiDir = path.join(projectPath, "src/api");
     mkdirRecursive(apiDir);
     secureWriteFile(path.join(apiDir, "hello.js"), `// Example API route
@@ -2684,7 +3560,6 @@ export default function handler(req, res) {
   }
 }`, { force: flags.force });
 
-    // Gitignore
     secureWriteFile(path.join(projectPath, ".gitignore"), `# Dependencies
 node_modules/
 npm-debug.log*
@@ -2745,6 +3620,30 @@ npm run start  # Production server with API routes + auto-opens browser
 | \`npm run preview\` | Preview build | ✅ Auto-opens | ✅ Working |
 | \`npm run start\` | Production | ✅ Auto-opens | ✅ Working |
 
+## 🎯 New Features
+
+### ⚡ Fastify Production Server
+- ✅ **2x faster** than Express.js
+- ✅ Built-in security with Helmet
+- ✅ Rate limiting protection
+- ✅ Gzip compression
+- ✅ Graceful shutdown
+- ✅ Health checks & metrics
+
+### 🖼️ Automatic Favicon Generation
+- ✅ SVG, PNG formats automatically generated
+- ✅ Multiple sizes for different devices (16x16, 32x32, 64x64, 180x180, 512x512)
+- ✅ Open Graph image (1200x630) for social media sharing
+- ✅ Apple Touch Icon for iOS devices
+- ✅ Web Manifest for PWA support
+
+### 🔍 Enhanced SEO & Social Media
+- ✅ Complete Open Graph tags
+- ✅ Twitter Card support  
+- ✅ Keyword meta tags
+- ✅ Proper favicon declarations
+- ✅ Canonical URLs and robots meta
+
 ## 🏗️ Project Structure
 
 \`\`\`
@@ -2759,13 +3658,13 @@ ${projectName}/
 ├── public/            # Static assets
 ├── bini/              # Framework internals and plugins
 ├── .bini/             # Build outputs (like Next.js .next)
-├── api-server.js      # ✅ Production server with API support
+├── api-server.js      # ⚡ Fastify production server with API support
 ├── bini.config.mjs    # Bini.js configuration (ES modules)
 ├── vite.config.mjs    # Vite configuration (ES modules)
 ├── eslint.config.mjs  # ESLint configuration (ES modules)
 ${useTypeScript ? '├── tsconfig.json     # TypeScript configuration\n├── bini-env.d.ts      # TypeScript environment' : ''}
 ${answers.styling === "Tailwind" ? '├── tailwind.config.js # Tailwind configuration\n├── postcss.config.mjs  # PostCSS configuration' : ''}
-└── package.json       # Dependencies (Express included)
+└── package.json       # Dependencies (Fastify included)
 \`\`\`
 
 ## 🔌 API Routes - WORKING EVERYWHERE
@@ -2782,7 +3681,7 @@ API routes now work in ALL modes with browser auto-opening:
 
 **Production:** \`npm run build && npm run start\`
 - ✅ Auto-opens browser
-- ✅ API routes work via Express server
+- ✅ API routes work via Fastify server
 - ✅ Static files served from .bini/dist
 
 ### Test the API:
@@ -2833,6 +3732,7 @@ ${useTypeScript ? '✅ TypeScript configured' : '✅ JavaScript ready'}
     console.log(`📂 Project: ${projectName}`);
     console.log(`🎨 Styling: ${answers.styling}`);
     console.log(`📝 Language: ${useTypeScript ? 'TypeScript' : 'JavaScript'}`);
+    console.log(`⚡ Server:   Fastify (2x faster than Express)`);
     console.log(`🎨 Background: Consistent blue (#ecf3ff) across all styling options`);
     console.log(`📱 Cards: Fully responsive for all screen sizes`);
     console.log(`⚙️  Config Files: MJS (ES modules for all projects)\n`);
@@ -2850,6 +3750,7 @@ ${useTypeScript ? '✅ TypeScript configured' : '✅ JavaScript ready'}
     
     console.log(`🔌 API Routes: Now work in BOTH development AND production!`);
     console.log(`🌐 All commands auto-open browser: dev, preview, and start!`);
+    console.log(`⚡ Production server uses Fastify for maximum performance!`);
     console.log(`🎨 Same beautiful UI with blue background across all styling options!`);
     console.log(`📱 Fully responsive cards that work on mobile, tablet, and desktop!`);
     console.log(`📚 Check README.md for production build instructions`);
