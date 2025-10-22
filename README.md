@@ -1,3 +1,5 @@
+# ß Bini.js CLI – Complete Documentation
+
 <div align="center">
 
 ```
@@ -8,8 +10,6 @@
 ██████╔╝██║██║ ╚████║██║ ╚█████╔╝███████║
 ╚═════╝ ╚═╝╚═╝  ╚═══╝╚═╝  ╚════╝ ╚══════╝
 ```
-
-# ▲ Bini.js CLI
 
 ### Build lightning-fast, source-protected React apps — powered by Vite
 
@@ -32,11 +32,27 @@
 
 ---
 
+## What's New: Rebranded Logo
+
+The Bini.js logo has been completely rebranded! The new ß (German capital eszett) icon represents the framework's precision and elegance. Auto-generated across multiple formats:
+
+- **SVG favicon** for crisp display on all devices
+- **PNG variants** (16×16, 32×32, 64×64, 180×180, 512×512) for different contexts
+- **Open Graph image** (1200×630) for social media sharing
+- **Apple Touch Icon** (180×180) for iOS home screens
+- **Web manifest** integration for PWA support
+
+All logos are generated automatically during project creation with the beautiful gradient blue-to-cyan color scheme (#00CFFF → #0077FF).
+
+---
+
+## Overview
+
 Build source-code-protected React apps with Next.js-style file-based routing and built-in API routes, powered by Vite. Your source code stays hidden while your site remains fully functional and SEO-optimized.
 
 ---
 
-## Quick Start
+## Getting Started
 
 ```bash
 npx create-bini-app@latest my-app
@@ -45,152 +61,94 @@ npm install
 npm run dev
 ```
 
-Visit **http://localhost:3000** in October - your app will auto-open in the browser.
+Your browser opens automatically at `http://localhost:3000`.
 
 ---
 
-## Installation Options
+## Installation
 
-### Interactive Setup (Recommended)
+### Interactive Setup
 ```bash
 npx create-bini-app@latest
 ```
 
-You'll be prompted to choose:
-- Project name
+Select your preferences:
 - TypeScript or JavaScript
-- Styling: Tailwind CSS, CSS Modules, or None
+- Styling: Tailwind CSS, CSS Modules, or vanilla CSS
+- Additional options via command-line flags
 
-### Quick Setup with Flags
+### Command-Line Setup
 ```bash
-# TypeScript + Tailwind
+# Full-featured with TypeScript and Tailwind
 npx create-bini-app@latest my-app --typescript --tailwind
 
-# JavaScript with CSS Modules
+# With CSS Modules
 npx create-bini-app@latest my-app --css-modules
 
-# Plain JavaScript, no styling
+# JavaScript only
 npx create-bini-app@latest my-app --javascript
 
-# Overwrite existing directory
+# Override existing directory
 npx create-bini-app@latest my-app --force
-
-# Minimal setup
-npx create-bini-app@latest my-app --minimal
 ```
 
 ### Supported Package Managers
-- npm
-- yarn
-- pnpm
-- bun
-
-The CLI auto-detects and uses your installed package manager (prioritizing: bun → pnpm → yarn → npm).
+Bini.js automatically detects and uses your preferred package manager (bun → pnpm → yarn → npm).
 
 ---
 
-## Project Structure
+## Project Architecture
 
 ```
 my-app/
 ├── src/
-│   ├── app/                 # Next.js-like app directory
-│   │   ├── layout.tsx       # Root layout with metadata
-│   │   ├── page.tsx         # Home page (/)
-│   │   └── globals.css      # Global styles
-│   ├── api/                 # API routes
-│   │   └── hello.js         # Example: /api/hello
-│   ├── App.tsx              # Root component (auto-generated)
-│   └── main.tsx             # Entry point
-├── public/                  # Static assets
-│   ├── favicon.svg          # Auto-generated favicon
-│   └── bini-logo.svg        # Auto-generated logo
-├── bini/                    # Framework internals
-│   └── internal/
-│       └── plugins/         # Vite plugins
-│           ├── router.js    # Auto-routing
-│           ├── api.js       # API middleware
-│           ├── ssr.js       # Meta tags
-│           ├── preview.js   # Preview server info
-│           └── badge.js     # Dev server badge
-├── .bini/                   # Build output (gitignored)
-│   └── dist/                # Production build
-├── index.html               # HTML entry
-├── vite.config.mjs          # Vite configuration
-├── bini.config.mjs          # Bini configuration
-├── eslint.config.mjs        # ESLint config
-├── tsconfig.json            # TypeScript (if enabled)
-├── tailwind.config.js       # Tailwind (if enabled)
-├── postcss.config.mjs       # PostCSS (if enabled)
-├── api-server.js            # Production Express server
-├── package.json             # Dependencies
-└── README.md                # Project docs
+│   ├── app/                         # File-based routing
+│   │   ├── layout.tsx               # Root layout (metadata, SEO)
+│   │   ├── page.tsx                 # Home page (/)
+│   │   ├── about/page.tsx           # (/about)
+│   │   ├── blog/[slug]/page.tsx     # Dynamic routes (/blog/:slug)
+│   │   └── globals.css              # Global stylesheet
+│   ├── api/                         # Server-side API routes
+│   │   ├── hello.js                 # GET /api/hello
+│   │   ├── users.js                 # POST /api/users
+│   │   └── data/search.js           # GET /api/data/search
+│   ├── App.tsx                      # Root component (auto-generated)
+│   └── main.tsx                     # Application entry point
+├── public/                          # Static assets & auto-generated favicons
+│   ├── favicon.svg                  # NEW: Rebranded ß icon (SVG)
+│   ├── favicon.png                  # Main favicon (PNG)
+│   ├── favicon-16x16.png            # NEW: 16px resolution
+│   ├── favicon-32x32.png            # NEW: 32px resolution
+│   ├── favicon-64x64.png            # NEW: 64px resolution
+│   ├── favicon-180x180.png          # NEW: 180px resolution
+│   ├── favicon-512x512.png          # NEW: 512px resolution
+│   ├── apple-touch-icon.png         # NEW: iOS home screen icon
+│   ├── og-image.png                 # NEW: Social media preview (1200×630)
+│   ├── bini-logo.svg                # NEW: Rebranded application logo
+│   └── site.webmanifest             # NEW: PWA manifest
+├── bini/internal/plugins/           # Framework runtime
+│   ├── router.js                    # File-based routing engine
+│   ├── api.js                       # API middleware
+│   ├── ssr.js                       # Server-side meta tag rendering
+│   ├── badge.js                     # Development console badge
+│   └── preview.js                   # Preview server configuration
+├── .bini/dist/                      # Production build output
+├── index.html                       # HTML template
+├── vite.config.mjs                  # Build configuration
+├── bini.config.mjs                  # Application configuration
+├── api-server.js                    # Fastify production server
+├── package.json                     # Dependencies (with Fastify)
+├── tsconfig.json                    # TypeScript (if enabled)
+├── tailwind.config.js               # Tailwind CSS (if enabled)
+└── README.md                        # Project documentation
 ```
-
----
-
-## Source Code Protection
-
-Bini.js protects your source code by separating development from production:
-
-### How It Works
-
-**During Development (`npm run dev`):**
-- Full source code is available (normal dev experience)
-- TypeScript/JSX visible
-- Source maps enabled for debugging
-- Components editable in real-time
-
-**In Production (`npm run build`):**
-- Only minified, obfuscated code in `.bini/dist/`
-- No source maps included
-- Original `.tsx`/`.jsx` files NOT served
-- Compiled JavaScript is browser-ready but unreadable
-- Users can only see the compiled output
-
-**SEO Crawlers See:**
-- Meta tags injected in `<head>` (title, description, OG tags, etc.)
-- Server renders head tags for search engines
-- UI code remains hidden from crawlers and users
-
-### Build Output Security
-```
-Source files                  Build output
-├── src/app/page.tsx     →    .bini/dist/index.html
-├── src/App.tsx          →    .bini/dist/assets/index.js (minified)
-└── src/api/hello.js     →    /api/hello (Express handler)
-```
-
-The original source files are **never exposed** to browsers or clients. They're only used during your build process.
-
-### What's Visible in Browser DevTools
-- Minified React code (cannot be easily reverse-engineered)
-- Network requests to API endpoints
-- Component tree structure (but not source)
-
-### What's Hidden
-- Original TypeScript/JSX source
-- Business logic details
-- Component implementation
-- API handler code
-- Internal dependencies
 
 ---
 
 ## File-Based Routing
 
-Routes are automatically created from `src/app/` directory structure:
+Pages are automatically discovered and routed based on file location:
 
-### Basic Page
-```tsx
-// src/app/about/page.tsx
-export default function About() {
-  return <h1>About Page</h1>;
-}
-```
-Creates route: `/about`
-
-### Nested Routes
 ```
 src/app/
 ├── page.tsx              → /
@@ -199,413 +157,251 @@ src/app/
 └── blog/[slug]/page.tsx  → /blog/:slug
 ```
 
-### Dynamic Routes
+### Creating Routes
+
+**Static Route:**
 ```tsx
-// src/app/products/[id]/page.tsx
-import { useParams } from 'react-router-dom';
-
-export default function Product() {
-  const { id } = useParams();
-  return <h1>Product {id}</h1>;
-}
-```
-
-Routes are auto-generated on `npm install` and hot-reload during development.
-
----
-
-## API Routes
-
-Create backend endpoints in `src/api/`:
-
-### Basic Endpoint
-```js
-// src/api/hello.js
-export default function handler(req, res) {
-  return {
-    message: 'Hello from Bini.js!',
-    method: req.method,
-    timestamp: new Date().toISOString()
-  };
-}
-```
-
-**Access:** `GET /api/hello`
-
-### Handling POST Requests
-```js
-// src/api/users.js
-export default function handler(req, res) {
-  if (req.method === 'POST') {
-    const { name, email } = req.body;
-    return {
-      success: true,
-      id: Date.now(),
-      name,
-      email
-    };
-  }
-  
-  return {
-    users: [
-      { id: 1, name: 'Alice' },
-      { id: 2, name: 'Bob' }
-    ]
-  };
-}
-```
-
-### Query Parameters
-```js
-// src/api/search.js
-export default function handler(req, res) {
-  const { q, limit = 10 } = req.query;
-  return {
-    query: q,
-    limit: parseInt(limit),
-    results: []
-  };
-}
-```
-
-**Access:** `GET /api/search?q=test&limit=5`
-
-### Error Handling
-```js
-// src/api/data.js
-export default function handler(req, res) {
-  if (!req.body.id) {
-    res.status(400);
-    return { error: 'ID required' };
-  }
-  
-  return { success: true };
-}
-```
-
-**Features:**
-- Works in `npm run dev` (Vite dev server)
-- Works in `npm run preview` (Vite preview)
-- Works in `npm run start` (Express production server)
-- Built-in rate limiting (100 requests/60s per IP)
-- Automatic JSON parsing
-- Request body size limit: 1MB
-- Request timeout: 30s
-- Error boundary with fallback responses
-
----
-
-## Styling Options
-
-### Tailwind CSS
-```tsx
-export default function Home() {
+// src/app/about/page.tsx
+export default function AboutPage() {
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center">
-      <h1 className="text-4xl font-bold text-white">Hello Bini.js!</h1>
+    <div>
+      <h1>About Us</h1>
+      <p>Company information here.</p>
     </div>
   );
 }
 ```
 
-### CSS Modules
+**Dynamic Route:**
 ```tsx
-import styles from './page.module.css';
+// src/app/blog/[slug]/page.tsx
+import { useParams } from 'react-router-dom';
 
-export default function Home() {
-  return <h1 className={styles.title}>Hello Bini.js!</h1>;
+export default function BlogPost() {
+  const { slug } = useParams();
+  
+  return (
+    <article>
+      <h1>Post: {slug}</h1>
+    </article>
+  );
 }
 ```
 
-### Plain CSS
-```tsx
-import './page.css';
+Routes are automatically generated at startup and hot-reload during development.
 
-export default function Home() {
-  return <h1 className="title">Hello Bini.js!</h1>;
+---
+
+## API Routes
+
+### Defining Endpoints
+
+API handlers are functions exported from `src/api/`:
+
+```js
+// src/api/hello.js
+export default function handler(req, res) {
+  return {
+    message: 'API working',
+    timestamp: new Date().toISOString()
+  };
+}
+```
+
+**Request Methods:**
+```js
+// src/api/users.js
+export default function handler(req, res) {
+  switch (req.method) {
+    case 'GET':
+      return { users: [] };
+    
+    case 'POST':
+      const { name, email } = req.body;
+      return { id: Date.now(), name, email };
+    
+    case 'PUT':
+      return { updated: true };
+    
+    case 'DELETE':
+      return { deleted: true };
+    
+    default:
+      res.status(405);
+      return { error: 'Method not allowed' };
+  }
+}
+```
+
+**Query Parameters:**
+```js
+// src/api/search.js
+export default function handler(req, res) {
+  const { q, limit = 10, offset = 0 } = req.query;
+  
+  return {
+    query: q,
+    limit: parseInt(limit),
+    offset: parseInt(offset),
+    results: []
+  };
+}
+```
+
+### Request/Response API
+
+```js
+export default function handler(req, res) {
+  // Request Properties
+  req.method          // 'GET', 'POST', 'PUT', 'DELETE', etc.
+  req.url             // Full request URL
+  req.headers         // HTTP headers object
+  req.body            // Parsed JSON body (POST/PUT/PATCH/DELETE)
+  req.query           // Query parameters object
+  req.ip              // Client IP address
+  
+  // Response Methods
+  res.status(code)             // Set HTTP status
+  res.setHeader(name, value)   // Set response header
+  res.json(data)               // Send JSON response
+  res.send(data)               // Send response (auto-detects format)
+  res.end(data)                // End response with optional data
+  
+  return data;  // Alternative: auto-serialized to JSON
+}
+```
+
+### API Specifications
+
+- Request Body Limit: 1MB
+- Request Timeout: 30 seconds
+- Rate Limiting: 100 requests per 15 minutes per IP
+- Response Format: Automatically JSON-serialized
+- Security: Path traversal prevention, prototype pollution checks
+- Availability: Works in development, preview, and production
+
+---
+
+## SEO & Metadata
+
+Define all SEO information in your root layout:
+
+```tsx
+// src/app/layout.tsx
+
+export const metadata = {
+  title: 'My Application',
+  description: 'High-performance React application',
+  keywords: ['react', 'bini', 'fastify'],
+  
+  openGraph: {
+    title: 'My Application',
+    description: 'Experience fast, modern development',
+    url: 'https://myapp.com',
+    images: [{ url: '/og-image.png', width: 1200, height: 630 }]
+  },
+  
+  twitter: {
+    card: 'summary_large_image',
+    title: 'My Application',
+    images: ['/og-image.png']
+  },
+  
+  icons: {
+    icon: [
+      { url: '/favicon.svg', type: 'image/svg+xml' },
+      { url: '/favicon-16x16.png', type: 'image/png', sizes: '16x16' }
+    ],
+    apple: [{ url: '/apple-touch-icon.png', sizes: '180x180' }]
+  }
+};
+
+export default function RootLayout({ children }) {
+  return (
+    <html lang="en">
+      <head>{/* Meta tags auto-injected */}</head>
+      <body>{children}</body>
+    </html>
+  );
 }
 ```
 
 ---
 
-## Development
+## Build & Deploy
 
-### Available Scripts
-
-| Command | Purpose | Browser |
-|---------|---------|---------|
-| `npm run dev` | Development server with HMR | ✓ Auto-opens |
-| `npm run build` | Production build | - |
-| `npm run preview` | Preview production build | ✓ Auto-opens |
-| `npm run start` | Production server (Express) | ✓ Auto-opens |
-| `npm run type-check` | Check TypeScript (if enabled) | - |
-| `npm run lint` | Lint with ESLint | - |
-
-### Development Features
-- **HMR (Hot Module Replacement)** - Instant updates without page reload
-- **Auto-routing** - New pages detected automatically
-- **Route hot reload** - Changes to routing structure refresh app
-- **Network IP display** - Shows local and network URLs
-- **Dev badge** - Bottom-right corner badge with server info
-- **Error boundaries** - Failed components show helpful error messages
-- **Empty page fallback** - Placeholder for pages without exports
-
----
-
-## Production Build
-
+### Development
 ```bash
-# Build for production
-npm run build
-
-# Output location: .bini/dist/
+npm run dev
 ```
+Starts Vite development server with:
+- Hot Module Replacement (HMR) with sub-50ms updates
+- Automatic file-based routing
+- Live API route updates
+- Browser auto-opens at http://localhost:3000
+- Full source maps for debugging
 
-### Deployment Options
-
-**Option 1: Express Server** (Recommended)
-```bash
-npm run start
-```
-- Runs `api-server.js`
-- Serves from `.bini/dist/`
-- Full API route support
-- Auto-opens browser
-
-**Option 2: Static Host** (No APIs)
-```bash
-# Build only
-npm run build
-
-# Deploy .bini/dist/ to any static host
-# Netlify, Vercel, GitHub Pages, etc.
-```
-
-**Option 3: Preview** (Testing)
+### Preview Production Build
 ```bash
 npm run preview
 ```
+Preview the production build locally before deployment:
+- Runs the optimized production bundle
 - Uses Vite preview server
-- Full API support
-- Good for testing before deploy
+- Full API routes working via Vite
+- Browser auto-opens at http://localhost:3000
+- Gzip compression enabled
+- Source maps disabled (production mode)
 
----
+Use this to test the production build before deploying to verify performance, styling, and functionality.
 
-## Configuration
-
-### Vite Config (`vite.config.mjs`)
-```js
-export default defineConfig({
-  server: { port: 3000, host: 'localhost' },
-  preview: { port: 3000, host: '0.0.0.0' },
-  build: { outDir: '.bini/dist' }
-});
-```
-
-### Bini Config (`bini.config.mjs`)
-```js
-export default {
-  outDir: '.bini',
-  port: 3000,
-  api: {
-    dir: 'src/api',
-    bodySizeLimit: '1mb'
-  }
-};
-```
-
-### TypeScript (`tsconfig.json`) - If Enabled
-```json
-{
-  "compilerOptions": {
-    "target": "ES2020",
-    "lib": ["ES2020", "DOM", "DOM.Iterable"],
-    "jsx": "react-jsx",
-    "strict": true
-  }
-}
-```
-
-### Tailwind (`tailwind.config.js`) - If Enabled
-```js
-export default {
-  content: ["./src/**/*.{js,jsx,ts,tsx}"],
-  theme: { extend: {} },
-  plugins: []
-};
-```
-
----
-
-## How It Works
-
-### Auto-Routing Plugin
-Scans `src/app/` for files matching `page.tsx`, `page.jsx`, `page.ts`, or `page.js`:
-- Generates `src/App.tsx` with React Router setup
-- Supports dynamic segments with `[param]` syntax
-- Hot reloads on file add/remove/modify
-- Handles empty pages with fallback UI
-- Includes error boundary wrapper
-
-### API Middleware
-Serves endpoints from `src/api/`:
-- Development: Vite dev middleware
-- Preview: Vite preview middleware  
-- Production: Express middleware in `api-server.js`
-- Rate limiting: 100 req/min per IP
-- Input validation: JSON parsing + proto pollution checks
-- Output: Auto-JSON stringified or custom response
-
-### SSR Plugin
-Reads metadata from `src/app/layout.tsx`:
-- Parses `export const metadata` object
-- Injects meta tags into `index.html`
-- Supports: title, description, keywords, author, viewport
-- Hot reloads on layout changes
-
-### Badge Plugin
-Displays dev server info:
-- Local URL: `http://localhost:3000`
-- Network URL: `http://192.168.x.x:3000`
-- Fixed bottom-right corner badge
-- Only shows in development
-
----
-
-## Security
-
-### Source Code Protection Features
-- **Compiled code only** - Browser receives minified JavaScript, not source files
-- **No source maps** - Production builds exclude `.map` files
-- **Meta tag injection** - SEO tags rendered server-side, not in page source
-- **Hidden API handlers** - `src/api/` files only executed server-side
-- **Private build output** - `.bini/dist/` contains compiled assets only
-
-### API Route Security
-- Path traversal prevention (sanitized API paths)
-- Prototype pollution checks (JSON parsing)
-- Rate limiting (100 req/60s per IP)
-- Request body size limits (1MB)
-- Request timeouts (30s)
-- File type validation (API routes must be `.js`)
-
-### Production Deployment Security
-- Use `npm run start` (Express server) for full protection
-- Never expose `src/` directory on production server
-- Only serve content from `.bini/dist/`
-- Use environment variables for secrets (`.env` ignored in Git)
-- Validate all user input in API routes
-- Use HTTPS in production
-- Add authentication to sensitive endpoints
-
-### What Gets Exposed
-- Compiled JavaScript (minified, not readable)
-- API endpoint names and responses
-- Client-side routing structure
-- Meta tags and SEO information
-
-### What Stays Hidden
-- Original TypeScript/JSX source code
-- Component implementation details
-- Business logic and algorithms
-- API handler code
-- Dependencies and imports
-- Comments and documentation
-
----
-
-## Troubleshooting
-
-**Port 3000 already in use:**
+### Production Build
 ```bash
-# Change port in vite.config.mjs
-# Or run on different port:
-PORT=3001 npm run dev
-```
-
-**Routes not generating:**
-```bash
-# Run setup manually
-node bini/internal/plugins/router.js
-npm run dev
-```
-
-**API routes not working:**
-1. Verify file is in `src/api/` directory
-2. Check file exports a default function
-3. Ensure file ends with `.js`
-4. Check network tab in browser dev tools
-5. Run `npm run dev` or `npm run preview`
-
-**Build fails:**
-```bash
-rm -rf node_modules .bini package-lock.json
-npm install
 npm run build
 ```
+Creates optimized production bundle in `.bini/dist/`:
+- Minified JavaScript (no source maps)
+- Code splitting and tree-shaking
+- CSS minification
+- Asset optimization
+- Source code protection enabled
+- Ready for deployment
 
-**Memory usage high:**
+### Production Server
 ```bash
-# Increase Node memory
-NODE_OPTIONS=--max-old-space-size=4096 npm run build
+npm run start
+# or
+npm start
 ```
+Launches Fastify production server with:
+- Static file serving from `.bini/dist/`
+- Full API routes working (`/api/*`)
+- Helmet security headers
+- Rate limiting (100 req/15 min per IP)
+- Graceful shutdown handling
+- Health checks (`/health`) and metrics (`/metrics`)
+- Gzip & Brotli compression
+- Auto-opens browser at http://localhost:3000
+- Network IP detection and display
+
+**Key Difference:** `npm run start` uses the **Fastify production server** and requires a prior build. `npm run preview` uses Vite's preview server. Both auto-open your browser.
 
 ---
 
-## Feature Comparison
+## System Requirements
 
-| Feature | Bini.js | Next.js | Create React App |
-|---------|---------|---------|------------------|
-| Dev server startup | ~0.3s | ~2.1s | ~8.4s |
-| HMR speed | ~50ms | ~200ms | ~1.2s |
-| File-based routing | ✓ | ✓ | ✗ |
-| API routes | ✓ | ✓ | ✗ |
-| TypeScript support | ✓ | ✓ | ✓ |
-| Tailwind CSS | ✓ | ✓ | ✗ |
-| Production server | ✓ Express | ✓ Node | ✗ |
-| Bundle size | ~45KB | ~85KB | ~125KB |
-| Config files | MJS | JS/TS | Hidden |
-| Built with | Vite | Webpack | Webpack |
-
----
-
-## Requirements
-
-- **Node.js:** 18.0.0 or higher
-- **npm/yarn/pnpm/bun:** Latest version recommended
-- **Disk space:** ~100MB for node_modules
-- **RAM:** 512MB minimum
-
----
-
-## Contributing
-
-Found a bug or have a feature request?
-
-1. Check [GitHub Issues](https://github.com/Binidu01/bini-cli/issues)
-2. Create a new issue with clear description
-3. Include steps to reproduce for bugs
-4. Submit pull requests to `main` branch
+- Node.js 18.0.0 or higher
+- 150MB disk space (node_modules + build)
+- 512MB RAM minimum
 
 ---
 
 ## License
 
-MIT - Free for personal and commercial use.
+MIT – Free for personal and commercial use.
 
 ---
 
-## Built With
+**Bini.js** — Built with Vite, React, and Fastify
 
-- [Vite](https://vitejs.dev) - Frontend build tool
-- [React](https://react.dev) - UI library
-- [React Router DOM](https://reactrouter.com) - Routing
-- [Express](https://expressjs.com) - Production server
-- [Tailwind CSS](https://tailwindcss.com) - Styling (optional)
-- [TypeScript](https://www.typescriptlang.org) - Language (optional)
-
----
-
-**Made with by [Binidu](https://github.com/Binidu01)**
-
-[GitHub](https://github.com/Binidu01/bini-cli) • [Issues](https://github.com/Binidu01/bini-cli/issues)
+[GitHub](https://github.com/Binidu01/bini-cli) · [Documentation](https://bini.js.org) · [npm](https://npmjs.com/package/create-bini-app)
