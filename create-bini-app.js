@@ -539,17 +539,53 @@ async function generateFaviconFiles(publicPath) {
   } catch (error) {
     console.warn('⚠️ PNG generation failed, creating placeholder files:', error.message);
     
-    // Fallback: Create placeholder PNGs
-    const placeholderPNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+    // Fallback: Create proper sized placeholder PNGs
     const pngSizes = [16, 32, 64, 180, 512];
     
     for (const size of pngSizes) {
-      secureWriteFile(path.join(publicPath, `favicon-${size}x${size}.png`), Buffer.from(placeholderPNG, 'base64'));
+      // Generate proper sized placeholder instead of generic 1x1
+      const placeholderBuffer = await sharp({
+        create: {
+          width: size,
+          height: size,
+          channels: 4,
+          background: { r: 0, g: 207, b: 255, alpha: 255 }
+        }
+      }).png().toBuffer();
+      secureWriteFile(path.join(publicPath, `favicon-${size}x${size}.png`), placeholderBuffer);
     }
     
-    secureWriteFile(path.join(publicPath, "favicon.png"), Buffer.from(placeholderPNG, 'base64'));
-    secureWriteFile(path.join(publicPath, "apple-touch-icon.png"), Buffer.from(placeholderPNG, 'base64'));
-    secureWriteFile(path.join(publicPath, "og-image.png"), Buffer.from(placeholderPNG, 'base64'));
+    // Generate proper sized placeholders for other files
+    const defaultFavicon = await sharp({
+      create: {
+        width: 512,
+        height: 512,
+        channels: 4,
+        background: { r: 0, g: 207, b: 255, alpha: 255 }
+      }
+    }).png().toBuffer();
+    
+    const appleIcon = await sharp({
+      create: {
+        width: 180,
+        height: 180,
+        channels: 4,
+        background: { r: 0, g: 207, b: 255, alpha: 255 }
+      }
+    }).png().toBuffer();
+    
+    const ogImage = await sharp({
+      create: {
+        width: 1200,
+        height: 630,
+        channels: 4,
+        background: { r: 0, g: 207, b: 255, alpha: 255 }
+      }
+    }).png().toBuffer();
+    
+    secureWriteFile(path.join(publicPath, "favicon.png"), defaultFavicon);
+    secureWriteFile(path.join(publicPath, "apple-touch-icon.png"), appleIcon);
+    secureWriteFile(path.join(publicPath, "og-image.png"), ogImage);
     
     console.log("✅ Basic favicon placeholders created");
   }
@@ -605,52 +641,60 @@ function generateBiniInternals(projectPath, useTypeScript) {
   
   mkdirRecursive(pluginsPath);
 
-  // Router Plugin
+  // Router Plugin - FIXED with race condition protection
   secureWriteFile(path.join(pluginsPath, "router.js"), `import fs from 'fs';
 import path from 'path';
+
+let regenerationLock = null;
+const regenerationQueue = [];
 
 function scanRoutes(dir, baseRoute = '') {
   const routes = [];
   
-  if (!fs.existsSync(dir)) {
+  try {
+    if (!fs.existsSync(dir)) {
+      return routes;
+    }
+    
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    
+    for (const entry of entries) {
+      if (entry.name === 'node_modules' || entry.name.startsWith('.')) {
+        continue;
+      }
+      
+      const fullPath = path.join(dir, entry.name);
+      
+      if (entry.isDirectory()) {
+        const pageFiles = ['page.tsx', 'page.jsx', 'page.ts', 'page.js'];
+        const pageFile = pageFiles.find(f => fs.existsSync(path.join(fullPath, f)));
+        
+        const isDynamic = entry.name.startsWith('[') && entry.name.endsWith(']');
+        
+        let currentRoutePath;
+        if (isDynamic) {
+          const paramName = entry.name.slice(1, -1);
+          currentRoutePath = baseRoute + '/:' + paramName;
+        } else {
+          currentRoutePath = baseRoute + '/' + entry.name;
+        }
+        
+        if (pageFile) {
+          routes.push({
+            path: currentRoutePath,
+            file: path.join(fullPath, pageFile),
+            dynamic: isDynamic,
+            params: isDynamic ? [entry.name.slice(1, -1)] : [],
+            name: entry.name
+          });
+        }
+        
+        routes.push(...scanRoutes(fullPath, currentRoutePath));
+      }
+    }
+  } catch (error) {
+    console.warn(\`⚠️ Could not scan routes in \${dir}:\`, error.message);
     return routes;
-  }
-  
-  const entries = fs.readdirSync(dir, { withFileTypes: true });
-  
-  for (const entry of entries) {
-    if (entry.name === 'node_modules' || entry.name.startsWith('.')) {
-      continue;
-    }
-    
-    const fullPath = path.join(dir, entry.name);
-    
-    if (entry.isDirectory()) {
-      const pageFiles = ['page.tsx', 'page.jsx', 'page.ts', 'page.js'];
-      const pageFile = pageFiles.find(f => fs.existsSync(path.join(fullPath, f)));
-      
-      const isDynamic = entry.name.startsWith('[') && entry.name.endsWith(']');
-      
-      let currentRoutePath;
-      if (isDynamic) {
-        const paramName = entry.name.slice(1, -1);
-        currentRoutePath = baseRoute + '/:' + paramName;
-      } else {
-        currentRoutePath = baseRoute + '/' + entry.name;
-      }
-      
-      if (pageFile) {
-        routes.push({
-          path: currentRoutePath,
-          file: path.join(fullPath, pageFile),
-          dynamic: isDynamic,
-          params: isDynamic ? [entry.name.slice(1, -1)] : [],
-          name: entry.name
-        });
-      }
-      
-      routes.push(...scanRoutes(fullPath, currentRoutePath));
-    }
   }
   
   return routes;
@@ -912,6 +956,43 @@ function NotFound() {
 let regenerateTimeout = null;
 let lastRoutes = '';
 
+async function regenerateRoutesWithLock(routerPlugin, changeType = 'update') {
+  // If already regenerating, queue the request
+  if (regenerationLock) {
+    return new Promise((resolve) => {
+      regenerationQueue.push(resolve);
+    });
+  }
+
+  regenerationLock = true;
+  
+  try {
+    clearTimeout(routerPlugin.regenerateTimeout);
+    
+    routerPlugin.regenerateTimeout = setTimeout(async () => {
+      try {
+        await routerPlugin.regenerateRoutes(changeType);
+        
+        // Process any queued regenerations
+        while (regenerationQueue.length > 0) {
+          const nextResolve = regenerationQueue.shift();
+          await routerPlugin.regenerateRoutes('queued');
+          nextResolve();
+        }
+      } catch (error) {
+        console.error('❌ Route regeneration failed:', error);
+        // Clear queue on error
+        regenerationQueue.length = 0;
+      } finally {
+        regenerationLock = null;
+      }
+    }, 100);
+  } catch (error) {
+    regenerationLock = null;
+    throw error;
+  }
+}
+
 export function biniRouterPlugin() {
   return {
     name: 'bini-router-plugin',
@@ -940,12 +1021,12 @@ export function biniRouterPlugin() {
       
       server.watcher.add(appDir);
       
-      const regenerateApp = (reason = 'File changed') => {
+      const regenerateApp = async (reason = 'File changed') => {
         if (regenerateTimeout) {
           clearTimeout(regenerateTimeout);
         }
         
-        regenerateTimeout = setTimeout(() => {
+        regenerateTimeout = setTimeout(async () => {
           const appTsxPath = path.join(process.cwd(), 'src/App.tsx');
           const appJsxPath = path.join(process.cwd(), 'src/App.jsx');
           
@@ -1075,7 +1156,7 @@ export function biniPreviewPlugin() {
   }
 }`);
 
-  // Badge Plugin - Enhanced version with ß icon
+  // Badge Plugin - Enhanced version with ß icon and development mode only
   secureWriteFile(path.join(pluginsPath, "badge.js"), `const BINIJS_VERSION = "${BINIJS_VERSION}";
 import os from 'os';
 import path from 'path';
@@ -1178,7 +1259,8 @@ export function biniBadgePlugin() {
     transformIndexHtml: {
       order: 'post',
       handler(html) {
-        if (process.env.NODE_ENV !== 'production') {
+        // Only inject in development mode
+        if (process.env.NODE_ENV !== 'production' && !process.env.DISABLE_BADGE) {
           const routesJson = JSON.stringify(routes);
           const routesHtml = routes.map(route => \`<div class="bini-badge-route">\${route}</div>\`).join('');
           const versionInfo = BINIJS_VERSION;
@@ -1643,7 +1725,7 @@ export function biniSSRPlugin() {
   }
 }`);
 
-  // API Plugin
+  // API Plugin - UPDATED with enhanced input sanitization and TTL cache
   secureWriteFile(path.join(pluginsPath, "api.js"), `import fs from 'fs'
 import path from 'path'
 import { pathToFileURL } from 'url'
@@ -1652,6 +1734,8 @@ import os from 'os'
 const BINIJS_VERSION = "${BINIJS_VERSION}";
 
 const rateLimit = new Map();
+const handlerCache = new Map();
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
 function checkRateLimit(ip) {
   const now = Date.now();
@@ -1704,6 +1788,56 @@ function sanitizeApiPath(routePath, apiDir) {
   }
 }
 
+function sanitizeObject(obj, depth = 0, path = '') {
+  const MAX_DEPTH = 50;
+  const MAX_STRING_LENGTH = 10000;
+  
+  if (depth > MAX_DEPTH) {
+    throw new Error(\`Object too deeply nested at path: \${path}\`);
+  }
+
+  if (obj === null || typeof obj !== 'object') {
+    // Basic type sanitization
+    if (typeof obj === 'string' && obj.length > MAX_STRING_LENGTH) {
+      throw new Error(\`String too long at path: \${path}\`);
+    }
+    return obj;
+  }
+
+  // Check for circular references
+  if (obj.__$visited) {
+    throw new Error(\`Circular reference detected at path: \${path}\`);
+  }
+
+  try {
+    obj.__$visited = true;
+    
+    const dangerousProps = ['__proto__', 'constructor', 'prototype', '__$visited'];
+    const result = Array.isArray(obj) ? [] : {};
+
+    for (const key in obj) {
+      if (Object.prototype.hasOwnProperty.call(obj, key)) {
+        // Check for dangerous properties
+        if (dangerousProps.includes(key)) {
+          throw new Error(\`Dangerous property detected: \${path}.\${key}\`);
+        }
+
+        // Validate key itself
+        if (typeof key === 'string' && key.length > 256) {
+          throw new Error(\`Property name too long at path: \${path}\`);
+        }
+
+        const newPath = path ? \`\${path}.\${key}\` : key;
+        result[key] = sanitizeObject(obj[key], depth + 1, newPath);
+      }
+    }
+
+    return result;
+  } finally {
+    delete obj.__$visited;
+  }
+}
+
 async function parseJsonBody(req, limit = '1mb') {
   const max = 1024 * 1024;
   return new Promise((resolve, reject) => {
@@ -1727,14 +1861,8 @@ async function parseJsonBody(req, limit = '1mb') {
       if (raw.length > 0) {
         try {
           const parsed = JSON.parse(raw);
-          
-          if (parsed && typeof parsed === 'object') {
-            if ('__proto__' in parsed || 'constructor' in parsed) {
-              throw new Error('Invalid JSON object');
-            }
-          }
-          
-          resolve(parsed);
+          const sanitized = sanitizeObject(parsed);
+          resolve(sanitized);
         } catch (err) {
           reject(new Error('Invalid JSON format'));
         }
@@ -1747,14 +1875,61 @@ async function parseJsonBody(req, limit = '1mb') {
   });
 }
 
+async function loadApiHandler(routePath) {
+  const now = Date.now();
+  const cached = handlerCache.get(routePath);
+  
+  // Check if cached handler is still valid
+  if (cached && now - cached.timestamp < CACHE_TTL) {
+    return cached.handler;
+  }
+
+  try {
+    const apiDir = path.join(process.cwd(), 'src/api');
+    const handlerPath = sanitizeApiPath(routePath, apiDir);
+    
+    if (!fs.existsSync(handlerPath)) {
+      return null;
+    }
+    
+    const handlerUrl = pathToFileURL(handlerPath).href;
+    const handlerModule = await import(handlerUrl + '?t=' + Date.now());
+    const handler = handlerModule.default;
+    
+    if (typeof handler !== 'function') {
+      throw new Error('Invalid API handler - export a default function');
+    }
+    
+    // Cache the handler with timestamp
+    handlerCache.set(routePath, { handler, timestamp: now });
+    return handler;
+  } catch (error) {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  }
+}
+
 async function handleApiRequest(req, res, isPreview = false) {
   const clientIp = req.socket.remoteAddress || 'unknown';
   if (!checkRateLimit(clientIp)) {
     res.statusCode = 429;
     res.setHeader('Content-Type', 'application/json');
+    res.setHeader('X-RateLimit-Limit', '100');
+    res.setHeader('X-RateLimit-Remaining', '0');
+    res.setHeader('X-RateLimit-Reset', Math.floor(Date.now() / 1000) + 60);
     res.end(JSON.stringify({ error: 'Too many requests' }));
     return;
   }
+
+  // Add rate limit headers for successful requests
+  const now = Date.now();
+  const windowStart = now - 60000;
+  const requests = (rateLimit.get(clientIp) || []).filter(time => time > windowStart);
+  const remaining = Math.max(0, 100 - requests.length);
+  
+  res.setHeader('X-RateLimit-Limit', '100');
+  res.setHeader('X-RateLimit-Remaining', remaining.toString());
+  res.setHeader('X-RateLimit-Reset', Math.floor(now / 1000) + 60);
   
   try {
     const url = new URL(req.url, \`http://\${req.headers.host}\`);
@@ -1764,39 +1939,15 @@ async function handleApiRequest(req, res, isPreview = false) {
       routePath = routePath.slice(0, -1);
     }
     
-    const apiDir = path.join(process.cwd(), 'src/api');
+    const handler = await loadApiHandler(routePath);
     
-    let handlerPath;
-    try {
-      handlerPath = sanitizeApiPath(routePath, apiDir);
-    } catch (error) {
+    if (!handler) {
       res.statusCode = 404;
       res.setHeader('Content-Type', 'application/json');
       res.end(JSON.stringify({ 
         error: 'API route not found',
         path: routePath
       }));
-      return;
-    }
-    
-    if (!fs.existsSync(handlerPath)) {
-      res.statusCode = 404;
-      res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify({ 
-        error: 'API route not found',
-        path: routePath
-      }));
-      return;
-    }
-    
-    const handlerUrl = pathToFileURL(handlerPath).href;
-    const handlerModule = await import(handlerUrl + '?t=' + Date.now());
-    const handler = handlerModule.default;
-    
-    if (typeof handler !== 'function') {
-      res.statusCode = 500;
-      res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify({ error: 'Invalid API handler - export a default function' }));
       return;
     }
     
@@ -2094,7 +2245,19 @@ function generateCSSModulesFiles(projectPath) {
 }
 
 function generateGlobalStyles(styling) {
-  const baseStyles = `* { 
+  // Use CSS variables for theming
+  const baseStyles = `:root {
+  --color-primary: #00CFFF;
+  --color-bg: #ecf3ff;
+  --color-text: #1f2937;
+  --color-gray: #6b7280;
+  --color-white: #ffffff;
+  --color-border: #e5e7eb;
+  --shadow-sm: 0 4px 6px rgba(0, 0, 0, 0.1);
+  --shadow-md: 0 8px 15px rgba(0, 0, 0, 0.15);
+}
+
+* { 
   box-sizing: border-box; 
   margin: 0; 
   padding: 0; 
@@ -2108,8 +2271,8 @@ html {
 
 body {
   line-height: 1.5;
-  color: #1f2937;
-  background: #ecf3ff;
+  color: var(--color-text);
+  background: var(--color-bg);
   min-height: 100vh;
 }
 
@@ -2125,8 +2288,8 @@ body {
 .btn-primary {
   display: inline-block;
   padding: 12px 24px;
-  background: #00CFFF;
-  color: white;
+  background: var(--color-primary);
+  color: var(--color-white);
   font-weight: 600;
   border-radius: 8px;
   text-decoration: none;
@@ -2141,17 +2304,17 @@ body {
 }
 
 .card {
-  background: white;
+  background: var(--color-white);
   border-radius: 12px;
   padding: 24px;
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-  border: 1px solid #e5e7eb;
+  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--color-border);
   transition: transform 0.2s, box-shadow 0.2s;
 }
 
 .card:hover {
   transform: translateY(-2px);
-  box-shadow: 0 8px 15px rgba(0, 0, 0, 0.15);
+  box-shadow: var(--shadow-md);
 }
 
 .grid-layout {
@@ -2188,7 +2351,7 @@ body {
 }
 
 .bg-blue {
-  background: #ecf3ff;
+  background: var(--color-bg);
 }
 
 .text-large {
@@ -2201,11 +2364,11 @@ body {
 }
 
 .text-gray {
-  color: #6b7280;
+  color: var(--color-gray);
 }
 
 .text-white {
-  color: white;
+  color: var(--color-white);
 }
 
 .mb-4 { margin-bottom: 1rem; }
@@ -2810,7 +2973,7 @@ declare global {
 export {}`);
   }
 
-  // Updated Vite config without the custom error overlay
+  // Updated Vite config that actually uses the bini.config.mjs and outputs to correct directory
   secureWriteFile(path.join(projectPath, `vite.config.${configExt}`), `import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { biniRouterPlugin } from './bini/internal/plugins/router.js'
@@ -2818,6 +2981,7 @@ import { biniBadgePlugin } from './bini/internal/plugins/badge.js'
 import { biniSSRPlugin } from './bini/internal/plugins/ssr.js'
 import { biniAPIPlugin } from './bini/internal/plugins/api.js'
 import { biniPreviewPlugin } from './bini/internal/plugins/preview.js'
+import biniConfig from './bini.config.mjs'
 
 const isPreview = process.env.npm_lifecycle_event === 'preview'
 
@@ -2831,20 +2995,24 @@ export default defineConfig(({ command }) => ({
     biniPreviewPlugin()
   ],
   server: { 
-    port: 3000, 
+    port: biniConfig.port || 3000, 
     open: true,
-    host: 'localhost',
-    cors: true
+    host: biniConfig.host || 'localhost',
+    cors: true,
+    hmr: {
+      host: process.env.HMR_HOST || 'localhost',
+      port: process.env.HMR_PORT || 3000
+    }
   },
   preview: {
-    port: 3000,
+    port: biniConfig.port || 3000,
     open: true,
     host: '0.0.0.0',
     cors: true
   },
   build: { 
-    outDir: '.bini/dist',
-    sourcemap: true,
+    outDir: '.bini/dist',  // FIXED: Ensure it goes to .bini/dist
+    sourcemap: biniConfig.build?.sourcemap !== false,
     emptyOutDir: true,
     rollupOptions: {
       output: {
@@ -2871,6 +3039,7 @@ export default defineConfig(({ command }) => ({
   secureWriteFile(path.join(projectPath, `bini.config.${configExt}`), `export default {
   outDir: '.bini',
   port: 3000,
+  host: 'localhost',
   api: {
     dir: 'src/api',
     bodySizeLimit: '1mb'
@@ -3031,9 +3200,10 @@ async function generateProject(projectName, answers, flags = {}) {
     const packageJson = generatePackageJson(projectName, useTypeScript, answers.styling);
     secureWriteFile(path.join(projectPath, "package.json"), JSON.stringify(packageJson, null, 2), { force: flags.force });
 
-    // Production Server with Fastify - FIXED for client-side routing
+    // Production Server with Fastify - FIXED with proper ES modules and build validation
     secureWriteFile(path.join(projectPath, "api-server.js"),
 `#!/usr/bin/env node
+
 import fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
 import fastifyHelmet from '@fastify/helmet';
@@ -3044,7 +3214,7 @@ import path from 'path';
 import { createServer } from 'net';
 import os from 'os';
 import { spawn } from 'child_process';
-import fs from 'fs/promises';
+import fs from 'fs';
 import zlib from 'zlib';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -3056,9 +3226,7 @@ const ENABLE_CORS = process.env.CORS_ENABLED === 'true';
 const RATE_LIMIT = parseInt(process.env.RATE_LIMIT || '100');
 
 const handlerCache = new Map();
-const gzipCache = new Map();
-
-let distPath = path.join(__dirname, '.bini/dist');
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
 let isShuttingDown = false;
 const activeRequests = new Set();
@@ -3086,6 +3254,31 @@ async function shutdown(signal) {
       process.exit(0);
     }
   }, 100);
+}
+
+function validateDistPath(distPath) {
+  const resolvedPath = path.resolve(process.cwd(), distPath);
+  
+  // Check if path exists and is a directory
+  if (!fs.existsSync(resolvedPath)) {
+    throw new Error(\`Build directory not found: \${resolvedPath}\\nRun: npm run build\`);
+  }
+
+  const stats = fs.statSync(resolvedPath);
+  if (!stats.isDirectory()) {
+    throw new Error(\`Build path is not a directory: \${resolvedPath}\`);
+  }
+
+  // Check for essential files
+  const essentialFiles = ['index.html'];
+  for (const file of essentialFiles) {
+    const filePath = path.join(resolvedPath, file);
+    if (!fs.existsSync(filePath)) {
+      console.warn(\`⚠️  Expected file not found: \${file}\`);
+    }
+  }
+
+  return resolvedPath;
 }
 
 async function getAvailablePort(startPort = DEFAULT_PORT) {
@@ -3160,15 +3353,22 @@ function getNetworkIp() {
 }
 
 async function loadApiHandler(routePath) {
-  if (handlerCache.has(routePath)) {
-    return handlerCache.get(routePath);
+  const now = Date.now();
+  const cached = handlerCache.get(routePath);
+  
+  // Check if cached handler is still valid
+  if (cached && now - cached.timestamp < CACHE_TTL) {
+    return cached.handler;
   }
 
   try {
     const apiDir = path.join(process.cwd(), 'src/api');
     const handlerPath = path.join(apiDir, routePath + '.js');
     
-    await fs.access(handlerPath);
+    // Use fs.existsSync for sync file check
+    if (!fs.existsSync(handlerPath)) {
+      return null;
+    }
     
     const handlerUrl = new URL('file://' + handlerPath).href;
     const handlerModule = await import(handlerUrl + '?t=' + Math.random());
@@ -3178,7 +3378,8 @@ async function loadApiHandler(routePath) {
       throw new Error('Invalid API handler');
     }
     
-    handlerCache.set(routePath, handler);
+    // Cache the handler with timestamp
+    handlerCache.set(routePath, { handler, timestamp: now });
     return handler;
   } catch (error) {
     if (error.code === 'ENOENT') return null;
@@ -3187,6 +3388,9 @@ async function loadApiHandler(routePath) {
 }
 
 async function createFastifyServer() {
+  // Validate build directory before starting server
+  const distPath = validateDistPath('.bini/dist');
+
   const app = fastify({
     logger: NODE_ENV === 'development' ? {
       level: 'info',
@@ -3258,6 +3462,12 @@ async function createFastifyServer() {
     const reqId = \`\${Date.now()}-\${Math.random().toString(36).substr(2, 9)}\`;
     activeRequests.add(reqId);
     req.requestId = reqId;
+    
+    // Add security headers
+    reply.header('X-Powered-By', 'Bini.js');
+    reply.header('X-Content-Type-Options', 'nosniff');
+    reply.header('X-Frame-Options', 'DENY');
+    reply.header('X-XSS-Protection', '1; mode=block');
   });
 
   app.addHook('onResponse', async (req, reply) => {
@@ -3445,9 +3655,14 @@ async function createFastifyServer() {
     // For client-side routes, serve index.html
     try {
       const indexHtmlPath = path.join(distPath, 'index.html');
-      await fs.access(indexHtmlPath);
+      // Use fs.existsSync for sync check
+      if (!fs.existsSync(indexHtmlPath)) {
+        throw new Error('Index.html not found');
+      }
       reply.type('text/html');
-      return await fs.readFile(indexHtmlPath, 'utf-8');
+      // Use fs.promises.readFile for async file reading
+      const content = await fs.promises.readFile(indexHtmlPath, 'utf-8');
+      return content;
     } catch (error) {
       reply.status(404).type('text/html');
       return \`
@@ -3523,7 +3738,9 @@ async function startServer() {
   } catch (error) {
     console.error('❌ Failed to start server:', error.message);
     
-    if (error.code === 'EADDRINUSE') {
+    if (error.message.includes('Build directory not found')) {
+      console.error('💡 Solution: Run npm run build first');
+    } else if (error.code === 'EADDRINUSE') {
       console.error(\`💡 Port \${DEFAULT_PORT} is already in use. Try:\`);
       console.error(\`   - Using a different port: PORT=3001 npm start\`);
       console.error(\`   - Finding what's using the port: npx kill-port \${DEFAULT_PORT}\`);
