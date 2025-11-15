@@ -75,25 +75,20 @@ jobs:
 
   publish-npm:
     name: Publish to NPM
-    needs:
-      - check-version
-      - create-release
+    needs: check-version
     if: needs.check-version.outputs.version_changed == 'true'
     runs-on: ubuntu-latest
     environment: production
-    permissions:
-      id-token: write
-      contents: read
     
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
       
-      - name: Setup Node.js
+      - name: Setup Node.js with OIDC
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-          registry-url: https://registry.npmjs.org
+          registry-url: 'https://registry.npmjs.org/'
       
       - name: Install dependencies
         run: npm install --legacy-peer-deps
@@ -101,10 +96,8 @@ jobs:
       - name: Build package
         run: npm run build --if-present
       
-      - name: Publish to NPM with OIDC
-        run: npm publish
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Publish to NPM using OIDC
+        run: npm publish --provenance
       
       - name: Success
         run: echo "✅ Published create-bini-app@${{ needs.check-version.outputs.new_version }} to NPM"
