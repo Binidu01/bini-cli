@@ -518,3 +518,4 @@ MIT – Free for personal and commercial use.
 **Bini.js v9.1.6** — Built with ❤️ using Vite, React, and Fastify
 
 [GitHub](https://github.com/Binidu01/bini-cli) · [Documentation](https://bini.js.org) · [npm](https://npmjs.com/package/create-bini-app) · [Sponsor](https://github.com/sponsors/Binidu01)
+
