@@ -22,29 +22,24 @@ jobs:
       - name: Get package info
         id: package
         run: |
-          NAME=$(node -p "require('./package.json').name")
           VERSION=$(node -p "require('./package.json').version")
-          echo "name=$NAME" >> $GITHUB_OUTPUT
           echo "new_version=$VERSION" >> $GITHUB_OUTPUT
-          echo "Package: $NAME@$VERSION"
+          echo "Version: $VERSION"
       
-      - name: Get latest release tag
+      - name: Get latest tag
         id: tags
         run: |
           git fetch --tags
           LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || echo "0.0.0")
           echo "latest_tag=$LATEST_TAG" >> $GITHUB_OUTPUT
-          echo "Latest tag: v$LATEST_TAG"
       
       - name: Compare versions
         id: check
         run: |
           if [ "${{ steps.package.outputs.new_version }}" != "${{ steps.tags.outputs.latest_tag }}" ]; then
             echo "changed=true" >> $GITHUB_OUTPUT
-            echo "🚀 Version changed: v${{ steps.tags.outputs.latest_tag }} → v${{ steps.package.outputs.new_version }}"
           else
             echo "changed=false" >> $GITHUB_OUTPUT
-            echo "📦 Version unchanged: v${{ steps.package.outputs.new_version }}"
           fi
 
   publish-npm:
@@ -66,26 +61,18 @@ jobs:
       - name: Install dependencies
         run: npm install --legacy-peer-deps
       
-      - name: Verify package
-        run: |
-          echo "📦 Package: $(node -p "require('./package.json').name")"
-          echo "🏷️ Version: $(node -p "require('./package.json').version")"
-          echo "📝 Description: $(node -p "require('./package.json').description || 'No description'")"
-      
       - name: Run pre-publish checks
         run: |
           node create-bini-app.js --version
           npm run build --if-present
       
-      - name: Publish to NPM
+      - name: Publish to NPM with 2FA bypass token
         run: npm publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
       
-      - name: Verify publication
-        run: |
-          echo "✅ Successfully published ${{ needs.check-version.outputs.name }}@${{ needs.check-version.outputs.new_version }}"
-          echo "🔗 View at: https://www.npmjs.com/package/${{ needs.check-version.outputs.name }}"
+      - name: Success
+        run: echo "✅ Published create-bini-app@${{ needs.check-version.outputs.new_version }}"
 
   create-release:
     name: Create GitHub Release
@@ -107,7 +94,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ needs.check-version.outputs.new_version }}
-          name: ${{ needs.check-version.outputs.name }} v${{ needs.check-version.outputs.new_version }}
+          name: create-bini-app v${{ needs.check-version.outputs.new_version }}
           draft: false
           prerelease: false
           generate_release_notes: true
