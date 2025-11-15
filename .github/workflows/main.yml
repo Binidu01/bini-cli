@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  packages: write
   id-token: write
 
 jobs:
@@ -79,6 +80,7 @@ jobs:
       - create-release
     if: needs.check-version.outputs.version_changed == 'true'
     runs-on: ubuntu-latest
+    environment: production
     permissions:
       id-token: write
       contents: read
@@ -93,9 +95,6 @@ jobs:
           node-version: '22'
           registry-url: https://registry.npmjs.org
       
-      - name: Update npm
-        run: npm install -g npm@latest
-      
       - name: Install dependencies
         run: npm install --legacy-peer-deps
       
@@ -104,6 +103,8 @@ jobs:
       
       - name: Publish to NPM with OIDC
         run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
       
       - name: Success
         run: echo "✅ Published create-bini-app@${{ needs.check-version.outputs.new_version }} to NPM"
