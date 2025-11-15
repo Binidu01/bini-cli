@@ -1,0 +1,111 @@
+name: Release on Push to Main
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  check-version:
+    name: Check if Version Changed
+    runs-on: ubuntu-latest
+    outputs:
+      version_changed: ${{ steps.check.outputs.changed }}
+      new_version: ${{ steps.package.outputs.version }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Get package version
+        id: package
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Current version: $VERSION"
+      
+      - name: Get latest tag
+        id: tags
+        run: |
+          git fetch --tags
+          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || echo "0.0.0")
+          echo "latest_tag=$LATEST_TAG" >> $GITHUB_OUTPUT
+          echo "Latest tag: $LATEST_TAG"
+      
+      - name: Compare versions
+        id: check
+        run: |
+          CURRENT=${{ steps.package.outputs.version }}
+          LATEST=${{ steps.tags.outputs.latest_tag }}
+          echo "Comparing: $CURRENT vs $LATEST"
+          if [ "$CURRENT" != "$LATEST" ]; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+            echo "✅ Version changed"
+          else
+            echo "changed=false" >> $GITHUB_OUTPUT
+            echo "⏭️  Version unchanged"
+          fi
+
+  create-release:
+    name: Create GitHub Release
+    needs: check-version
+    if: needs.check-version.outputs.version_changed == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.check-version.outputs.new_version }}
+          name: create-bini-app v${{ needs.check-version.outputs.new_version }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  publish-npm:
+    name: Publish to NPM
+    needs: 
+      - check-version
+      - create-release
+    if: needs.check-version.outputs.version_changed == 'true'
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: https://registry.npmjs.org
+      
+      - name: Install dependencies
+        run: npm install --legacy-peer-deps
+      
+      - name: Run pre-publish checks
+        run: |
+          node create-bini-app.js --version
+          npm run build --if-present
+      
+      - name: Publish to NPM
+        run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      
+      - name: Success
+        run: echo "✅ Published create-bini-app@${{ needs.check-version.outputs.new_version }} to NPM"
