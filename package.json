@@ -1,7 +1,7 @@
 {
   "name": "create-bini-app",
   "type": "module",
-  "version": "9.1.6",
+  "version": "9.2.0",
   "description": "Bini.js: Ultra-high-performance enterprise-grade React framework with automatic source code protection, Next.js-like file-based routing, head-only SSR, production-ready API routes with TypeScript support, Fastify server, OIDC authentication, and built-in security middleware. The fastest, most secure React framework alternative for mission-critical SaaS, fintech, healthcare, and ecommerce applications requiring zero-config setup and source code obfuscation.",
   "tagline": "Enterprise React Framework: Next.js-like DX meets source code protection, powered by Vite 6 and Fastify 4, with 52% faster startup and OIDC security",
   "long_description": "Bini.js v9.1.6 is the ultimate enterprise-grade React framework combining Vite 6's lightning-fast build system with automatic source code protection and production-grade Fastify 4 server. Build secure, SEO-optimized applications with zero-config file-based routing, full-featured TypeScript API routes, integrated security middleware, and comprehensive monitoring. Features 52% faster dev startup, 77% faster hot reload, 75% faster API routes, and 39% lower memory usage. Ideal for mission-critical SaaS platforms, fintech applications, healthcare systems, ecommerce stores, and enterprise admin dashboards requiring extreme performance, source code security, and compliance readiness.",
