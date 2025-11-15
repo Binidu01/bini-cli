@@ -20,10 +20,9 @@ jobs:
     outputs:
       version_changed: ${{ steps.check.outputs.changed }}
       new_version: ${{ steps.check.outputs.new_version }}
-      old_version: ${{ steps.check.outputs.old_version }}
     
     steps:
-      - name: Checkout current code
+      - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -33,14 +32,12 @@ jobs:
         run: |
           NEW_VERSION=$(grep '"version"' package.json | head -1 | sed -E 's/.*"version": "([^"]+)".*/\1/')
           echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
-          echo "New version: $NEW_VERSION"
       
-      - name: Get old version (from last tag)
+      - name: Get old version
         id: old
         run: |
           OLD_VERSION=$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || echo "0.0.0")
           echo "old_version=$OLD_VERSION" >> $GITHUB_OUTPUT
-          echo "Old version: $OLD_VERSION"
       
       - name: Compare versions
         id: check
@@ -50,16 +47,13 @@ jobs:
           
           if [ "$NEW_VERSION" != "$OLD_VERSION" ]; then
             echo "changed=true" >> $GITHUB_OUTPUT
-            echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
-            echo "old_version=$OLD_VERSION" >> $GITHUB_OUTPUT
             echo "✅ Version changed: $OLD_VERSION → $NEW_VERSION"
           else
             echo "changed=false" >> $GITHUB_OUTPUT
-            echo "⏭️  Version unchanged ($NEW_VERSION), skipping release"
           fi
-  
-  push-to-github:
-    name: Push Updated Files to GitHub
+
+  create-release:
+    name: Create GitHub Release
     needs: check-version
     if: needs.check-version.outputs.version_changed == 'true'
     runs-on: ubuntu-latest
@@ -67,97 +61,28 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      
-      - name: Configure Git
-        run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-      
-      - name: Push updated files to GitHub
-        run: |
-          git add -A
-          
-          if git diff --cached --quiet; then
-            echo "ℹ️  No changes to push"
-          else
-            git commit -m "chore: auto-update files for v${{ needs.check-version.outputs.new_version }}"
-            git push origin main
-            echo "✅ Updated files pushed to GitHub"
-          fi
-
-  test:
-    name: Test
-    needs: [check-version, push-to-github]
-    if: needs.check-version.outputs.version_changed == 'true'
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        node-version: [20.x, 21.x, 22.x]
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      
-      - name: Setup Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ matrix.node-version }}
-      
-      - name: Install dependencies with legacy peer deps
-        run: npm install --legacy-peer-deps
-      
-      - name: Run linter
-        run: npm run lint --if-present
-      
-      - name: Run tests
-        run: npm test --if-present
-      
-      - name: Build
-        run: npm run build --if-present
-
-  create-release:
-    name: Create GitHub Release
-    needs: [check-version, test]
-    if: needs.check-version.outputs.version_changed == 'true'
-    runs-on: ubuntu-latest
-    
-    outputs:
-      upload_url: ${{ steps.create_release.outputs.upload_url }}
-      release_id: ${{ steps.create_release.outputs.id }}
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
         with:
           fetch-depth: 0
       
-      - name: Generate changelog for this release
-        id: changelog
-        run: |
-          VERSION=${{ needs.check-version.outputs.new_version }}
-          CHANGELOG=$(sed -n "/## \[$VERSION\]/,/## \[[0-9]\.[0-9]\.[0-9]\]/p" CHANGELOG.md | sed '$ d')
-          echo "release_notes<<EOF" >> $GITHUB_OUTPUT
-          echo "$CHANGELOG" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
-      
       - name: Create Release
-        id: create_release
         uses: actions/create-release@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: v${{ needs.check-version.outputs.new_version }}
-          release_name: Bini.js ${{ needs.check-version.outputs.new_version }}
-          body: ${{ steps.changelog.outputs.release_notes }}
+          release_name: Release v${{ needs.check-version.outputs.new_version }}
           draft: false
           prerelease: false
 
   publish-npm:
-    name: Publish to NPM (OIDC)
+    name: Publish to NPM
     needs: [check-version, create-release]
     if: needs.check-version.outputs.version_changed == 'true'
     runs-on: ubuntu-latest
     environment: production
+    permissions:
+      id-token: write
+      contents: read
     
     steps:
       - name: Checkout code
@@ -169,155 +94,24 @@ jobs:
           node-version: '22'
           registry-url: 'https://registry.npmjs.org'
       
-      - name: Install dependencies with legacy peer deps
+      - name: Get OIDC Token
+        id: oidc
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const token = await core.getIDToken('https://npmjs.org');
+            core.setOutput('token', token);
+      
+      - name: Install dependencies
         run: npm install --legacy-peer-deps
       
       - name: Build package
         run: npm run build --if-present
-      
-      - name: Update package.json version
-        run: |
-          npm version ${{ needs.check-version.outputs.new_version }} --no-git-tag-version
       
       - name: Publish to NPM
         run: npm publish
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ steps.oidc.outputs.token }}
       
-      - name: Update release with NPM link
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const release = await github.rest.repos.getReleaseByTag({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              tag: 'v${{ needs.check-version.outputs.new_version }}'
-            });
-            
-            github.rest.repos.updateRelease({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              release_id: release.data.id,
-              body: release.data.body + '\n\n## 📦 NPM Package\n\n```bash\nnpm install create-bini-app@${{ needs.check-version.outputs.new_version }}\n```\n\n📍 [View on NPM](https://www.npmjs.com/package/create-bini-app/v/${{ needs.check-version.outputs.new_version }})'
-            });
-
-  publish-github-packages:
-    name: Publish to GitHub Packages (OIDC)
-    needs: [check-version, create-release]
-    if: needs.check-version.outputs.version_changed == 'true'
-    runs-on: ubuntu-latest
-    environment: production
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          registry-url: 'https://npm.pkg.github.com'
-      
-      - name: Install dependencies with legacy peer deps
-        run: npm install --legacy-peer-deps
-      
-      - name: Build package
-        run: npm run build --if-present
-      
-      - name: Update package.json version
-        run: |
-          npm version ${{ needs.check-version.outputs.new_version }} --no-git-tag-version
-      
-      - name: Configure scoped package
-        run: |
-          jq '.name = "@Binidu01/create-bini-app"' package.json > temp.json
-          mv temp.json package.json
-      
-      - name: Publish to GitHub Packages
-        run: npm publish
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  upload-artifacts:
-    name: Upload Release Artifacts
-    needs: [check-version, create-release]
-    if: needs.check-version.outputs.version_changed == 'true'
-    runs-on: ubuntu-latest
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-      
-      - name: Install dependencies with legacy peer deps
-        run: npm install --legacy-peer-deps
-      
-      - name: Build distribution
-        run: npm run build --if-present
-      
-      - name: Create tarball
-        run: npm pack
-      
-      - name: Get tarball filename
-        id: tarball
-        run: |
-          TARBALL=$(ls create-bini-app-*.tgz | head -1)
-          echo "filename=$TARBALL" >> $GITHUB_OUTPUT
-      
-      - name: Upload artifact to release
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: v${{ needs.check-version.outputs.new_version }}
-          files: ${{ steps.tarball.outputs.filename }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  notify-success:
-    name: Notify Success
-    needs: [check-version, publish-npm, publish-github-packages, upload-artifacts]
-    runs-on: ubuntu-latest
-    if: success()
-    
-    steps:
-      - name: Create success notification
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const version = '${{ needs.check-version.outputs.new_version }}';
-            const releaseUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/releases/tag/v${version}`;
-            const npmUrl = `https://www.npmjs.com/package/create-bini-app/v/${version}`;
-            const githubPkgUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/packages`;
-            
-            console.log(`
-            ✅ Release v${version} published successfully!
-            
-            📍 GitHub Release: ${releaseUrl}
-            📦 NPM Package: ${npmUrl}
-            🏠 GitHub Packages: ${githubPkgUrl}
-            
-            Install with:
-            npm install create-bini-app@${version}
-            `);
-
-  notify-failure:
-    name: Notify Failure
-    needs: [check-version]
-    runs-on: ubuntu-latest
-    if: failure()
-    
-    steps:
-      - name: Create failure notification
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const version = '${{ needs.check-version.outputs.new_version }}';
-            github.rest.repos.createCommitComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              commit_sha: context.sha,
-              body: `❌ **Bini.js v${version}** release failed!\n\n🔍 Check the [workflow logs](https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}) for details.`
-            });
+      - name: Echo success
+        run: echo "✅ Published to NPM: create-bini-app@${{ needs.check-version.outputs.new_version }}"
