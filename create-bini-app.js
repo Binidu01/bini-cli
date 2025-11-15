@@ -730,7 +730,7 @@ export default {
   displayBiniStartup
 };`);
 
-  // Router Plugin - OPTIMIZED: Removed blocking config() method
+  // Router Plugin - FIXED with race condition protection
   secureWriteFile(path.join(pluginsPath, "router.js"), `import fs from 'fs';
 import path from 'path';
 
@@ -1086,32 +1086,10 @@ export function biniRouterPlugin() {
   return {
     name: 'bini-router-plugin',
     
-    // ⚡ OPTIMIZED: Remove blocking config() method - moved to configureServer
-    // config() {
-    //   const appDir = path.join(process.cwd(), 'src/app');
-    //   
-    //   if (!fs.existsSync(appDir)) {
-    //     console.warn('⚠️  src/app directory not found - file-based routing disabled');
-    //     return;
-    //   }
-    //   
-    //   const appTsxPath = path.join(process.cwd(), 'src/App.tsx');
-    //   const appJsxPath = path.join(process.cwd(), 'src/App.jsx');
-    //   
-    //   const isTypeScript = fs.existsSync(appTsxPath);
-    //   const targetPath = isTypeScript ? appTsxPath : appJsxPath;
-    //   
-    //   if (fs.existsSync(appDir)) {
-    //     const newCode = generateRouterCode(appDir, isTypeScript);
-    //     fs.writeFileSync(targetPath, newCode, 'utf8');
-    //     lastRoutes = newCode;
-    //   }
-    // },
-    
-    configureServer(server) {
+    config() {
       const appDir = path.join(process.cwd(), 'src/app');
       
-      // ⚡ OPTIMIZED: Early return if no app directory
+      // ADDED: Check if app directory exists
       if (!fs.existsSync(appDir)) {
         console.warn('⚠️  src/app directory not found - file-based routing disabled');
         return;
@@ -1123,19 +1101,20 @@ export function biniRouterPlugin() {
       const isTypeScript = fs.existsSync(appTsxPath);
       const targetPath = isTypeScript ? appTsxPath : appJsxPath;
       
-      // ⚡ OPTIMIZED: Defer route generation (non-blocking)
-      setImmediate(() => {
-        try {
-          if (fs.existsSync(appDir)) {
-            const newCode = generateRouterCode(appDir, isTypeScript);
-            fs.writeFileSync(targetPath, newCode, 'utf8');
-            lastRoutes = newCode;
-          }
-        } catch (error) {
-          console.error('Route generation error:', error.message);
-        }
-      });
-
+      if (fs.existsSync(appDir)) {
+        const newCode = generateRouterCode(appDir, isTypeScript);
+        fs.writeFileSync(targetPath, newCode, 'utf8');
+        lastRoutes = newCode;
+      }
+    },
+    
+    configureServer(server) {
+      const appDir = path.join(process.cwd(), 'src/app');
+      
+      if (!fs.existsSync(appDir)) {
+        return;
+      }
+      
       server.watcher.add(appDir);
       
       const regenerateApp = async (reason = 'File changed') => {
@@ -1214,7 +1193,6 @@ export function biniRouterPlugin() {
       });
     },
     
-    // ⚡ OPTIMIZED: Keep buildStart for production builds only
     buildStart() {
       const appDir = path.join(process.cwd(), 'src/app');
       const appTsxPath = path.join(process.cwd(), 'src/App.tsx');
@@ -1687,14 +1665,27 @@ export function biniBadgePlugin() {
     }
   }
 }`);
-  // SSR Plugin
-  secureWriteFile(path.join(pluginsPath, "ssr.js"), `const BINIJS_VERSION = "${BINIJS_VERSION}";
+// SSR Plugin
+secureWriteFile(path.join(pluginsPath, "ssr.js"), `const BINIJS_VERSION = "${BINIJS_VERSION}";
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Vite-style logging formatter
+function formatViteLog(file, action = 'page reload') {
+  const t = new Date().toLocaleTimeString("en-US", { hour12: true, hour: "numeric", minute: "2-digit", second: "2-digit" });
+  const gy = "\x1b[90m";     // light gray (timestamp)
+  const c = "\x1b[36m";      // cyan [vite]
+  const r = "\x1b[0m";       // reset
+  const dg = "\x1b[2m\x1b[90m"; // darker gray (client)
+  const g = "\x1b[32m";      // green (page reload)
+  const lg = "\x1b[90m";     // light gray (file path)
+  
+  return \`\${gy}\${t}\${r} \${c}[vite]\${r} \${dg}(client)\${r} \${g}\${action}\${r} \${lg}\${file}\${r}\`;
+}
 
 function parseMetadata(layoutContent) {
   const metaTags = {
@@ -1828,6 +1819,9 @@ export function biniSSRPlugin() {
         
         server.watcher.on('change', (file) => {
           if (layoutFiles.includes(file)) {
+            // Show CLI notification when layout changes
+            console.log(formatViteLog('src/app/layout.tsx', 'page reload'));
+            
             setTimeout(() => {
               server.ws.send({
                 type: 'full-reload',
@@ -1938,6 +1932,9 @@ export function biniSSRPlugin() {
     
     handleHotUpdate({ server, file }) {
       if (file.endsWith('layout.tsx') || file.endsWith('layout.jsx')) {
+        // Remove the console.log from here to avoid duplicate notifications
+        // The notification is already shown in configureServer watcher
+        
         setTimeout(() => {
           server.ws.send({
             type: 'full-reload',
@@ -1950,18 +1947,31 @@ export function biniSSRPlugin() {
     }
   }
 }`);
+// API Plugin - UPDATED with silent operation and improved TypeScript support
+secureWriteFile(path.join(pluginsPath, "api.js"), `import fs from 'fs';
+import path from 'path';
+import { pathToFileURL } from 'url';
+import os from 'os';
 
-  // API Plugin - OPTIMIZED: Added early return for performance
-  secureWriteFile(path.join(pluginsPath, "api.js"), `import fs from 'fs'
-import path from 'path'
-import { pathToFileURL } from 'url'
-import os from 'os'
-
-const BINIJS_VERSION = "${BINIJS_VERSION}";
+const BINIJS_VERSION = "9.1.5";
 
 const rateLimit = new Map();
 const handlerCache = new Map();
 const CACHE_TTL = 5 * 60 * 1000;
+const hmrOutputState = new Map(); // Track HMR server output state
+
+// Vite-style logging formatter
+function formatViteLog(file, action = 'page reload') {
+  const t = new Date().toLocaleTimeString("en-US", { hour12: true, hour: "numeric", minute: "2-digit", second: "2-digit" });
+  const gy = "\\x1b[90m";     // light gray (timestamp)
+  const c = "\\x1b[36m";      // cyan [vite]
+  const r = "\\x1b[0m";       // reset
+  const dg = "\\x1b[2m\\x1b[90m"; // darker gray (client)
+  const g = "\\x1b[32m";      // green (page reload)
+  const lg = "\\x1b[90m";     // light gray (file path)
+  
+  return \`\${gy}\${t}\${r} \${c}[vite]\${r} \${dg}(client)\${r} \${g}\${action}\${r} \${lg}src/app/api/\${file}\${r}\`;
+}
 
 function checkRateLimit(ip) {
   const now = Date.now();
@@ -1992,12 +2002,6 @@ async function loadApiHandler(routePath, viteServer) {
 
   try {
     const apiDir = path.join(process.cwd(), 'src/app/api');
-    
-    // ⚡ OPTIMIZED: Early return if no API directory
-    if (!fs.existsSync(apiDir)) {
-      return null;
-    }
-    
     const extensions = ['.js', '.ts', '.mjs', '.cjs'];
     let handlerPath = null;
     
@@ -2019,7 +2023,7 @@ async function loadApiHandler(routePath, viteServer) {
     if (viteServer && handlerPath.endsWith('.ts')) {
       // Use Vite's transform to handle TypeScript files in development
       try {
-        // Transform TypeScript to JavaScript using Vite - no console output
+        // Transform TypeScript to JavaScript using Vite
         const transformed = await viteServer.transformRequest(handlerPath);
         
         if (!transformed || !transformed.code) {
@@ -2031,7 +2035,7 @@ async function loadApiHandler(routePath, viteServer) {
         handlerModule = await import(moduleUrl);
         
       } catch (transformError) {
-        // Fallback: try direct import with query parameter - no console output
+        // Fallback: try direct import with query parameter
         try {
           const handlerUrl = pathToFileURL(handlerPath).href + '?t=' + Date.now();
           handlerModule = await import(handlerUrl);
@@ -2098,59 +2102,85 @@ async function loadApiHandler(routePath, viteServer) {
   }
 }
 
-// Enhanced file watcher for hot reload - silent version
+// Enhanced file watcher with proper HMR triggering
 function setupFileWatcher(viteServer) {
   const apiDir = path.join(process.cwd(), 'src/app/api');
-  
-  // ⚡ OPTIMIZED: Early return if no API directory
-  if (!fs.existsSync(apiDir)) {
-    return;
-  }
+  const normalizedApiDir = apiDir.replace(/\\\\/g, '/');
   
   if (viteServer && fs.existsSync(apiDir)) {
+    // Add the API directory to Vite's watcher
     viteServer.watcher.add(apiDir);
     
-    const handleApiFileChange = (file) => {
-      if (file.includes('src/app/api') && /\\.(js|ts)$/.test(file)) {
-        const routePath = path.relative(apiDir, file).replace(/\\.(js|ts)$/, '');
+    const handleApiFileChange = (file, action) => {
+      // Normalize file path to use forward slashes
+      const normalizedFile = file.replace(/\\\\/g, '/');
+      const normalizedApiDirCheck = normalizedApiDir.replace(/\\\\/g, '/');
+      
+      if (normalizedFile.includes(normalizedApiDirCheck) && /\\.(js|ts|mjs|cjs)$/.test(normalizedFile)) {
+        const routePath = path.relative(apiDir, file).replace(/\\\\/g, '/');
         
-        // Clear all related cache entries silently
+        // Clear all related cache entries
         const cacheKeys = Array.from(handlerCache.keys());
         cacheKeys.forEach(key => {
-          if (key.includes(routePath) || key.includes('vite')) {
+          if (key.includes(routePath.replace(/\\.(js|ts|mjs|cjs)$/, '')) || key.includes('vite')) {
             handlerCache.delete(key);
           }
         });
         
-        // Send silent HMR event (no console output)
+        // Show custom output only for add/delete actions
+        if (action === 'add' || action === 'unlink' || action === 'delete') {
+          console.log(formatViteLog(routePath, 'page reload'));
+        }
+        
+        // Send custom HMR event with action details
         viteServer.ws.send({
           type: 'custom',
           event: 'api-update',
           data: { 
             route: routePath,
             file: path.basename(file),
+            action: action,
             timestamp: Date.now()
           }
         });
+        
+        // Trigger full reload for new files or deletions
+        if (action === 'add' || action === 'unlink' || action === 'delete') {
+          setTimeout(() => {
+            viteServer.ws.send({
+              type: 'full-reload',
+              path: '*'
+            });
+          }, 50);
+        }
       }
     };
 
-    // Watch for all file operations silently
-    viteServer.watcher.on('change', (file) => handleApiFileChange(file));
-    viteServer.watcher.on('add', (file) => handleApiFileChange(file));
-    viteServer.watcher.on('unlink', (file) => handleApiFileChange(file));
+    // Watch for file operations with proper action types
+    viteServer.watcher.on('change', (file) => handleApiFileChange(file, 'edit'));
+    viteServer.watcher.on('add', (file) => handleApiFileChange(file, 'add'));
+    viteServer.watcher.on('unlink', (file) => handleApiFileChange(file, 'unlink'));
+    
+    // Handle directory changes
     viteServer.watcher.on('addDir', (dir) => {
-      if (dir.includes('src/app/api') && !dir.includes('node_modules')) {
-        // Clear cache silently for directory changes
-        const cacheKeys = Array.from(handlerCache.keys());
-        cacheKeys.forEach(key => handlerCache.delete(key));
+      const normalizedDir = dir.replace(/\\\\/g, '/');
+      if (normalizedDir.includes(normalizedApiDir) && !normalizedDir.includes('node_modules')) {
+        handlerCache.clear();
+        viteServer.ws.send({
+          type: 'full-reload',
+          path: '*'
+        });
       }
     });
+    
     viteServer.watcher.on('unlinkDir', (dir) => {
-      if (dir.includes('src/app/api') && !dir.includes('node_modules')) {
-        // Clear cache silently for directory changes
-        const cacheKeys = Array.from(handlerCache.keys());
-        cacheKeys.forEach(key => handlerCache.delete(key));
+      const normalizedDir = dir.replace(/\\\\/g, '/');
+      if (normalizedDir.includes(normalizedApiDir) && !normalizedDir.includes('node_modules')) {
+        handlerCache.clear();
+        viteServer.ws.send({
+          type: 'full-reload',
+          path: '*'
+        });
       }
     });
   }
@@ -2286,21 +2316,24 @@ export function biniAPIPlugin(options = {}) {
     name: 'bini-api-plugin',
     
     configureServer(server) {
-      const apiDir = path.join(process.cwd(), 'src/app/api');
-      
-      // ⚡ OPTIMIZED: Early return if no API directory
-      if (!fs.existsSync(apiDir)) {
-        return;
-      }
-      
       viteServer = server;
-      setupFileWatcher(viteServer);
+      
+      // Only setup file watcher if API routes exist
+      const apiDir = path.join(process.cwd(), 'src/app/api');
+      if (fs.existsSync(apiDir)) {
+        const files = fs.readdirSync(apiDir, { recursive: true });
+        const hasApiRoutes = files.some(file => /\\.(js|ts|mjs|cjs)$/.test(file) && !file.includes('node_modules'));
+        
+        if (hasApiRoutes) {
+          setupFileWatcher(viteServer);
+        }
+      }
       
       server.middlewares.use('/api', async (req, res) => {
         await handleApiRequest(req, res, viteServer);
       });
 
-      // Silent development middleware
+      // Development API info endpoint
       server.middlewares.use('/api/_dev', (req, res) => {
         res.setHeader('Content-Type', 'application/json');
         res.end(JSON.stringify({
@@ -2313,13 +2346,6 @@ export function biniAPIPlugin(options = {}) {
     },
     
     configurePreviewServer(server) {
-      const apiDir = path.join(process.cwd(), 'src/app/api');
-      
-      // ⚡ OPTIMIZED: Early return if no API directory
-      if (!fs.existsSync(apiDir)) {
-        return;
-      }
-      
       server.middlewares.use('/api', async (req, res) => {
         await handleApiRequest(req, res, null);
       });
@@ -2328,34 +2354,37 @@ export function biniAPIPlugin(options = {}) {
     buildStart() {
       const apiDir = path.join(process.cwd(), 'src/app/api');
       if (fs.existsSync(apiDir)) {
-        // Silent build logging
         try {
           const files = fs.readdirSync(apiDir, { recursive: true });
           const apiRoutes = files.filter(file => 
-            /\\.(js|ts)$/.test(file) && !file.includes('node_modules')
+            /\\.(js|ts|mjs|cjs)$/.test(file) && !file.includes('node_modules')
           );
-          // No console output during build
+          // Silent - no console output
         } catch (error) {
           // Silent error handling
         }
       }
     },
     
-    // Silent HMR for API routes
+    // Handle HMR updates for API routes
     handleHotUpdate({ file, server, modules }) {
-      if (file.includes('src/app/api') && /\\.(js|ts)$/.test(file)) {
+      const normalizedFile = file.replace(/\\\\/g, '/');
+      if (normalizedFile.includes('src/app/api') && /\\.(js|ts|mjs|cjs)$/.test(normalizedFile)) {
         const apiDir = path.join(process.cwd(), 'src/app/api');
-        const routePath = path.relative(apiDir, file).replace(/\\.(js|ts)$/, '');
+        const routePath = path.relative(apiDir, file).replace(/\\\\/g, '/');
         
-        // Clear all cache entries silently
+        // Clear all cache entries
         const cacheKeys = Array.from(handlerCache.keys());
         cacheKeys.forEach(key => {
-          if (key.includes(routePath) || key.includes('vite')) {
+          if (key.includes(routePath.replace(/\\.(js|ts|mjs|cjs)$/, '')) || key.includes('vite')) {
             handlerCache.delete(key);
           }
         });
         
-        // Send silent HMR event
+        // Show CLI output for file modifications
+        console.log(formatViteLog(routePath, 'page reload'));
+        
+        // Send custom HMR event
         server.ws.send({
           type: 'custom',
           event: 'api-update',
@@ -2367,32 +2396,34 @@ export function biniAPIPlugin(options = {}) {
           }
         });
 
-        // Silent full-reload fallback
+        // Trigger full reload for consistency
         setTimeout(() => {
           server.ws.send({
             type: 'full-reload',
             path: '*'
           });
-        }, 100);
+        }, 50);
+        
+        return [];
       }
       
       return modules;
     },
 
-    // Transform index.html to add silent API HMR client
+    // Transform index.html to add API HMR client
     transformIndexHtml(html) {
       if (process.env.NODE_ENV !== 'production') {
         const hmrScript = \`
           <script type="module">
-            // Silent API Hot Reload Client
+            // API Hot Reload Client
             if (import.meta.hot) {
               import.meta.hot.on('api-update', (data) => {
-                // Completely silent - no console logs or notifications
+                console.log('[API HMR]', data.action, data.route);
               });
             }
           </script>
         \`;
-        return html.replace('</body>', hmrScript + '</body>');
+        return html.replace('</body>', \`\${hmrScript}</body>\`);
       }
       return html;
     }
@@ -3687,7 +3718,7 @@ declare global {
 export {}`);
   }
 
-  // ⚡ OPTIMIZED: Vite config with performance improvements
+  // Updated Vite config with HTML minification and improved build settings
   secureWriteFile(path.join(projectPath, `vite.config.${configExt}`), `import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import fs from 'fs';
@@ -3707,17 +3738,11 @@ const isBuild = process.env.NODE_ENV === 'production';
 export default defineConfig(({ command }) => ({
   plugins: [
     react(),
-    // ⚡ OPTIMIZED: Critical plugins first
     biniRouterPlugin(),
     biniSSRPlugin(),
+    biniBadgePlugin(),
     biniAPIPlugin({ isPreview }),
     biniPreviewPlugin(),
-    // ⚡ OPTIMIZED: UI plugin last
-    {
-      ...biniBadgePlugin(),
-      apply: 'serve',
-      enforce: 'post'  // Load LAST (non-critical UI)
-    },
 
     // 💣 Post-build HTML one-liner
     {
@@ -3762,11 +3787,6 @@ export default defineConfig(({ command }) => ({
     open: true,
     host: biniConfig.host || 'localhost',
     cors: true,
-    // ⚡ OPTIMIZED: Native file watching (much faster)
-    watch: {
-      usePolling: false,  // Use native fs watchers instead of polling
-      ignored: ['**/node_modules/**', '**/.git/**', '**/.bini/**']
-    },
     hmr: {
       host: process.env.HMR_HOST || 'localhost',
       port: process.env.HMR_PORT || 3000,
@@ -3804,7 +3824,7 @@ export default defineConfig(({ command }) => ({
     devSourcemap: true,
   },
 }));`);
-
+  // UPDATED: API directory now inside app folder
   secureWriteFile(path.join(projectPath, `bini.config.${configExt}`), `export default {
   outDir: '.bini',
   port: 3000,
@@ -4000,38 +4020,35 @@ export default function handler(req, res) {
 }`, { force: flags.force });
     }
 
-// Production server - UPDATED with silent operation and improved TypeScript support
-secureWriteFile(path.join(projectPath, "api-server.js"), 
+     // Production server - UPDATED with silent operation and improved TypeScript support
+    secureWriteFile(path.join(projectPath, "api-server.js"), 
 `#!/usr/bin/env node
 
-import fastify from "fastify";
-import fastifyStatic from "@fastify/static";
-import fastifyHelmet from "@fastify/helmet";
-import fastifyCors from "@fastify/cors";
-import fastifyRateLimiter from "@fastify/rate-limit";
-import { fileURLToPath } from "url";
-import path from "path";
-import { createServer } from "net";
-import net from "net";
-import os from "os";
-import { spawn } from "child_process";
-import { promisify } from "util";
-import { exec as execCb } from "child_process";
-import fs from "fs";
-import zlib from "zlib";
-import { displayBiniStartup } from "./bini/internal/env-checker.js";
+import fastify from 'fastify';
+import fastifyStatic from '@fastify/static';
+import fastifyHelmet from '@fastify/helmet';
+import fastifyCors from '@fastify/cors';
+import fastifyRateLimiter from '@fastify/rate-limit';
+import { fileURLToPath } from 'url';
+import path from 'path';
+import { createServer } from 'net';
+import net from 'net';
+import os from 'os';
+import { spawn } from 'child_process';
+import { promisify } from 'util';
+import { exec as execCb } from 'child_process';
+import fs from 'fs';
+import zlib from 'zlib';
+import { displayBiniStartup } from './bini/internal/env-checker.js';
 
 const execp = promisify(execCb);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const NODE_ENV = process.env.NODE_ENV || "production";
-const DEFAULT_PORT = parseInt(
-  process.env.PORT || (NODE_ENV === "development" ? "3001" : "3000"),
-  10
-);
-const ENABLE_CORS = process.env.CORS_ENABLED === "true";
-const RATE_LIMIT = parseInt(process.env.RATE_LIMIT || "100", 10);
+const NODE_ENV = process.env.NODE_ENV || 'production';
+const DEFAULT_PORT = parseInt(process.env.PORT || (NODE_ENV === 'development' ? '3001' : '3000'), 10);
+const ENABLE_CORS = process.env.CORS_ENABLED === 'true';
+const RATE_LIMIT = parseInt(process.env.RATE_LIMIT || '100', 10);
 
 const handlerCache = new Map();
 const CACHE_TTL = 5 * 60 * 1000;
@@ -4039,8 +4056,8 @@ const CACHE_TTL = 5 * 60 * 1000;
 let isShuttingDown = false;
 const activeRequests = new Set();
 
-process.on("SIGTERM", () => shutdown("SIGTERM"));
-process.on("SIGINT", () => shutdown("SIGINT"));
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
 
 async function shutdown(signal) {
   if (isShuttingDown) return;
@@ -4063,9 +4080,7 @@ function validateDistPath(distPath) {
   const resolvedPath = path.resolve(process.cwd(), distPath);
 
   if (!fs.existsSync(resolvedPath)) {
-    throw new Error(
-      \`Build directory not found: \${resolvedPath}\\nRun: npm run build\`
-    );
+    throw new Error(\`Build directory not found: \${resolvedPath}\\nRun: npm run build\`);
   }
 
   const stats = fs.statSync(resolvedPath);
@@ -4073,7 +4088,7 @@ function validateDistPath(distPath) {
     throw new Error(\`Build path is not a directory: \${resolvedPath}\`);
   }
 
-  const essentialFiles = ["index.html"];
+  const essentialFiles = ['index.html'];
   for (const file of essentialFiles) {
     const filePath = path.join(resolvedPath, file);
     if (!fs.existsSync(filePath)) {
@@ -4090,15 +4105,14 @@ function delay(ms) {
 
 function getAllNetworkIps() {
   const interfaces = os.networkInterfaces();
-  const allIps = ["localhost"];
+  const allIps = ['localhost'];
 
   for (const name in interfaces) {
-    if (/docker|veth|br-|lo|loopback|vmnet|vbox|utun|tun|tap/i.test(name))
-      continue;
+    if (/docker|veth|br-|lo|loopback|vmnet|vbox|utun|tun|tap/i.test(name)) continue;
     for (const iface of interfaces[name]) {
       if (!iface) continue;
       if (iface.internal) continue;
-      if (iface.family === "IPv4") {
+      if (iface.family === 'IPv4') {
         allIps.push(iface.address);
       }
     }
@@ -4108,37 +4122,27 @@ function getAllNetworkIps() {
 
 function displayServerUrls(port) {
   const allIps = getAllNetworkIps();
-  console.log(
-    "  \\x1b[32m➜\\x1b[39m  Local:   \\x1b[36mhttp://localhost:" +
-      port +
-      "/\\x1b[39m"
-  );
+  console.log('  \\x1b[32m➜\\x1b[39m  Local:   \\x1b[36mhttp://localhost:' + port + '/\\x1b[39m');
   allIps.forEach((ip) => {
-    if (ip !== "localhost") {
-      console.log(
-        "  \\x1b[32m➜\\x1b[39m  Network: \\x1b[36mhttp://" +
-          ip +
-          ":" +
-          port +
-          "/\\x1b[39m"
-      );
+    if (ip !== 'localhost') {
+      console.log('  \\x1b[32m➜\\x1b[39m  Network: \\x1b[36mhttp://' + ip + ':' + port + '/\\x1b[39m');
     }
   });
 }
 
-async function isTcpConnectable(port, host = "127.0.0.1", timeout = 250) {
+async function isTcpConnectable(port, host = '127.0.0.1', timeout = 250) {
   return new Promise((resolve) => {
     const s = new net.Socket();
     let done = false;
     s.setTimeout(timeout);
 
-    s.once("connect", () => {
+    s.once('connect', () => {
       done = true;
       s.destroy();
       resolve(true);
     });
 
-    s.once("timeout", () => {
+    s.once('timeout', () => {
       if (!done) {
         done = true;
         s.destroy();
@@ -4146,7 +4150,7 @@ async function isTcpConnectable(port, host = "127.0.0.1", timeout = 250) {
       }
     });
 
-    s.once("error", () => {
+    s.once('error', () => {
       if (!done) {
         done = true;
         s.destroy();
@@ -4159,9 +4163,7 @@ async function isTcpConnectable(port, host = "127.0.0.1", timeout = 250) {
     } catch (e) {
       if (!done) {
         done = true;
-        try {
-          s.destroy();
-        } catch (_) {}
+        try { s.destroy(); } catch (_) {}
         resolve(false);
       }
     }
@@ -4169,11 +4171,11 @@ async function isTcpConnectable(port, host = "127.0.0.1", timeout = 250) {
 }
 
 async function isPortBusyOnLoopback(port, timeout = 200) {
-  const v4 = await isTcpConnectable(port, "127.0.0.1", timeout);
+  const v4 = await isTcpConnectable(port, '127.0.0.1', timeout);
   if (v4) return true;
 
   try {
-    const v6 = await isTcpConnectable(port, "::1", timeout);
+    const v6 = await isTcpConnectable(port, '::1', timeout);
     return v6;
   } catch {
     return false;
@@ -4182,15 +4184,10 @@ async function isPortBusyOnLoopback(port, timeout = 200) {
 
 async function getPidsListeningOnPort(port) {
   try {
-    if (process.platform === "win32") {
-      const { stdout } = await execp(\`netstat -ano | findstr :\${port}\`, {
-        timeout: 3000,
-      });
+    if (process.platform === 'win32') {
+      const { stdout } = await execp(\`netstat -ano | findstr :\${port}\`, { timeout: 3000 });
       if (!stdout) return [];
-      const lines = stdout
-        .split(/\\r?\\n/)
-        .map((l) => l.trim())
-        .filter(Boolean);
+      const lines = stdout.split(/\\r?\\n/).map(l => l.trim()).filter(Boolean);
       const pids = new Set();
       for (const line of lines) {
         const m = line.match(/\\s+LISTENING\\s+(\\d+)$/);
@@ -4199,10 +4196,7 @@ async function getPidsListeningOnPort(port) {
       return Array.from(pids);
     } else {
       try {
-        const { stdout } = await execp(
-          \`lsof -nP -iTCP:\${port} -sTCP:LISTEN -Fp\`,
-          { timeout: 3000 }
-        );
+        const { stdout } = await execp(\`lsof -nP -iTCP:\${port} -sTCP:LISTEN -Fp\`, { timeout: 3000 });
         if (!stdout) return [];
         const pids = new Set();
         for (const line of stdout.split(/\\r?\\n/)) {
@@ -4212,9 +4206,7 @@ async function getPidsListeningOnPort(port) {
         return Array.from(pids);
       } catch {
         try {
-          const { stdout } = await execp(\`ss -tulpn | grep :\${port} || true\`, {
-            timeout: 3000,
-          });
+          const { stdout } = await execp(\`ss -tulpn | grep :\${port} || true\`, { timeout: 3000 });
           if (!stdout) return [];
           const pids = new Set();
           for (const line of stdout.split(/\\r?\\n/)) {
@@ -4234,27 +4226,19 @@ async function getPidsListeningOnPort(port) {
 
 async function getCommandLineForPid(pid) {
   try {
-    if (process.platform === "win32") {
-      const { stdout } = await execp(
-        \`powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \\\\\\"ProcessId=\${pid}\\\\\\" | Select-Object -ExpandProperty CommandLine"\`,
-        { timeout: 3000 }
-      );
-      return (stdout || "").trim();
+    if (process.platform === 'win32') {
+      const { stdout } = await execp(\`powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \\\\\\"ProcessId=\${pid}\\\\\\" | Select-Object -ExpandProperty CommandLine"\`, { timeout: 3000 });
+      return (stdout || '').trim();
     } else {
-      const { stdout } = await execp(\`ps -p \${pid} -o args=\`, {
-        timeout: 3000,
-      });
-      return (stdout || "").trim();
+      const { stdout } = await execp(\`ps -p \${pid} -o args=\`, { timeout: 3000 });
+      return (stdout || '').trim();
     }
   } catch {
-    return "";
+    return '';
   }
 }
 
-async function portOwnedByDisallowedProcess(
-  port,
-  denyPatterns = [/next/i, /vite/i, /webpack/i]
-) {
+async function portOwnedByDisallowedProcess(port, denyPatterns = [/next/i, /vite/i, /webpack/i]) {
   const pids = await getPidsListeningOnPort(port);
   if (!pids || pids.length === 0) return false;
   for (const pid of pids) {
@@ -4268,17 +4252,13 @@ async function portOwnedByDisallowedProcess(
   return { owned: false };
 }
 
-async function findOpenPort(
-  startPort = DEFAULT_PORT,
-  maxPort = Math.min(startPort + 1000, 65535)
-) {
+async function findOpenPort(startPort = DEFAULT_PORT, maxPort = Math.min(startPort + 1000, 65535)) {
   const startingPortBusy = await isPortBusyOnLoopback(startPort, 200);
-
+  
   for (let port = startPort; port <= maxPort; port++) {
     try {
       const accepting = await isPortBusyOnLoopback(port, 200);
       if (accepting) {
-        console.log(\`Port \${port} is in use, trying another one...\`);
         const ownership = await portOwnedByDisallowedProcess(port);
         if (ownership.owned) {
           continue;
@@ -4290,23 +4270,19 @@ async function findOpenPort(
       const available = await new Promise((resolve, reject) => {
         const tester = createServer();
         const onError = (err) => {
-          if (err && err.code === "EADDRINUSE") {
-            try {
-              tester.close();
-            } catch (_) {}
+          if (err && err.code === 'EADDRINUSE') {
+            try { tester.close(); } catch (_) {}
             resolve(false);
           } else {
-            try {
-              tester.close();
-            } catch (_) {}
+            try { tester.close(); } catch (_) {}
             reject(err);
           }
         };
-        tester.once("error", onError);
-        tester.once("listening", () => {
+        tester.once('error', onError);
+        tester.once('listening', () => {
           tester.close(() => resolve(true));
         });
-        tester.listen(port, "0.0.0.0");
+        tester.listen(port, '0.0.0.0');
       });
 
       if (available) {
@@ -4320,30 +4296,27 @@ async function findOpenPort(
         continue;
       }
     } catch (err) {
-      if (err && (err.code === "EACCES" || err.code === "EADDRNOTAVAIL"))
-        throw err;
+      if (err && (err.code === 'EACCES' || err.code === 'EADDRNOTAVAIL')) throw err;
       await delay(50);
       continue;
     }
   }
-  throw new Error(
-    \`No available port found between \${startPort} and \${maxPort}\`
-  );
+  throw new Error(\`No available port found between \${startPort} and \${maxPort}\`);
 }
 
 async function loadApiHandler(routePath) {
   const now = Date.now();
   const cached = handlerCache.get(routePath);
-
+  
   if (cached && now - cached.timestamp < CACHE_TTL) {
     return cached.handler;
   }
 
   try {
-    const apiDir = path.join(process.cwd(), "src/app/api");
-    const extensions = [".js", ".ts", ".mjs", ".cjs"];
+    const apiDir = path.join(process.cwd(), 'src/app/api');
+    const extensions = ['.js', '.ts', '.mjs', '.cjs'];
     let handlerPath = null;
-
+    
     for (const ext of extensions) {
       const testPath = path.join(apiDir, routePath + ext);
       if (fs.existsSync(testPath)) {
@@ -4351,25 +4324,24 @@ async function loadApiHandler(routePath) {
         break;
       }
     }
-
+    
     if (!handlerPath) {
       return null;
     }
 
     let handlerModule;
 
-    if (handlerPath.endsWith(".ts")) {
+    if (handlerPath.endsWith('.ts')) {
       // Silent TypeScript handling
       try {
-        const handlerUrl =
-          new URL("file://" + handlerPath).href + "?t=" + Math.random();
+        const handlerUrl = new URL('file://' + handlerPath).href + '?t=' + Math.random();
         handlerModule = await import(handlerUrl);
       } catch (tsError) {
         // Silent fallback to TypeScript compilation
         try {
-          const ts = await import("typescript");
-          const fileContent = fs.readFileSync(handlerPath, "utf8");
-
+          const ts = await import('typescript');
+          const fileContent = fs.readFileSync(handlerPath, 'utf8');
+          
           const result = ts.transpileModule(fileContent, {
             compilerOptions: {
               target: ts.ScriptTarget.ES2020,
@@ -4377,186 +4349,134 @@ async function loadApiHandler(routePath) {
               jsx: ts.JsxEmit.React,
               esModuleInterop: true,
               allowSyntheticDefaultImports: true,
-            },
+            }
           });
-
+          
           const compiledCode = result.outputText;
-          const moduleUrl = \`data:text/javascript;charset=utf-8,\${encodeURIComponent(
-            compiledCode
-          )}\`;
+          const moduleUrl = \`data:text/javascript;charset=utf-8,\${encodeURIComponent(compiledCode)}\`;
           handlerModule = await import(moduleUrl);
         } catch (compileError) {
           throw new Error(
             \`TypeScript API routes require tsx or ts-node in production. \` +
-              \`Install with: npm install -D tsx\\n\` +
-              \`Or convert \${routePath} to JavaScript.\`
+            \`Install with: npm install -D tsx\\n\` +
+            \`Or convert \${routePath} to JavaScript.\`
           );
         }
       }
     } else {
-      const handlerUrl =
-        new URL("file://" + handlerPath).href + "?t=" + Math.random();
+      const handlerUrl = new URL('file://' + handlerPath).href + '?t=' + Math.random();
       handlerModule = await import(handlerUrl);
     }
 
     const handler = handlerModule.default;
-
-    if (typeof handler !== "function") {
-      throw new Error("Invalid API handler - export a default function");
+    
+    if (typeof handler !== 'function') {
+      throw new Error('Invalid API handler - export a default function');
     }
 
     handlerCache.set(routePath, { handler, timestamp: now });
     return handler;
   } catch (error) {
-    if (error.code === "ENOENT") return null;
+    if (error.code === 'ENOENT') return null;
     throw error;
   }
 }
 
 async function createFastifyServer() {
-  const distPath = validateDistPath(".bini/dist");
+  const distPath = validateDistPath('.bini/dist');
 
   const app = fastify({
-    logger: false,
+    logger: false, // Disable Fastify logging for complete silence
     bodyLimit: 1048576,
     trustProxy: 1,
-    requestIdHeader: "x-request-id",
+    requestIdHeader: 'x-request-id',
     disableRequestLogging: true,
     connectionTimeout: 60000,
     keepAliveTimeout: 65000,
     requestTimeout: 60000,
-    http2SessionTimeout: 600000,
+    http2SessionTimeout: 600000
   });
 
-  app.addHook("onClose", async () => {
+  app.addHook('onClose', async () => {
     handlerCache.clear();
   });
 
-  // ✅ BALANCED SECURITY - ESSENTIAL PROTECTIONS WITHOUT UNNECESSARY RESTRICTIONS
   await app.register(fastifyHelmet, {
     contentSecurityPolicy: {
       directives: {
-        defaultSrc: ["'self'", "https:", "data:", "blob:"],
-        scriptSrc: ["'self'", "'unsafe-inline'", "https:", "blob:"],
-        styleSrc: ["'self'", "'unsafe-inline'", "https:", "fonts.googleapis.com"],
-        imgSrc: ["'self'", "data:", "https:", "blob:"],
-        connectSrc: ["'self'", "https:", "ws:", "wss:", "blob:"],
-        fontSrc: ["'self'", "https:", "data:", "fonts.gstatic.com"],
-        mediaSrc: ["'self'", "https:", "data:", "blob:"],
-        frameSrc: ["'self'", "https:", "blob:"],
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'", "'unsafe-inline'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", 'data:', 'https:'],
+        connectSrc: ["'self'"],
+        fontSrc: ["'self'"],
         objectSrc: ["'none'"],
-      },
+        upgradeInsecureRequests: []
+      }
     },
-    hsts: NODE_ENV === "production" ? { 
-      maxAge: 31536000, 
-      includeSubDomains: true, 
-      preload: true 
-    } : false,
-    referrerPolicy: { policy: "strict-origin-when-cross-origin" },
+    hsts: { maxAge: 31536000, includeSubDomains: true, preload: true },
+    referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
     xContentTypeOptions: true,
-    xFrameOptions: "SAMEORIGIN", // Allow same-origin embedding
-    xXssProtection: true,
+    xFrameOptions: { action: 'deny' },
+    xXssProtection: true
   });
 
-  // ✅ SMART CORS - ALLOW DEVELOPMENT BUT SECURE IN PRODUCTION
-  await app.register(fastifyCors, {
-    origin: NODE_ENV === "development" ? true : [
-      "http://localhost:*",
-      "https://localhost:*",
-      "https://*.codesandbox.io",
-      "https://*.csb.app",
-      "https://*.vercel.app",
-      "https://*.netlify.app"
-    ],
-    credentials: true,
-    methods: ["GET", "HEAD", "PUT", "PATCH", "POST", "DELETE", "OPTIONS"],
-    allowedHeaders: [
-      "Content-Type",
-      "Authorization",
-      "Accept",
-      "X-Requested-With",
-      "X-API-Key",
-      "User-Agent",
-      "Origin",
-      "Referer"
-    ],
-    exposedHeaders: [
-      "Content-Length",
-      "X-Request-Id",
-      "X-Total-Count",
-      "Cache-Control"
-    ],
-    maxAge: 86400,
-  });
+  if (ENABLE_CORS) {
+    await app.register(fastifyCors, {
+      origin: true,
+      credentials: true,
+      methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
+      exposedHeaders: ['Content-Length', 'X-Request-Id']
+    });
+  }
 
-  // ✅ ESSENTIAL RATE LIMITING
   await app.register(fastifyRateLimiter, {
     max: RATE_LIMIT,
-    timeWindow: "15 minutes",
+    timeWindow: '15 minutes',
     cache: 10000,
-    allowList: ["127.0.0.1", "::1", "localhost"],
-    skipOnError: false, // Keep rate limiting active
+    allowList: ['127.0.0.1', '::1'],
+    skipOnError: true
   });
 
-  app.addHook("onRequest", async (req, reply) => {
+  app.addHook('onRequest', async (req, reply) => {
     const reqId = \`\${Date.now()}-\${Math.random().toString(36).substr(2, 9)}\`;
     activeRequests.add(reqId);
     req.requestId = reqId;
 
-    // Essential security headers
-    reply.header("X-Powered-By", "Bini.js");
-    reply.header("X-Content-Type-Options", "nosniff");
-    reply.header("X-Frame-Options", "SAMEORIGIN");
-    reply.header("X-XSS-Protection", "1; mode=block");
-    
-    // Development-friendly CORS
-    if (NODE_ENV === "development") {
-      const origin = req.headers.origin;
-      if (origin) {
-        reply.header("Access-Control-Allow-Origin", origin);
-        reply.header("Access-Control-Allow-Credentials", "true");
-      }
-    }
+    reply.header('X-Powered-By', 'Bini.js');
+    reply.header('X-Content-Type-Options', 'nosniff');
+    reply.header('X-Frame-Options', 'DENY');
+    reply.header('X-XSS-Protection', '1; mode=block');
   });
 
-  app.addHook("onResponse", async (req, reply) => {
+  app.addHook('onResponse', async (req, reply) => {
     activeRequests.delete(req.requestId);
   });
 
   await app.register(fastifyStatic, {
     root: distPath,
-    prefix: "/",
+    prefix: '/',
     constraints: {},
-    maxAge: NODE_ENV === "production" ? "1y" : 0,
+    maxAge: NODE_ENV === 'production' ? '1y' : 0,
     etag: true,
     lastModified: true,
     wildcard: false,
     preCompressed: true,
-    index: ["index.html"],
-    dotfiles: "deny", // Security: Don't serve dotfiles
-    acceptRanges: true,
+    index: ['index.html'],
+    dotfiles: 'deny',
+    acceptRanges: true
   });
 
-  app.addHook("onSend", async (req, reply, payload) => {
+  app.addHook('onSend', async (req, reply, payload) => {
     try {
-      if (
-        !reply.sent &&
-        !req.url.startsWith("/api/") &&
-        req.url !== "/health" &&
-        req.url !== "/metrics" &&
-        req.url !== "/db-status"
-      ) {
-        const acceptEncoding = req.headers["accept-encoding"] || "";
-        if (
-          acceptEncoding.includes("gzip") &&
-          (typeof payload === "string" || Buffer.isBuffer(payload))
-        ) {
-          reply.header("Vary", "Accept-Encoding");
-          reply.header("Content-Encoding", "gzip");
+      if (!reply.sent && !req.url.startsWith('/api/') && req.url !== '/health' && req.url !== '/metrics') {
+        const acceptEncoding = req.headers['accept-encoding'] || '';
+        if (acceptEncoding.includes('gzip') && (typeof payload === 'string' || Buffer.isBuffer(payload))) {
+          reply.header('Vary', 'Accept-Encoding');
+          reply.header('Content-Encoding', 'gzip');
           const compressed = await new Promise((resolve, reject) => {
-            zlib.gzip(payload, { level: 6 }, (err, result) =>
-              err ? reject(err) : resolve(result)
-            );
+            zlib.gzip(payload, { level: 6 }, (err, result) => err ? reject(err) : resolve(result));
           });
           return compressed;
         }
@@ -4567,74 +4487,58 @@ async function createFastifyServer() {
     return payload;
   });
 
-  // ✅ SECURITY STATUS ENDPOINT
-  app.get("/db-status", async (req, reply) => {
-    reply.header("Cache-Control", "no-cache");
-    return {
-      status: "secure",
-      security: {
-        csp: "✓ Essential Content Security Policy",
-        cors: NODE_ENV === "development" ? "✓ Development CORS" : "✓ Production CORS",
-        rate_limiting: "✓ Active rate limiting",
-        headers: "✓ Security headers enabled",
-        compression: "✓ Gzip compression",
-      },
-      compatibility: {
-        databases: "✓ All databases supported",
-        development: "✓ Local development",
-        production: "✓ Production deployment",
-        previews: "✓ CodeSandbox & Vercel previews",
-      },
-      timestamp: new Date().toISOString(),
-    };
-  });
+  app.get('/health', async (req, reply) => {
+    reply.header('Cache-Control', 'no-cache, no-store, must-revalidate');
+    reply.header('Pragma', 'no-cache');
+    reply.header('Expires', '0');
 
-  app.get("/health", async (req, reply) => {
-    reply.header("Cache-Control", "no-cache, no-store, must-revalidate");
     return {
-      status: "ok",
+      status: 'ok',
       timestamp: new Date().toISOString(),
       uptime: process.uptime(),
       memory: {
         used: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
         total: Math.round(process.memoryUsage().heapTotal / 1024 / 1024),
-        rss: Math.round(process.memoryUsage().rss / 1024 / 1024),
+        rss: Math.round(process.memoryUsage().rss / 1024 / 1024)
       },
       node: {
         version: process.version,
-        env: NODE_ENV,
-      },
+        env: NODE_ENV
+      }
     };
   });
 
-  app.get("/metrics", async (req, reply) => {
-    reply.header("Cache-Control", "no-cache");
+  app.get('/metrics', async (req, reply) => {
+    reply.header('Cache-Control', 'no-cache');
     return {
       server: {
         uptime: process.uptime(),
         activeRequests: activeRequests.size,
-        handlersCached: handlerCache.size,
+        handlersCached: handlerCache.size
       },
       memory: process.memoryUsage(),
       versions: process.versions,
+      platform: process.platform,
+      arch: process.arch
     };
   });
 
   app.route({
-    method: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-    url: "/api/*",
+    method: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    url: '/api/*',
     handler: async (req, reply) => {
       try {
         const url = new URL(req.url, \`http://\${req.headers.host}\`);
-        let routePath = url.pathname.replace("/api/", "") || "index";
-        if (routePath.endsWith("/")) routePath = routePath.slice(0, -1);
+        let routePath = url.pathname.replace('/api/', '') || 'index';
+        if (routePath.endsWith('/')) routePath = routePath.slice(0, -1);
 
         const handler = await loadApiHandler(routePath);
         if (!handler) {
-          reply.status(404).type("application/json");
+          reply.status(404).type('application/json');
           return {
-            error: "API route not found",
+            error: 'API route not found',
             path: routePath,
+            availableRoutes: Array.from(handlerCache.keys())
           };
         }
 
@@ -4648,7 +4552,7 @@ async function createFastifyServer() {
           query,
           ip: req.ip,
           url: req.url,
-          params: {},
+          params: {}
         };
 
         let responded = false;
@@ -4663,12 +4567,12 @@ async function createFastifyServer() {
           },
           json: (data) => {
             responded = true;
-            reply.type("application/json").send(data);
+            reply.type('application/json').send(data);
           },
           send: (data) => {
             responded = true;
-            if (typeof data === "object") {
-              reply.type("application/json").send(data);
+            if (typeof data === 'object') {
+              reply.type('application/json').send(data);
             } else {
               reply.send(data);
             }
@@ -4676,60 +4580,59 @@ async function createFastifyServer() {
           end: (data) => {
             responded = true;
             if (data) reply.send(data);
-          },
+          }
         };
 
-        const timeoutPromise = new Promise((_, reject) =>
-          setTimeout(() => reject(new Error("Request timeout")), 30000)
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Request timeout')), 10000)
         );
 
-        const handlerPromise = Promise.resolve().then(() =>
-          handler(request, response)
-        );
+        const handlerPromise = Promise.resolve().then(() => handler(request, response));
         const result = await Promise.race([handlerPromise, timeoutPromise]);
 
         if (!responded && result) {
-          reply.type("application/json").send(result);
+          reply.type('application/json').send(result);
         }
       } catch (error) {
         if (!reply.sent) {
-          reply.status(500).type("application/json");
-          reply.send({
-            error: "Internal Server Error",
-            message: error.message,
-            ...(NODE_ENV === "development" && { stack: error.stack }),
-          });
+          if (error.message === 'Request timeout' || error.message === 'API handler timeout') {
+            reply.status(504).type('application/json');
+            reply.send({ error: 'Request timeout', message: 'API handler took too long to respond' });
+          } else {
+            reply.status(500).type('application/json');
+            reply.send({
+              error: 'Internal Server Error',
+              message: error.message,
+              ...(NODE_ENV === 'development' && { stack: error.stack })
+            });
+          }
         }
       }
-    },
+    }
   });
 
   app.setNotFoundHandler(async (req, reply) => {
-    if (req.url.startsWith("/api/")) {
-      reply.status(404).type("application/json");
+    if (req.url.startsWith('/api/')) {
+      reply.status(404).type('application/json');
       return {
-        error: "Not found",
-        message: "API endpoint does not exist",
-        path: req.url,
+        error: 'Not found',
+        message: 'API endpoint does not exist',
+        path: req.url
       };
     }
 
     try {
-      const indexHtmlPath = path.join(distPath, "index.html");
+      const indexHtmlPath = path.join(distPath, 'index.html');
       if (!fs.existsSync(indexHtmlPath)) {
-        throw new Error("Index.html not found");
+        throw new Error('Index.html not found');
       }
-      reply.type("text/html");
-      const content = await fs.promises.readFile(indexHtmlPath, "utf-8");
+      reply.type('text/html');
+      const content = await fs.promises.readFile(indexHtmlPath, 'utf-8');
       return content;
     } catch (error) {
-      reply.status(404).type("text/html");
+      reply.status(404).type('text/html');
       return \`
         <html>
-          <head>
-            <title>404 - Not Found</title>
-            <meta name="viewport" content="width=device-width, initial-scale=1">
-          </head>
           <body>
             <h1>404 Not Found</h1>
             <p>The page you're looking for doesn't exist.</p>
@@ -4741,56 +4644,19 @@ async function createFastifyServer() {
 
   app.setErrorHandler(async (error, req, reply) => {
     if (!reply.sent) {
-      reply.status(500).type("application/json");
+      reply.status(500).type('application/json');
       return {
-        error: "Internal Server Error",
-        message: "Something went wrong",
-        ...(NODE_ENV === "development" && {
+        error: 'Internal Server Error',
+        message: 'Something went wrong',
+        ...(NODE_ENV === 'development' && {
           details: error.message,
-        }),
+          stack: error.stack
+        })
       };
     }
   });
 
   return app;
-}
-
-// ✅ SILENT BROWSER OPENING - Works everywhere, never crashes
-function safeOpenBrowser(port) {
-  // Try to open browser in all environments
-  setTimeout(() => {
-    try {
-      const url = \`http://localhost:\${port}\`;
-      
-      let command, args = [];
-      const platform = process.platform;
-
-      if (platform === 'darwin') {
-        command = 'open';
-        args = [url];
-      } else if (platform === 'win32') {
-        command = 'cmd';
-        args = ['/c', 'start', '', url];
-      } else {
-        command = 'xdg-open';
-        args = [url];
-      }
-
-      const child = spawn(command, args, {
-        stdio: 'ignore',
-        detached: true,
-        windowsHide: true
-      });
-
-      child.unref();
-      child.on('error', (err) => {
-        // Silent error - don't crash
-      });
-
-    } catch (error) {
-      // Silent catch - don't crash
-    }
-  }, 1000);
 }
 
 async function startServer() {
@@ -4800,66 +4666,59 @@ async function startServer() {
   const maxRetries = 50;
   let retries = 0;
 
-  // ✅ SECURE BINDING
-  const listenHost = NODE_ENV === "development" ? "0.0.0.0" : "0.0.0.0";
+  const listenHost = NODE_ENV === 'development' ? '127.0.0.1' : '0.0.0.0';
 
   while (retries < maxRetries) {
     retries++;
     try {
       const port = await findOpenPort(attemptStartPort, maxPort);
+
+      if (process.env.PORT && Number(process.env.PORT) !== port) {
+        // Silent port difference warning
+      }
+
       process.env.PORT = String(port);
 
-      const startTime = Date.now();
       const app = await createFastifyServer();
 
       try {
         await app.listen({ port, host: listenHost });
 
-        const readyTime = Date.now() - startTime;
-        console.log(
-          \`\\n \\x1b[32mFastify 4.28\\x1b[39m  \\x1b[90mready in\\x1b[39m \${readyTime} ms\\n\`
-        );
-
-        // Display server URLs
-        displayServerUrls(port);
-
-        // Display Bini startup info
+        // Only show essential startup info
         try {
-          displayBiniStartup({
-            mode: NODE_ENV === "development" ? "dev" : "prod",
-          });
+          displayServerUrls(port);
+        } catch (e) {
+          // Silent fallback
+        }
+        try {
+          displayBiniStartup({ mode: NODE_ENV === 'development' ? 'dev' : 'prod' });
         } catch (e) {
           // Silent fallback
         }
 
-        // ✅ SILENT BROWSER OPENING
-        safeOpenBrowser(port);
-
+        setTimeout(() => {
+          const opened = openBrowser(\`http://localhost:\${port}\`);
+          if (!opened) {
+            // Silent browser open failure
+          }
+        }, 1000);
         return;
       } catch (listenError) {
-        if (listenError && listenError.code === "EADDRINUSE") {
+        if (listenError && listenError.code === 'EADDRINUSE') {
           attemptStartPort = port + 1;
-          try {
-            await app.close();
-          } catch (_) {}
+          try { await app.close(); } catch (_) {}
           await delay(100);
           continue;
         } else {
-          try {
-            await app.close();
-          } catch (_) {}
+          try { await app.close(); } catch (_) {}
           throw listenError;
         }
       }
     } catch (err) {
-      if (err && (err.code === "EACCES" || err.code === "EADDRNOTAVAIL")) {
+      if (err && (err.code === 'EACCES' || err.code === 'EADDRNOTAVAIL')) {
         process.exit(1);
       }
-      if (
-        err &&
-        err.message &&
-        err.message.startsWith("No available port found")
-      ) {
+      if (err && err.message && err.message.startsWith('No available port found')) {
         process.exit(1);
       }
       process.exit(1);
@@ -4869,13 +4728,49 @@ async function startServer() {
   process.exit(1);
 }
 
-process.on("unhandledRejection", (reason, promise) => {
-  console.error("Unhandled Rejection:", reason);
+function openBrowser(url) {
+  try {
+    let command, args = [];
+    const platform = process.platform;
+
+    if (platform === 'darwin') {
+      command = 'open';
+      args = [url];
+    } else if (platform === 'win32') {
+      command = 'cmd';
+      args = ['/c', 'start', '', url];
+    } else {
+      command = 'xdg-open';
+      args = [url];
+    }
+
+    const child = spawn(command, args, {
+      stdio: 'ignore',
+      detached: true,
+      windowsHide: true
+    });
+
+    child.unref();
+    child.on('error', (err) => {
+      // Silent browser error
+    });
+
+    return true;
+  } catch (error) {
+    // Silent browser error
+    return false;
+  }
+}
+
+process.on('uncaughtException', (error) => {
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
   process.exit(1);
 });
 
 startServer().catch((error) => {
-  console.error("Failed to start server:", error.message);
   process.exit(1);
 });`, { force: flags.force });
 
