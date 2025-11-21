@@ -1,7 +1,7 @@
 {
   "name": "create-bini-app",
   "type": "module",
-  "version": "9.2.1",
+  "version": "9.2.2",
   "description": "Bini.js v9.2.1: Enterprise-grade React framework with automatic source code protection, Next.js-style file-based routing, API routes with TypeScript support, Fastify production server (2x faster than Express), head-only SSR for SEO, hot module replacement, rate limiting, security hardening, and 52% faster dev startup.",
   "long-description": "Bini.js is a modern, high-performance React framework that combines the best of Next.js, Vite, and Fastify. Build lightning-fast, source-code-protected React applications with automatic file-based routing, built-in API routes supporting TypeScript, production-ready Fastify server, head-only server-side rendering, comprehensive security features, and intelligent caching. Includes native file watching (5x faster), parallel port detection, TTL-based handler caching, race condition prevention, automatic favicon generation, PWA support, and environment file detection.",
   "keywords": [
