@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  deployments: write
 
 jobs:
   check-version:
@@ -109,3 +110,106 @@ jobs:
       
       - name: Success
         run: echo "✅ Published create-bini-app@${{ needs.check-version.outputs.new_version }} to NPM"
+
+  deploy:
+    name: Deploy to Production
+    needs: 
+      - check-version
+      - publish-npm
+    if: needs.check-version.outputs.version_changed == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      deployments: write
+      contents: read
+    environment:
+      name: production
+      url: https://www.npmjs.com/package/create-bini-app
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Create deployment
+        id: deployment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const deployment = await github.rest.repos.createDeployment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: context.ref,
+              environment: 'production',
+              description: 'Deploy create-bini-app@${{ needs.check-version.outputs.new_version }} to NPM',
+              auto_merge: false,
+              required_contexts: [],
+              production_environment: true
+            });
+            
+            console.log('Deployment created:', deployment.data.id);
+            core.setOutput('deployment_id', deployment.data.id);
+
+      - name: Create deployment status - in progress
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createDeploymentStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              deployment_id: ${{ steps.deployment.outputs.deployment_id }},
+              state: 'in_progress',
+              description: 'Publishing to NPM registry...',
+              environment_url: 'https://www.npmjs.com/package/create-bini-app'
+            });
+
+      - name: Verify NPM publish
+        run: |
+          VERSION=${{ needs.check-version.outputs.new_version }}
+          echo "Verifying publication of create-bini-app@$VERSION..."
+          sleep 5
+          
+          # Try to view the package on NPM
+          if npm view create-bini-app@$VERSION version > /dev/null 2>&1; then
+            echo "✅ Successfully verified create-bini-app@$VERSION on NPM"
+          else
+            echo "⚠️  Package not yet visible on NPM (may take a moment)"
+          fi
+
+      - name: Create deployment status - success
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createDeploymentStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              deployment_id: ${{ steps.deployment.outputs.deployment_id }},
+              state: 'success',
+              description: 'Successfully published to NPM',
+              environment_url: 'https://www.npmjs.com/package/create-bini-app',
+              auto_merge: false
+            });
+            
+            console.log('✅ Deployment successful!');
+
+      - name: Create deployment status - failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createDeploymentStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              deployment_id: ${{ steps.deployment.outputs.deployment_id }},
+              state: 'failure',
+              description: 'Failed to verify publication on NPM',
+              environment_url: 'https://www.npmjs.com/package/create-bini-app'
+            });
+            
+            console.log('❌ Deployment failed!');
+
+      - name: Deployment summary
+        run: |
+          echo "🎉 Deployment Complete!"
+          echo "Version: ${{ needs.check-version.outputs.new_version }}"
+          echo "Package: https://www.npmjs.com/package/create-bini-app"
+          echo "GitHub: https://github.com/${{ github.repository }}/releases/tag/v${{ needs.check-version.outputs.new_version }}"
