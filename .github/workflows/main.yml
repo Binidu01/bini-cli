@@ -4,8 +4,12 @@ on:
   push:
     branches:
       - main
-    paths:
+    paths-ignore:
       - '.github/workflows/main.yml'
+      - 'README.md'
+      - '.gitignore'
+      - 'CHANGELOG.md'
+      - 'create-bini-app.js'
 
 permissions:
   contents: write
@@ -169,7 +173,6 @@ jobs:
           echo "Verifying publication of create-bini-app@$VERSION..."
           sleep 5
           
-          # Try to view the package on NPM
           if npm view create-bini-app@$VERSION version > /dev/null 2>&1; then
             echo "✅ Successfully verified create-bini-app@$VERSION on NPM"
           else
