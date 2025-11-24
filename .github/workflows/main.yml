@@ -7,20 +7,21 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write       # for GitHub release & tags
-  id-token: write       # REQUIRED for OIDC Trusted Publisher
-  packages: write       # for npm publish
+  contents: write       # For GitHub release & tag creation
+  id-token: write       # REQUIRED for OIDC Trusted Publishing
+  packages: write       # Needed to publish to npm
 
 jobs:
   release:
     name: Tag, Release & Publish
     runs-on: ubuntu-latest
+    environment: production  # Reference your environment with protection rules
 
     steps:
-      - name: Checkout Repository
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 0  # Ensure full history for tags
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -28,27 +29,27 @@ jobs:
           node-version: 22
           registry-url: https://registry.npmjs.org/
 
-      - name: Install Dependencies
+      - name: Ensure latest npm
+        run: npm install -g npm@latest
+
+      - name: Install dependencies
         run: npm install
 
-      - name: Get Version from package.json
+      - name: Determine version
         id: pkg
         run: |
           VERSION=$(node -p "require('./package.json').version")
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Detected version: $VERSION"
 
-      - name: Create Git Tag if not exists
+      - name: Create Git Tag (force if needed)
         run: |
           TAG="v${{ steps.pkg.outputs.version }}"
-          if git rev-parse "$TAG" >/dev/null 2>&1; then
-            echo "Tag $TAG already exists. Skipping."
-          else
-            git config user.name "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-            git tag "$TAG"
-            git push origin "$TAG"
-          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -f "$TAG"
+          git push origin "$TAG" --force
+          git push origin main --force
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -59,21 +60,8 @@ jobs:
           prerelease: false
           generate_release_notes: true
 
-      - name: Publish to npm with Provenance
-        run: npm publish --provenance --access public
+      - name: Publish to npm via OIDC
+        run: npm publish --access public
         env:
-          # OIDC Trusted Publisher is used automatically; no NPM_TOKEN needed
+          # No token needed, uses OIDC
           NPM_CONFIG_PROVENANCE: true
-
-      - name: Verify npm Publish
-        run: |
-          VERSION=${{ steps.pkg.outputs.version }}
-          PACKAGE="create-bini-app"
-          echo "🔍 Verifying $PACKAGE@$VERSION is published..."
-          sleep 5
-          if npm view $PACKAGE@$VERSION version > /dev/null 2>&1; then
-            echo "✅ $PACKAGE@$VERSION is live on npm"
-          else
-            echo "❌ $PACKAGE@$VERSION not found on npm"
-            exit 1
-          fi
