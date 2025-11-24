@@ -1,6 +1,4 @@
-# Bini.js v9.2.2 – Production-Ready React Framework
-
-Build lightning-fast, source-protected React apps with Next.js-style file-based routing and built-in API routes powered by Vite & Fastify.
+<div align="center">
 
 ```
 ██████╗ ██╗███╗   ██╗██╗      ██╗███████╗
@@ -11,346 +9,86 @@ Build lightning-fast, source-protected React apps with Next.js-style file-based 
 ╚═════╝ ╚═╝╚═╝  ╚═══╝╚═╝  ╚════╝ ╚══════╝
 ```
 
+### Build lightning-fast, source-protected React apps — powered by Vite & Fastify
+
+[![npm version](https://img.shields.io/npm/v/create-bini-app?color=00CFFF&label=npm&style=for-the-badge)](https://www.npmjs.com/package/create-bini-app)
+[![total downloads](https://img.shields.io/npm/dt/create-bini-app?color=764ba2&style=for-the-badge&label=downloads)](https://www.npmjs.com/package/create-bini-app)
+[![license](https://img.shields.io/badge/license-MIT-blue?style=for-the-badge)](https://github.com/Binidu01/bini-cli/blob/main/LICENSE)
+[![node version](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen?style=for-the-badge)](https://nodejs.org)
+
+[![vite](https://img.shields.io/badge/vite-6.0.5-646CFF?style=for-the-badge&logo=vite&logoColor=white)](https://vitejs.dev)
+[![react](https://img.shields.io/badge/react-18.3.1-61DAFB?style=for-the-badge&logo=react&logoColor=black)](https://react.dev)
+[![fastify](https://img.shields.io/badge/fastify-4.28-000000?style=for-the-badge&logo=fastify&logoColor=white)](https://fastify.io)
+[![typescript](https://img.shields.io/badge/typescript-5.7.2-3178C6?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org)
+
+</div>
+
 ---
 
-## 🎯 What's New in v9.2.2
+## 🎯 Bini.js v9.2.3
 
-### ✨ Custom 404 Pages & Better Code Splitting
+A production-ready React framework that combines the best of Next.js, Vite, and Fastify. Build modern web applications with file-based routing, built-in API routes, and zero-config deployment to any Node.js server.
 
-**v9.2.2 brings powerful new features:**
+**Works everywhere** — Vercel, Netlify, Heroku, Railway, GitHub Codespaces, and traditional VPS servers.
 
-- ✅ **Custom Not-Found Pages** – Create beautiful `not-found.tsx/jsx` pages
-- ✅ **Dynamic Imports** – Automatic code splitting across all servers
-- ✅ **Universal Deployment** – Works on GitHub Pages, Netlify, Vercel & more
-- ✅ **Improved Bundle Size** – Lazy-loaded routes reduce initial load
-- ✅ **Production-Ready** – Zero config needed for major hosting platforms
+---
+
+## ✨ What's New in v9.2.3
+
+### 📁 Standard Build Output
+- ✅ **`dist/` folder** — Industry-standard output (no `.bini/dist`)
+- ✅ Works with all CI/CD pipelines
+- ✅ Compatible with major hosting platforms
+
+### 🔄 Advanced File-Based Routing
+- ✅ **File-based routes** — `admin.tsx` → `/admin`
+- ✅ **Folder-based routes** — `admin/page.tsx` → `/admin`
+- ✅ **Priority system** — File-based takes precedence
+- ✅ **Dynamic routes** — `[id]`, `[...slug]` patterns
+- ✅ **Custom 404 pages** — `not-found.tsx`
+
+### 🚀 Universal Deployment
+- ✅ **All Node.js servers** — Vercel, Netlify, Heroku, Railway, Render, etc.
+- ✅ **Zero config** — Works out of the box
+- ✅ **Production ready** — Fastify, security, rate limiting included
+- ✅ **Auto-opening browser** — dev, preview, and start commands
+
+⚠️ **Not supported** — GitHub Pages, static hosting (requires Node.js runtime)
+
+### 🔌 API Routes Everywhere
+- ✅ TypeScript & JavaScript support
+- ✅ Dynamic routes with parameters
+- ✅ Full request/response handling
+- ✅ Works in development & production
 
 ---
 
 ## 🚀 Quick Start
 
 ```bash
+# Create new project
 npx create-bini-app@latest my-app
+
+# Install dependencies
 cd my-app
 npm install
+
+# Start development server (auto-opens browser)
 npm run dev
 ```
 
-Your browser opens automatically at `http://localhost:3000`.
+Opens http://localhost:3000 automatically.
 
 ---
 
-## 📁 Custom 404 Not-Found Pages
+## 📊 Commands
 
-Create a beautiful custom error page that displays when routes don't exist.
-
-### Creating a Custom Not-Found Page
-
-Create `src/app/not-found.tsx` or `src/app/not-found.jsx`:
-
-**TypeScript:**
-```typescript
-// src/app/not-found.tsx
-import React from 'react';
-
-export default function NotFound() {
-  return (
-    <div style={{
-      minHeight: '100vh',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      flexDirection: 'column',
-      fontFamily: 'system-ui, -apple-system, sans-serif',
-      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-      color: 'white',
-      padding: '2rem'
-    }}>
-      <div style={{ textAlign: 'center' }}>
-        <h1 style={{
-          fontSize: '6rem',
-          margin: 0,
-          marginBottom: '1rem',
-          fontWeight: 'bold'
-        }}>
-          404
-        </h1>
-        <h2 style={{
-          fontSize: '2rem',
-          marginBottom: '1rem',
-          opacity: 0.9
-        }}>
-          Oops! Page Not Found
-        </h2>
-        <p style={{
-          fontSize: '1.1rem',
-          marginBottom: '2rem',
-          opacity: 0.8,
-          maxWidth: '600px',
-          lineHeight: 1.6
-        }}>
-          The page you're looking for doesn't exist. 
-          Let's get you back on track!
-        </p>
-        <a href="/" style={{
-          display: 'inline-block',
-          padding: '12px 32px',
-          background: 'rgba(255, 255, 255, 0.2)',
-          border: '2px solid white',
-          color: 'white',
-          textDecoration: 'none',
-          borderRadius: '8px',
-          fontWeight: '600',
-          fontSize: '1rem',
-          transition: 'all 0.3s ease',
-          cursor: 'pointer'
-        }}
-        onMouseOver={(e) => {
-          e.currentTarget.style.background = 'white';
-          e.currentTarget.style.color = '#667eea';
-        }}
-        onMouseOut={(e) => {
-          e.currentTarget.style.background = 'rgba(255, 255, 255, 0.2)';
-          e.currentTarget.style.color = 'white';
-        }}>
-          ← Back to Home
-        </a>
-      </div>
-    </div>
-  );
-}
-```
-
-**JavaScript:**
-```javascript
-// src/app/not-found.jsx
-export default function NotFound() {
-  return (
-    <div style={{
-      minHeight: '100vh',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      flexDirection: 'column',
-      fontFamily: 'system-ui, -apple-system, sans-serif',
-      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-      color: 'white',
-      padding: '2rem'
-    }}>
-      <div style={{ textAlign: 'center' }}>
-        <h1 style={{
-          fontSize: '6rem',
-          margin: 0,
-          marginBottom: '1rem',
-          fontWeight: 'bold'
-        }}>
-          404
-        </h1>
-        <h2 style={{
-          fontSize: '2rem',
-          marginBottom: '1rem',
-          opacity: 0.9
-        }}>
-          Oops! Page Not Found
-        </h2>
-        <p style={{
-          fontSize: '1.1rem',
-          marginBottom: '2rem',
-          opacity: 0.8,
-          maxWidth: '600px',
-          lineHeight: 1.6
-        }}>
-          The page you're looking for doesn't exist. 
-          Let's get you back on track!
-        </p>
-        <a href="/" style={{
-          display: 'inline-block',
-          padding: '12px 32px',
-          background: 'rgba(255, 255, 255, 0.2)',
-          border: '2px solid white',
-          color: 'white',
-          textDecoration: 'none',
-          borderRadius: '8px',
-          fontWeight: '600',
-          fontSize: '1rem',
-          transition: 'all 0.3s ease',
-          cursor: 'pointer'
-        }}
-        onMouseOver={(e) => {
-          e.currentTarget.style.background = 'white';
-          e.currentTarget.style.color = '#667eea';
-        }}
-        onMouseOut={(e) => {
-          e.currentTarget.style.background = 'rgba(255, 255, 255, 0.2)';
-          e.currentTarget.style.color = 'white';
-        }}>
-          ← Back to Home
-        </a>
-      </div>
-    </div>
-  );
-}
-```
-
-### How It Works
-
-- Bini.js automatically detects `not-found.tsx` or `not-found.jsx` in `src/app/`
-- When a user visits a non-existent route, this page is displayed
-- Works in **development, preview, AND production**
-- No configuration needed – just create the file!
-
-### With Tailwind CSS
-
-If you're using Tailwind CSS, here's a styled version:
-
-```tsx
-// src/app/not-found.tsx
-import React from 'react';
-
-export default function NotFound() {
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 flex items-center justify-center px-4">
-      <div className="text-center">
-        <h1 className="text-9xl font-black text-white mb-4">404</h1>
-        <h2 className="text-4xl font-bold text-white mb-4">Oops!</h2>
-        <p className="text-xl text-white/80 mb-8 max-w-md mx-auto">
-          The page you're looking for doesn't exist. Let's get you back on track!
-        </p>
-        <a 
-          href="/" 
-          className="inline-block px-8 py-3 bg-white text-purple-600 font-bold rounded-lg hover:shadow-lg transition-all duration-300 hover:scale-105"
-        >
-          ← Back to Home
-        </a>
-      </div>
-    </div>
-  );
-}
-```
-
----
-
-## 🔄 Dynamic Imports & Code Splitting
-
-### v9.2.2 Automatic Code Splitting
-
-Bini.js v9.2.2 uses **dynamic imports** for all routes, ensuring:
-
-- ✅ **Smaller Initial Bundle** – Only load what's needed
-- ✅ **Faster Page Loads** – Lazy-loaded routes appear faster
-- ✅ **Better Performance** – Reduced JavaScript sent to browsers
-- ✅ **Automatic Optimization** – Zero configuration required
-- ✅ **Works Everywhere** – GitHub Pages, Netlify, Vercel, etc.
-
-### How Dynamic Imports Work
-
-Routes are automatically loaded on-demand:
-
-```javascript
-// Before (Static Import - loads everything upfront)
-import HomePage from './app/page';
-import AboutPage from './app/about/page';
-import BlogPage from './app/blog/page';
-
-// After (Dynamic Import - v9.2.2 automatic)
-// Routes load only when needed
-const HomePage = React.lazy(() => import('./app/page'));
-const AboutPage = React.lazy(() => import('./app/about/page'));
-const BlogPage = React.lazy(() => import('./app/blog/page'));
-```
-
-### Creating Routes with Code Splitting
-
-Just create your page files – code splitting happens automatically:
-
-```
-src/app/
-├── page.tsx                    # / (loaded on demand)
-├── about/page.tsx              # /about (loaded on demand)
-├── blog/page.tsx               # /blog (loaded on demand)
-├── blog/[slug]/page.tsx        # /blog/:slug (loaded on demand)
-└── not-found.tsx               # /* (loaded on demand)
-```
-
-### Manual Dynamic Imports for Components
-
-For large components, use dynamic imports manually:
-
-```typescript
-// src/app/dashboard/page.tsx
-import React from 'react';
-
-// Import heavy components dynamically
-const AnalyticsChart = React.lazy(() => import('@/components/AnalyticsChart'));
-const ReportTable = React.lazy(() => import('@/components/ReportTable'));
-
-export default function Dashboard() {
-  return (
-    <div>
-      <h1>Dashboard</h1>
-      <React.Suspense fallback={<div>Loading charts...</div>}>
-        <AnalyticsChart />
-      </React.Suspense>
-      <React.Suspense fallback={<div>Loading table...</div>}>
-        <ReportTable />
-      </React.Suspense>
-    </div>
-  );
-}
-```
-
----
-
-## 📊 Performance Impact (v9.2.2)
-
-| Metric | Without Splitting | With Splitting | Improvement |
-|--------|-------------------|-----------------|-------------|
-| **Initial Bundle** | 245KB | 89KB | **64% smaller** |
-| **First Page Load** | 2.3s | 0.8s | **65% faster** |
-| **Blog Page Load** | 2.1s | 0.3s | **86% faster** |
-| **Dashboard Load** | 2.8s | 0.9s | **68% faster** |
-
----
-
-## 🌐 Universal Deployment
-
-v9.2.2 works seamlessly on all major platforms:
-
-### GitHub Pages
-
-```bash
-npm run build
-# Push to GitHub – automatically deployed
-```
-
-### Netlify
-
-```bash
-npm run build
-# Drag .bini/dist folder to Netlify
-# or connect GitHub repo
-```
-
-### Vercel
-
-```bash
-npm run build
-# Push to GitHub, Vercel auto-deploys
-```
-
-### Traditional Hosting (Heroku, Railway, etc.)
-
-```bash
-npm run build
-npm run start
-```
-
-All platforms automatically benefit from:
-- Dynamic code splitting
-- Custom 404 pages
-- API routes (with `/api/*` support)
-- Gzip compression
-- Security headers
+| Command | Purpose | Browser | Server |
+|---------|---------|---------|--------|
+| `npm run dev` | Development with HMR | ✅ Auto-opens | Vite Dev |
+| `npm run build` | Production build | — | — |
+| `npm run preview` | Test production build | ✅ Auto-opens | Vite Preview |
+| `npm run start` | Production server | ✅ Auto-opens | Fastify |
 
 ---
 
@@ -359,54 +97,72 @@ All platforms automatically benefit from:
 ```
 my-app/
 ├── src/
-│   ├── app/
+│   ├── app/                      # App Router (Next.js style)
 │   │   ├── layout.tsx            # Root layout
-│   │   ├── page.tsx              # Home page (/)
-│   │   ├── not-found.tsx         # Custom 404 page ← NEW!
-│   │   ├── about/page.tsx        # Static route (/about)
-│   │   ├── blog/[slug]/page.tsx  # Dynamic route (/blog/:slug)
+│   │   ├── page.tsx              # / (home)
+│   │   ├── admin.tsx             # /admin (file-based) ⭐
+│   │   ├── dashboard.tsx         # /dashboard (file-based) ⭐
+│   │   ├── products/
+│   │   │   ├── page.tsx          # /products (folder-based)
+│   │   │   └── [id]/
+│   │   │       └── page.tsx      # /products/:id
 │   │   ├── api/
-│   │   │   ├── hello.ts          # API route (/api/hello)
-│   │   │   └── users/[id].ts     # Dynamic API (/api/users/:id)
+│   │   │   ├── hello.ts          # POST /api/hello ⭐
+│   │   │   └── users/[id].ts     # GET /api/users/:id ⭐
+│   │   ├── not-found.tsx         # 404 page
 │   │   └── globals.css
-│   ├── components/               # Reusable components
-│   ├── App.tsx                   # Root component (auto-generated)
-│   └── main.tsx                  # Entry point
-├── public/
-│   ├── favicon.svg
-│   └── og-image.png
-├── .bini/
-│   └── dist/                     # Production build
+│   ├── components/
+│   ├── App.tsx                   # Auto-generated
+│   └── main.tsx
+├── public/                       # Static files
+├── dist/                         # Build output ⭐ NEW!
+├── bini/                         # Framework internals
+├── api-server.js                 # Fastify production server
 ├── bini.config.mjs
 ├── vite.config.mjs
-├── package.json
-└── README.md
+├── tsconfig.json
+└── package.json
 ```
 
 ---
 
-## 📝 File-Based Routing
+## 🔄 File-Based Routing
 
-Routes are automatically created from your file structure:
+### Two Routing Patterns
+
+**File-based** — Simple single-file routes:
+```
+src/app/
+├── admin.tsx          # /admin
+├── settings.tsx       # /settings
+└── profile.tsx        # /profile
+```
+
+**Folder-based** — Traditional Next.js structure:
+```
+src/app/
+├── admin/page.tsx     # /admin
+├── settings/page.tsx  # /settings
+└── profile/page.tsx   # /profile
+```
+
+### Priority System
+
+When both exist, **file-based wins**:
 
 ```
 src/app/
-├── page.tsx              → /
-├── about/page.tsx        → /about
-├── blog/page.tsx         → /blog
-├── blog/[slug]/page.tsx  → /blog/:slug
-├── blog/[slug]/[id]/page.tsx → /blog/:slug/:id
-├── products/[...id]/page.tsx → /products/* (catch-all)
-└── not-found.tsx         → /* (404 fallback)
+├── admin.tsx          ✅ WINS → /admin
+├── admin/page.tsx     ❌ IGNORED
 ```
+
+This gives flexibility to use either pattern per route.
 
 ---
 
 ## 🔌 API Routes
 
-API routes live in `src/app/api/` and support TypeScript and JavaScript:
-
-### Create API Routes
+### Create API Endpoints
 
 **TypeScript:**
 ```typescript
@@ -414,8 +170,8 @@ API routes live in `src/app/api/` and support TypeScript and JavaScript:
 export default function handler(req: any, res: any) {
   return {
     message: 'Hello from Bini.js!',
-    timestamp: new Date().toISOString(),
-    method: req.method
+    method: req.method,
+    timestamp: new Date().toISOString()
   };
 }
 ```
@@ -426,36 +182,31 @@ export default function handler(req: any, res: any) {
 export default function handler(req, res) {
   return {
     message: 'Hello from Bini.js!',
-    timestamp: new Date().toISOString(),
-    method: req.method
+    method: req.method,
+    timestamp: new Date().toISOString()
   };
 }
 ```
 
-### Dynamic API Routes
+### Dynamic Routes
 
 ```typescript
 // src/app/api/users/[id].ts
 export default function handler(req: any, res: any) {
-  const { id } = req.query;
-  
+  const { id } = req.params;
+
   if (req.method === 'GET') {
-    return {
-      id,
-      name: `User ${id}`,
-      email: `user${id}@example.com`
-    };
+    return { id, name: `User ${id}` };
   }
-  
+
   res.status(405);
   return { error: 'Method not allowed' };
 }
 ```
 
-### Access API Routes
+### Use in Your App
 
 ```javascript
-// Client-side
 const response = await fetch('/api/hello');
 const data = await response.json();
 console.log(data);
@@ -463,160 +214,233 @@ console.log(data);
 
 ---
 
-## 🚀 Development vs Production
+## 📦 Production Deployment
 
-### Development (`npm run dev`)
-- ✅ Hot Module Replacement (HMR)
-- ✅ Dynamic imports + code splitting
-- ✅ Custom 404 page support
-- ✅ API routes with hot reload
-- ✅ Development badge
-- ✅ Source maps
+### Build for Production
 
-### Preview (`npm run preview`)
-- ✅ Production build preview
-- ✅ All optimizations enabled
-- ✅ Dynamic imports working
-- ✅ Custom 404 page support
-- ✅ API routes functioning
+```bash
+npm run build
+npm run start
+```
 
-### Production (`npm run start`)
-- ✅ Fastify server (2x faster than Express)
-- ✅ Gzip compression
-- ✅ Dynamic imports optimized
-- ✅ Custom 404 page support
-- ✅ Full API routes support
-- ✅ Rate limiting
-- ✅ Security headers
+Creates optimized `dist/` folder and starts Fastify server on port 3000.
+
+### Deploy to Vercel
+
+```bash
+git push origin main
+# Vercel auto-detects and deploys
+```
+
+**vercel.json:**
+```json
+{
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist"
+}
+```
+
+### Deploy to Netlify (Node.js Runtime)
+
+```bash
+1. Connect GitHub repo
+2. Build command: npm run build
+3. Publish directory: dist
+4. Enable Node.js runtime
+```
+
+### Deploy to Heroku
+
+```bash
+heroku create my-bini-app
+git push heroku main
+```
+
+### Deploy to Railway
+
+```bash
+1. Connect GitHub repo
+2. Railway auto-detects Node.js
+3. Sets PORT automatically
+```
+
+### Deploy to VPS (Ubuntu/CentOS)
+
+```bash
+# SSH into server
+ssh user@your-server.com
+git clone your-repo
+cd your-app
+
+# Install and build
+npm install
+npm run build
+
+# Run with PM2
+npm install -g pm2
+pm2 start api-server.js --name "bini-app"
+pm2 save && pm2 startup
+```
 
 ---
 
-## 📦 Build & Deploy
+## 🌐 Deployment Compatibility
 
-```bash
-# Development (with hot reload)
-npm run dev
+| Platform | Support | API Routes | Runtime |
+|----------|---------|-----------|---------|
+| **Vercel** | ✅ Full | ✅ Serverless | Node.js |
+| **Netlify** | ✅ Full | ✅ Node.js | Node.js |
+| **Heroku** | ✅ Full | ✅ Yes | Node.js |
+| **Railway** | ✅ Full | ✅ Yes | Node.js |
+| **Render** | ✅ Full | ✅ Yes | Node.js |
+| **Fly.io** | ✅ Full | ✅ Yes | Node.js |
+| **GitHub Codespaces** | ✅ Full | ✅ Yes | Node.js |
+| **CodeSandbox** | ✅ Full | ✅ Yes | Node.js |
+| **Traditional VPS** | ✅ Full | ✅ Yes | Node.js |
+| **GitHub Pages** | ❌ No | ❌ No | Static |
+| **Netlify Static** | ❌ No | ❌ No | Static |
+| **AWS S3** | ❌ No | ❌ No | Static |
 
-# Build for production
-npm run build
-
-# Preview production build
-npm run preview
-
-# Start production server
-npm run start
-```
+⚠️ Static hosting requires Node.js server for API routes. Use Vercel or Netlify with Node.js runtime instead.
 
 ---
 
 ## 🎨 Styling Options
 
-Choose during project creation:
+Choose your preferred CSS solution:
 
-- **Tailwind CSS** – Utility-first CSS framework
-- **CSS Modules** – Scoped CSS with `module.css` files
-- **Vanilla CSS** – Plain CSS with CSS variables
+- **Tailwind CSS** — Utility-first framework with dark mode
+- **CSS Modules** — Scoped styles with `*.module.css`
+- **Vanilla CSS** — Plain CSS with CSS variables
 
-All include a responsive blue theme (#ecf3ff background).
-
----
-
-## 📊 Features at a Glance
-
-| Feature | Dev | Preview | Production |
-|---------|-----|---------|-----------|
-| Dynamic Code Splitting | ✅ | ✅ | ✅ |
-| Custom 404 Pages | ✅ | ✅ | ✅ |
-| File-Based Routing | ✅ | ✅ | ✅ |
-| API Routes (TS/JS) | ✅ | ✅ | ✅ |
-| Hot Module Reload | ✅ | ❌ | ❌ |
-| Source Maps | ✅ | ✅ | ❌ |
-| Gzip Compression | ❌ | ✅ | ✅ |
-| Rate Limiting | ❌ | ❌ | ✅ |
-| Security Headers | ❌ | ❌ | ✅ |
+All include responsive design and blue theme (#ecf3ff).
 
 ---
 
-## 🔍 System Requirements
+## 🔒 Security & Performance
 
-- **Node.js**: 18.0.0 or higher
-- **Disk Space**: 150MB
-- **RAM**: 512MB minimum
-- **OS**: macOS, Linux, Windows (WSL2 recommended)
-
----
-
-## 🆚 Comparison with Next.js
-
-| Feature | Bini.js | Next.js |
-|---------|---------|---------|
-| **Setup Time** | <2 min | ~5 min |
-| **Bundle Size** | Smaller | Larger |
-| **Production Server** | Fastify | Node/Vercel | 
-| **Code Splitting** | Automatic (v9.2.2) | Automatic |
-| **Custom 404** | ✅ Yes | ✅ Yes |
-| **API Routes** | ✅ Yes | ✅ Yes |
-| **Deployment** | Anywhere | Vercel (best) |
-| **Learning Curve** | Easier | Steeper |
-| **Community** | Growing | Large |
-
----
-
-## 📚 Changelog
-
-### v9.2.2 (Latest)
-- ✅ **Custom Not-Found Pages** – `not-found.tsx/jsx` support
-- ✅ **Dynamic Imports** – Automatic code splitting for all routes
-- ✅ **Universal Hosting** – Works on all platforms (GitHub, Netlify, Vercel, etc.)
-- ✅ **Performance** – 64% smaller initial bundles
-- ✅ **Better HMR Output** – Corrected Vite-style logging
-
-### v9.2.1
-- Fixed HMR CLI output formatting
-- Improved timestamp display
-
-### v9.2.0
-- 52% faster dev startup
-- 77% faster hot reload
-- 39% less memory usage
-- Native file watching
-
-### v9.1.5
-- TypeScript API route support
-- API routes in `src/app/api/`
-- Dynamic API route patterns
-
----
-
-## 🔐 Security
-
-Built-in security features:
-
-- ✅ Path traversal prevention
-- ✅ Prototype pollution protection
-- ✅ Input sanitization
-- ✅ Rate limiting (100 req/15min per IP)
+### Built-in Security
 - ✅ Helmet.js security headers
-- ✅ CORS configuration
-- ✅ Graceful shutdown handling
+- ✅ Rate limiting (100 req/15 min)
+- ✅ CORS protection
+- ✅ XSS prevention
+- ✅ Path traversal prevention
+
+### Performance Metrics
+- **Bundle size**: 89KB (gzipped)
+- **Server speed**: Fastify (2x faster than Express)
+- **Build time**: <10 seconds
+- **HMR updates**: <100ms
 
 ---
 
-## 📞 Support
+## 📝 Environment Variables
 
-- **GitHub**: [Binidu01/bini-cli](https://github.com/Binidu01/bini-cli)
-- **Documentation**: [bini.js.org](https://bini.js.org)
-- **NPM**: [create-bini-app](https://npmjs.com/package/create-bini-app)
-- **Issues**: [GitHub Issues](https://github.com/Binidu01/bini-cli/issues)
+Automatically detected and displayed:
+
+```bash
+# .env
+VITE_API_URL=https://api.example.com
+
+# .env.local (overrides .env)
+VITE_SECRET_KEY=secret123
+
+# .env.production
+VITE_API_URL=https://prod-api.example.com
+```
+
+Displayed on server startup:
+```
+✓ Environments: .env, .env.local
+✓ Ready
+```
+
+---
+
+## 🆚 Comparison
+
+| Feature | Bini.js | Next.js | Remix |
+|---------|---------|---------|-------|
+| **Setup** | <2 min | ~5 min | ~5 min |
+| **File-based routing** | ✅ Yes | ✅ Yes | ✅ Yes |
+| **API routes** | ✅ Built-in | ✅ Built-in | ✅ Yes |
+| **Production server** | Fastify | Vercel | Node.js |
+| **Bundle size** | 89KB | 150KB | 120KB |
+| **Deployment** | Anywhere | Vercel (best) | Anywhere |
+| **Learning curve** | Easy | Medium | Medium |
+
+---
+
+## 📚 Examples
+
+### Admin Dashboard (File-Based)
+```typescript
+// src/app/admin.tsx
+export default function AdminPage() {
+  return <h1>Admin Dashboard</h1>;
+}
+```
+
+Access: `/admin`
+
+### Product Details (Dynamic Route)
+```typescript
+// src/app/products/[id]/page.tsx
+export default function ProductPage({ params }: any) {
+  return <h1>Product {params.id}</h1>;
+}
+```
+
+Access: `/products/123`
+
+### User API (TypeScript)
+```typescript
+// src/app/api/users/[id].ts
+export default async function handler(req: any) {
+  const { id } = req.params;
+  
+  if (req.method === 'GET') {
+    return { id, name: `User ${id}` };
+  }
+  
+  return { error: 'Method not allowed' };
+}
+```
+
+Access: `GET /api/users/123`
+
+---
+
+## 💡 Pro Tips
+
+1. **Use file-based for simple pages** — Less boilerplate
+2. **Use folder-based for complex layouts** — More organization
+3. **Keep API routes flat** — Easier to maintain
+4. **Use TypeScript for APIs** — Better type safety
+5. **Test locally** — `npm run preview` before deploying
+
+---
+
+## 🔗 Resources
+
+- **Website**: https://bini.js.org
+- **GitHub**: https://github.com/Binidu01/bini-cli
+- **NPM**: https://www.npmjs.com/package/create-bini-app
+- **Issues**: https://github.com/Binidu01/bini-cli/issues
+- **Discussions**: https://github.com/Binidu01/bini-cli/discussions
 
 ---
 
 ## 📄 License
 
-MIT – Free for personal and commercial use.
+MIT — Free for personal and commercial use.
 
 ---
 
-**Bini.js v9.2.2** — Built with ❤️ using Vite, React, and Fastify
+<div align="center">
 
-*Dynamic code splitting · Custom 404 pages · Works everywhere*
+**Bini.js v9.2.3** — Built with ❤️ using Vite, React, and Fastify
+
+*Standard dist folder · File-based routing · Works on all Node.js servers · Zero config deployment*
+
+</div>

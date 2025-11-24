@@ -1,0 +1,131 @@
+name: Release & Publish
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  id-token: write
+  packages: write
+
+jobs:
+  release:
+    name: Build, Tag, Release & Publish
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org/
+
+      - name: Install Dependencies
+        run: npm install
+
+      - name: Build Project
+        run: npm run build
+
+      - name: Get Version from package.json
+        id: pkg
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Detected version: $VERSION"
+
+      - name: Create Git Tag if not exists
+        run: |
+          TAG="v${{ steps.pkg.outputs.version }}"
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists. Skipping."
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git tag "$TAG"
+            git push origin "$TAG"
+          fi
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "v${{ steps.pkg.outputs.version }}"
+          name: "v${{ steps.pkg.outputs.version }}"
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+
+      - name: Publish to npm with Provenance
+        run: npm publish --provenance --access public
+        env:
+          NPM_CONFIG_PROVENANCE: true
+
+      - name: Verify npm Publish
+        run: |
+          VERSION=${{ steps.pkg.outputs.version }}
+          PACKAGE="create-bini-app"
+          echo "🔍 Verifying $PACKAGE@$VERSION is published..."
+          sleep 5
+          if npm view $PACKAGE@$VERSION version > /dev/null 2>&1; then
+            echo "✅ $PACKAGE@$VERSION is live on npm"
+          else
+            echo "❌ $PACKAGE@$VERSION not found on npm"
+            exit 1
+          fi
+
+      - name: Deployment Status - success
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const version = "${{ steps.pkg.outputs.version }}";
+            const deployment = await github.rest.repos.createDeployment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: context.ref,
+              environment: 'production',
+              description: `Published create-bini-app@${version}`,
+              auto_merge: false,
+              required_contexts: [],
+              production_environment: true
+            });
+            await github.rest.repos.createDeploymentStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              deployment_id: deployment.data.id,
+              state: 'success',
+              description: 'Successfully published to npm',
+              environment_url: `https://www.npmjs.com/package/create-bini-app`
+            });
+
+      - name: Deployment Status - failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const version = "${{ steps.pkg.outputs.version }}";
+            const deployment = await github.rest.repos.createDeployment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: context.ref,
+              environment: 'production',
+              description: `Failed release create-bini-app@${version}`,
+              auto_merge: false,
+              required_contexts: [],
+              production_environment: true
+            });
+            await github.rest.repos.createDeploymentStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              deployment_id: deployment.data.id,
+              state: 'failure',
+              description: 'Build or npm publish failed',
+              environment_url: `https://www.npmjs.com/package/create-bini-app`
+            });

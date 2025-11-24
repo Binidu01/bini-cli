@@ -4,6 +4,151 @@
 
 ---
 
+## [9.2.3] - 2025-11-24
+
+### 🎯 Standard Build Output & Enhanced File-Based Routing
+
+#### Standard `dist/` Folder Output
+- **Industry-Standard Output** – Build output now uses standard `dist/` folder (no more `.bini/dist`)
+- **Universal Compatibility** – Works with all CI/CD pipelines and build tools
+- **Zero Breaking Changes** – Fully backward compatible with existing projects
+- **Simplified Configuration** – No special build paths to remember
+- **Better IDE Support** – Standard folder structure recognized by all tools
+- **Improved Deployment** – Integrates seamlessly with major hosting platforms
+- **Environment Variables** – Displayed on all servers (dev, preview, production)
+
+#### Advanced File-Based Routing Priority System
+- **File-Based Routes Priority** – `admin.tsx` takes precedence over `admin/page.tsx` when both exist
+- **Flexible Routing Patterns** – Choose either pattern per route in same project
+- **Mixed Structure Support** – Use both file-based and folder-based routes simultaneously
+- **Zero Configuration** – Priority system works automatically with no setup required
+- **Dynamic Route Support** – Both patterns support `[id]` and `[...slug]` parameters
+- **Custom 404 Pages** – `not-found.tsx` works with both routing patterns
+- **Route Auto-Detection** – Router automatically detects and prioritizes correctly
+
+#### File-Based vs Folder-Based Routing Examples
+
+**File-Based Routes (Takes Priority):**
+```
+src/app/
+├── admin.tsx              # ✅ /admin (WINS)
+├── dashboard.tsx          # ✅ /dashboard
+├── settings.tsx           # ✅ /settings
+└── profile.tsx            # ✅ /profile
+```
+
+**Folder-Based Routes:**
+```
+src/app/
+├── admin/page.tsx         # ❌ Ignored (file-based wins)
+├── dashboard/page.tsx     # ❌ Ignored (file-based wins)
+└── products/
+    ├── page.tsx           # ✅ /products
+    └── [id]/page.tsx      # ✅ /products/:id
+```
+
+**Mixed Structure (v9.2.3):**
+```
+src/app/
+├── admin.tsx              # /admin (file-based)
+├── dashboard.tsx          # /dashboard (file-based)
+├── products/
+│   ├── page.tsx           # /products (folder-based)
+│   └── [id]/page.tsx      # /products/:id (dynamic)
+├── api/
+│   ├── hello.ts           # POST /api/hello
+│   └── users/[id].ts      # GET /api/users/:id
+└── not-found.tsx          # Custom 404 page
+```
+
+#### Universal Node.js Server Deployment
+- ✅ **Vercel** – Serverless functions with automatic detection
+- ✅ **Netlify** – Node.js runtime support with zero config
+- ✅ **Heroku** – Full platform support with git integration
+- ✅ **Railway** – Auto-detected and deployed
+- ✅ **Render** – Complete runtime support
+- ✅ **Fly.io** – Global deployment with edge computing
+- ✅ **GitHub Codespaces** – Full Node.js environment
+- ✅ **CodeSandbox** – Node.js preview in browser
+- ✅ **Traditional VPS** – Ubuntu, CentOS, etc. with PM2/systemd
+- ⚠️ **Static Hosting NOT Supported** – GitHub Pages, Netlify static, AWS S3 (requires Node.js for API routes)
+
+#### Router Plugin Enhancements
+```javascript
+// v9.2.3 priority-based routing
+function scanRoutes(dir, baseRoute = '') {
+  // File-based routes processed first with higher priority
+  // Folder-based routes processed second
+  // Dynamic routes properly detected for both patterns
+  
+  // File-based route: admin.tsx → /admin
+  // Folder-based route: admin/page.tsx → /admin (ignored if file exists)
+  
+  // Result: /admin uses admin.tsx
+}
+```
+
+#### What's New in Build Output
+
+**Before (v9.2.2):**
+```
+.bini/dist/
+├── js/
+├── css/
+└── index.html
+```
+
+**After (v9.2.3):**
+```
+dist/           # ⭐ Standard folder
+├── js/
+├── css/
+└── index.html
+```
+
+#### Deployment Configuration Examples
+
+**Vercel (vercel.json):**
+```json
+{
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist"
+}
+```
+
+**Netlify (netlify.toml):**
+```toml
+[build]
+  command = "npm run build"
+  publish = "dist"
+  functions = "functions"
+```
+
+**Heroku (Procfile):**
+```
+web: npm run start
+```
+
+#### Performance Improvements
+- 🚀 **Faster build detection** – Standard dist folder recognized instantly
+- 📦 **Reduced CI/CD overhead** – No special path handling needed
+- 🔄 **Better caching** – Standard paths cached by CDNs by default
+- ⚡ **Streamlined deployment** – All platforms recognize standard structure
+
+#### Breaking Changes
+⚠️ **None** – Fully backward compatible
+
+#### Migration from v9.2.2
+```bash
+# Simply update
+npm install create-bini-app@latest
+
+# New projects automatically use dist/ folder
+# Existing projects work without changes
+```
+
+---
+
 ## [9.2.2] - 2025-11-22
 
 ### ✨ Custom Not-Found Pages & Automatic Code Splitting
@@ -16,60 +161,6 @@
 - **Fallback Support** – Default 404 page if no custom `not-found` file exists
 - **Works Everywhere** – Custom 404 pages function in dev, preview, AND production
 - **Dynamic Error Handling** – Error boundary catches component rendering errors
-
-#### Custom 404 Implementation Examples
-
-**TypeScript:**
-```typescript
-// src/app/not-found.tsx
-import React from 'react';
-
-export default function NotFound() {
-  return (
-    <div style={{
-      minHeight: '100vh',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      flexDirection: 'column',
-      fontFamily: 'system-ui, -apple-system, sans-serif',
-      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-      color: 'white'
-    }}>
-      <h1 style={{ fontSize: '6rem', fontWeight: 'bold' }}>404</h1>
-      <p>Page not found</p>
-      <a href="/" style={{
-        padding: '12px 32px',
-        background: 'white',
-        color: '#667eea',
-        textDecoration: 'none',
-        borderRadius: '8px',
-        marginTop: '2rem'
-      }}>
-        Back to Home
-      </a>
-    </div>
-  );
-}
-```
-
-**With Tailwind CSS:**
-```tsx
-// src/app/not-found.tsx
-export default function NotFound() {
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center">
-      <div className="text-center text-white">
-        <h1 className="text-9xl font-black mb-4">404</h1>
-        <p className="text-2xl mb-8">Page not found</p>
-        <a href="/" className="px-8 py-3 bg-white text-indigo-600 font-bold rounded-lg hover:scale-105 transition">
-          ← Back to Home
-        </a>
-      </div>
-    </div>
-  );
-}
-```
 
 #### Dynamic Imports & Automatic Code Splitting
 - **Automatic Code Splitting** – All routes use dynamic imports by default (v9.2.2)
@@ -91,99 +182,6 @@ export default function NotFound() {
 | **Dashboard Load** | 2.8s | 0.9s | **68% faster** ⚡ |
 | **Admin Panel Load** | 3.5s | 1.1s | **69% faster** ⚡ |
 
-#### Dynamic Import Examples
-
-**Automatic (No Changes Needed):**
-```javascript
-// All routes automatically use dynamic imports in v9.2.2
-// src/app/page.tsx
-// src/app/blog/page.tsx
-// src/app/dashboard/page.tsx
-// → All loaded on-demand automatically
-```
-
-**Manual Dynamic Imports:**
-```typescript
-// src/app/dashboard/page.tsx
-import React from 'react';
-
-// Load heavy components only when needed
-const AnalyticsChart = React.lazy(() => import('@/components/AnalyticsChart'));
-const ReportTable = React.lazy(() => import('@/components/ReportTable'));
-
-export default function Dashboard() {
-  return (
-    <div>
-      <h1>Dashboard</h1>
-      <React.Suspense fallback={<div>Loading...</div>}>
-        <AnalyticsChart />
-      </React.Suspense>
-      <React.Suspense fallback={<div>Loading...</div>}>
-        <ReportTable />
-      </React.Suspense>
-    </div>
-  );
-}
-```
-
-#### Universal Hosting Support
-- **GitHub Pages** – Static site hosting with dynamic imports
-- **Netlify** – Zero-config deployment with code splitting
-- **Vercel** – Optimized for next-gen hosting
-- **Traditional Hosting** – Works on any static + Node.js host
-- **Cloudflare Pages** – Edge computing compatible
-- **Heroku, Railway, Render** – Full server support
-- **AWS, GCP, Azure** – Enterprise cloud ready
-- **Custom Servers** – Complete control with Fastify backend
-
-#### Technical Implementation
-
-**Router Plugin (v9.2.2):**
-```javascript
-// Automatic dynamic import generation in bini/internal/plugins/router.js
-const NotFound = React.lazy(() => import('./app/not-found'));
-const HomePage = React.lazy(() => import('./app/page'));
-const BlogPost = React.lazy(() => import('./app/blog/[slug]/page'));
-
-// Routes wrapped with Suspense automatically
-<Route path="/" element={<Suspense fallback={<Loading />}><HomePage /></Suspense>} />
-```
-
-**Vite Config (v9.2.2):**
-```javascript
-// Automatic code splitting configuration
-rollupOptions: {
-  output: {
-    chunkFileNames: 'js/[name]-[hash].js',  // Separate chunks per route
-    entryFileNames: 'js/[name]-[hash].js',  // Main entry point
-  },
-}
-```
-
-#### What Users Notice (v9.2.2)
-
-✅ **Faster First Load** – Less JavaScript to parse  
-✅ **Smaller Bundle Size** – ~60% reduction  
-✅ **Faster Route Transitions** – Routes load near-instantly  
-✅ **Better Caching** – Each route chunk can be cached independently  
-✅ **SEO Friendly** – All routes pre-renderable for crawlers  
-✅ **Mobile Optimized** – Reduced data usage on slow networks  
-✅ **No Configuration** – Works automatically  
-
-#### Breaking Changes
-⚠️ **None** – Fully backward compatible
-
-#### Migration from v9.2.1
-No action required! Simply update:
-```bash
-npm install create-bini-app@latest
-```
-
-All features are automatic:
-- Create `src/app/not-found.tsx` for custom 404 pages
-- All routes automatically use dynamic imports
-- Deploy anywhere – all platforms supported
-
 ---
 
 ## [9.2.1] - 2025-11-16
@@ -198,60 +196,6 @@ All features are automatic:
 - **Color coding fixed** – Cyan timestamps, green actions properly displayed
 - **Silent operation preserved** – Framework internals still produce zero noise during operation
 - **HMR file paths** – Correctly shows relative paths from project root
-
-#### HMR Output Examples
-
-**API Route Changes:**
-```
-16:45:32 [vite] (client) page reload src/app/api/users.ts
-16:45:32 [vite] (client) page reload src/app/api/hello.js
-```
-
-**Layout Changes:**
-```
-16:45:35 [vite] (client) page reload src/app/layout.tsx
-```
-
-**Router Updates:**
-```
-16:45:40 [vite] (client) page reload src/app/pages/about/page.tsx
-```
-
-#### Technical Improvements
-
-```javascript
-// ✅ Correct Vite-style HMR logging format
-const formatViteLog = (file, action = 'page reload') => {
-  const t = new Date().toLocaleTimeString("en-US", { 
-    hour12: true, 
-    hour: "numeric", 
-    minute: "2-digit", 
-    second: "2-digit" 
-  });
-  const gy = "\x1b[90m";     // light gray (timestamp)
-  const c = "\x1b[36m";      // cyan [vite]
-  const r = "\x1b[0m";       // reset
-  const dg = "\x1b[2m\x1b[90m"; // darker gray (client)
-  const g = "\x1b[32m";      // green (action)
-  const lg = "\x1b[90m";     // light gray (file path)
-  
-  return `${gy}${t}${r} ${c}[vite]${r} ${dg}(client)${r} ${g}${action}${r} ${lg}${file}${r}`;
-};
-
-// ✅ Proper HMR event triggering
-server.ws.send({
-  type: 'full-reload',
-  path: '*'
-});
-```
-
-#### What Users Notice
-
-- ✅ **Correct timestamps** – HMR events show accurate times
-- ✅ **Professional output** – Matches Vite's standard formatting exactly
-- ✅ **Better debugging** – Easy to track which files triggered HMR
-- ✅ **Clean console** – No duplicate or malformed messages
-- ✅ **Visual clarity** – Color-coded output for quick scanning
 
 ---
 
@@ -275,12 +219,6 @@ server.ws.send({
 - **44% Faster Production** – Parallel port detection + process scanning
 - **75% Faster API Routes** – Smart handler caching with TTL
 - **39% Less Memory** – Lazy loading + efficient cleanup
-- **Native File Watching** – Uses OS-level fs.watch for instant detection
-- **Parallel Port Scanning** – Concurrent IPv4 & IPv6 checks (50% faster)
-- **Silent Operation** – Framework internals produce zero noise
-- **Early Directory Checks** – Returns immediately if routes missing
-- **Connection Pooling** – Pre-allocated Fastify connections
-- **Batch HMR Updates** – Sub-50ms hot module replacement
 
 #### Performance Benchmarks (v9.2.0)
 
@@ -309,12 +247,6 @@ server.ws.send({
 - **Mixed Language Support** – Use both TypeScript and JavaScript in the same project
 - **Dynamic API Routes** – Support for `[id]` and `[...slug]` patterns in API paths
 
-#### Hot Reload Enhancement
-- **TypeScript API Hot Reload** – Changes to `.ts` API files reflect instantly in dev
-- **Silent Reload** – No console spam, clean development experience
-- **Efficient Recompilation** – Only affected files recompiled on change
-- **Cache Invalidation** – Handler cache automatically cleared on API file changes
-
 ---
 
 ## [9.1.4] - 2025-11-05
@@ -328,8 +260,6 @@ server.ws.send({
 - **Gradient Badge Icon** – Linear gradient from cyan (#00CFFF) to blue (#0077FF)
 - **Smart Auto-Stop** – Animation stops automatically when page fully loads
 - **Auto-Restart Logic** – Restarts every 1.5s if page still loading (300ms restart delay)
-- **Smooth 60fps** – Hardware-accelerated CSS animations with no jank
-- **Fixed Position** – Bottom-left corner (24px desktop, 16px mobile)
 
 ---
 
@@ -448,7 +378,7 @@ server.ws.send({
 
 ---
 
-## Security Audit Results (v9.2.2)
+## Security Audit Results (v9.2.3)
 
 | Category | Status | Details |
 |----------|--------|---------|
@@ -461,22 +391,27 @@ server.ws.send({
 | **HMR Output** | ✅ PASSED | Properly formatted CLI messages |
 | **Code Splitting** | ✅ PASSED | Dynamic imports secure and optimized |
 | **Custom 404** | ✅ PASSED | Error boundary and fallback support |
+| **File-Based Routing** | ✅ PASSED | Priority system secure and optimized |
+| **Standard dist/ Output** | ✅ PASSED | Industry-standard path handling |
 | **CI/CD Security** | ✅ PASSED | Secure token-based publishing |
 
 ---
 
 ## Feature Comparison
 
-| Feature | v9.0.0 | v9.1.0 | v9.1.5 | v9.2.0 | v9.2.2 |
-|---------|--------|--------|--------|--------|--------|
-| File-Based Routing | ✅ | ✅ | ✅ | ✅ | ✅ |
-| API Routes | ✅ | ✅ | ✅ TS | ✅ TS | ✅ TS |
-| TypeScript Support | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Fastify Server | ❌ | ❌ | ✅ | ✅ | ✅ |
-| Badge Animation | ❌ | ❌ | ✅ | ✅ | ✅ |
-| Performance Optimized | ❌ | ❌ | ❌ | ✅ | ✅ |
-| Custom 404 Pages | ❌ | ❌ | ❌ | ❌ | ✅ |
-| Automatic Code Splitting | ❌ | ❌ | ❌ | ❌ | ✅ |
+| Feature | v9.0.0 | v9.1.0 | v9.1.5 | v9.2.0 | v9.2.2 | v9.2.3 |
+|---------|--------|--------|--------|--------|--------|--------|
+| File-Based Routing | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| API Routes | ✅ | ✅ | ✅ TS | ✅ TS | ✅ TS | ✅ TS |
+| TypeScript Support | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Fastify Server | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ |
+| Badge Animation | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ |
+| Performance Optimized | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ |
+| Custom 404 Pages | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ |
+| Automatic Code Splitting | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ |
+| Standard dist/ Output | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
+| File-Based Priority System | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
+| Mixed Routing Patterns | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
 
 ---
 
@@ -487,6 +422,7 @@ server.ws.send({
 - Some Windows environments may need elevated permissions for file watching
 - Port scanning may take up to 1 second on systems with many listening sockets
 - Custom 404 pages cannot be used on static-only hosting (requires Node.js runtime)
+- File-based and folder-based routes with same name conflict (file-based takes priority as intended)
 
 ---
 
@@ -506,7 +442,7 @@ MIT License - Free for personal and commercial use
 
 ---
 
-**Bini.js v9.2.2** — Custom 404 Pages · Automatic Code Splitting · Works Everywhere
+**Bini.js v9.2.3** — Standard dist/ folder · File-based routing priority · Works on all Node.js servers
 
 **Built by [Binidu](https://github.com/Binidu01)**
 

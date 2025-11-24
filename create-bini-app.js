@@ -730,7 +730,7 @@ export default {
   displayBiniStartup
 };`);
 
-// Router Plugin - UPDATED with custom 404 support
+// Router Plugin - UPDATED with custom 404 support and file-based routing
 secureWriteFile(path.join(pluginsPath, "router.js"), `import fs from 'fs';
 import path from 'path';
 
@@ -753,6 +753,33 @@ function scanRoutes(dir, baseRoute = '') {
     
     const entries = fs.readdirSync(dir, { withFileTypes: true });
     
+    // First, process file-based routes (like admin.tsx, dashboard.tsx)
+    for (const entry of entries) {
+      if (entry.isFile() && !entry.name.startsWith('.')) {
+        const fileExt = path.extname(entry.name);
+        const fileName = path.basename(entry.name, fileExt);
+        
+        // Skip page.tsx and not-found files as they are handled separately
+        if (fileName === 'page' || fileName === 'not-found') {
+          continue;
+        }
+        
+        // Only process .tsx, .jsx, .ts, .js files as routes
+        if (['.tsx', '.jsx', '.ts', '.js'].includes(fileExt)) {
+          const routePath = baseRoute + '/' + fileName;
+          routes.push({
+            path: routePath,
+            file: path.join(dir, entry.name),
+            dynamic: false,
+            params: [],
+            name: fileName,
+            type: 'file-based'
+          });
+        }
+      }
+    }
+    
+    // Then, process directory-based routes
     for (const entry of entries) {
       if (entry.name === 'node_modules' || entry.name.startsWith('.')) {
         continue;
@@ -780,7 +807,8 @@ function scanRoutes(dir, baseRoute = '') {
             file: path.join(fullPath, pageFile),
             dynamic: isDynamic,
             params: isDynamic ? [entry.name.slice(1, -1)] : [],
-            name: entry.name
+            name: entry.name,
+            type: 'directory-based'
           });
         }
         
@@ -798,6 +826,7 @@ function scanRoutes(dir, baseRoute = '') {
 function generateRouterCode(appDir, isTypeScript) {
   const routes = scanRoutes(appDir);
   
+  // Add root page
   const rootPageFiles = ['page.tsx', 'page.jsx', 'page.ts', 'page.js'];
   const rootPage = rootPageFiles.find(f => fs.existsSync(path.join(appDir, f)));
   
@@ -807,10 +836,12 @@ function generateRouterCode(appDir, isTypeScript) {
       file: path.join(appDir, rootPage),
       dynamic: false,
       params: [],
-      name: 'Home'
+      name: 'Home',
+      type: 'root'
     });
   }
   
+  // Sort routes: static before dynamic, shorter paths first
   routes.sort((a, b) => {
     if (a.dynamic && !b.dynamic) return 1;
     if (!a.dynamic && b.dynamic) return -1;
@@ -1032,7 +1063,8 @@ export default function App() {
     const importInfo = importMap.get(route.file);
     if (!importInfo) return;
     
-    const comment = route.dynamic ? \` {/* Dynamic: \${route.path} */}\` : '';
+    const comment = route.dynamic ? \` {/* Dynamic: \${route.path} */}\` : 
+                   route.type === 'file-based' ? \` {/* File-based: \${route.path} */}\` : '';
     
     if (importInfo.empty) {
       routesCode += \`        <Route path="\${route.path}" element={<EmptyPage pagePath="\${importInfo.path}" />} />\${comment}
@@ -1121,6 +1153,29 @@ function shouldProcessEvent(file, eventType) {
   return true;
 }
 
+function isRouteFile(file) {
+  const fileName = path.basename(file);
+  const ext = path.extname(file);
+  
+  // Check if it's a page file in a directory
+  if (/page\\.(tsx|jsx|ts|js)\$/.test(fileName)) {
+    return true;
+  }
+  
+  // Check if it's a file-based route (like admin.tsx, dashboard.tsx)
+  // but exclude special files
+  const baseName = path.basename(file, ext);
+  if (baseName !== 'not-found' && 
+      baseName !== 'layout' && 
+      baseName !== 'loading' && 
+      baseName !== 'error' &&
+      ['.tsx', '.jsx', '.ts', '.js'].includes(ext)) {
+    return true;
+  }
+  
+  return false;
+}
+
 export function biniRouterPlugin() {
   return {
     name: 'bini-router-plugin',
@@ -1183,9 +1238,7 @@ export function biniRouterPlugin() {
       
       server.watcher.on('add', (file) => {
         if (file.includes('src' + path.sep + 'app')) {
-          if (/page\\.(tsx|jsx|ts|js)\$/.test(file) && shouldProcessEvent(file, 'add')) {
-            regenerateApp();
-          } else if (/not-found\\.(tsx|jsx|ts|js)\$/.test(file) && shouldProcessEvent(file, 'add')) {
+          if ((isRouteFile(file) || /not-found\\.(tsx|jsx|ts|js)\$/.test(file)) && shouldProcessEvent(file, 'add')) {
             regenerateApp();
           }
         }
@@ -1193,9 +1246,7 @@ export function biniRouterPlugin() {
       
       server.watcher.on('unlink', (file) => {
         if (file.includes('src' + path.sep + 'app')) {
-          if (/page\\.(tsx|jsx|ts|js)\$/.test(file) && shouldProcessEvent(file, 'unlink')) {
-            regenerateApp();
-          } else if (/not-found\\.(tsx|jsx|ts|js)\$/.test(file) && shouldProcessEvent(file, 'unlink')) {
+          if ((isRouteFile(file) || /not-found\\.(tsx|jsx|ts|js)\$/.test(file)) && shouldProcessEvent(file, 'unlink')) {
             regenerateApp();
           }
         }
@@ -1221,10 +1272,7 @@ export function biniRouterPlugin() {
       
       server.watcher.on('change', (file) => {
         if (file.includes('src' + path.sep + 'app')) {
-          const isPageFile = /page\\.(tsx|jsx|ts|js)\$/.test(file);
-          const isNotFoundFile = /not-found\\.(tsx|jsx|ts|js)\$/.test(file);
-          
-          if ((isPageFile || isNotFoundFile) && shouldProcessEvent(file, 'change')) {
+          if ((isRouteFile(file) || /not-found\\.(tsx|jsx|ts|js)\$/.test(file)) && shouldProcessEvent(file, 'change')) {
             try {
               regenerateApp();
             } catch (err) {
@@ -1252,8 +1300,7 @@ export function biniRouterPlugin() {
 }
 `);
 
-
- // Preview Plugin - UPDATED: Check .bini/dist BEFORE server starts
+ // Preview Plugin - UPDATED: Check dist BEFORE server starts
   secureWriteFile(path.join(pluginsPath, "preview.js"), `import { displayBiniStartup } from '../env-checker.js';
 import fs from 'fs';
 import path from 'path';
@@ -1263,13 +1310,13 @@ export function biniPreviewPlugin() {
     name: 'bini-preview-plugin',
     
     configurePreviewServer(server) {
-      // Check if .bini/dist exists and has necessary files BEFORE server starts
-      const distPath = path.join(process.cwd(), '.bini/dist');
+      // Check if dist exists and has necessary files BEFORE server starts
+      const distPath = path.join(process.cwd(), 'dist');
       const indexHtmlPath = path.join(distPath, 'index.html');
       
       // Validate build output before allowing server to start
       if (!fs.existsSync(distPath)) {
-        console.log('❌ Build directory not found: .bini/dist');
+        console.log('❌ Build directory not found: dist');
         console.log('💡 Run: npm run build');
         process.exit(1);
       }
@@ -2315,13 +2362,8 @@ async function handleApiRequest(req, res, viteServer = null) {
         res.end(JSON.stringify(data, null, 2));
       },
       send: (data) => {
-        if (typeof data === 'string') {
-          res.setHeader('Content-Type', 'text/plain');
-          res.end(data);
-        } else {
-          res.setHeader('Content-Type', 'application/json');
-          res.end(JSON.stringify(data));
-        }
+        res.setHeader('Content-Type', 'application/json');
+        res.end(JSON.stringify(data));
       },
       end: (data) => {
         res.end(data);
@@ -2479,14 +2521,38 @@ export function biniAPIPlugin(options = {}) {
 function generateCSSModulesFiles(projectPath) {
   const appPath = path.join(projectPath, "src/app");
   
-  // Home page CSS module
-  secureWriteFile(path.join(appPath, "page.module.css"), `.container {
+ // Home page CSS module with dark mode support
+secureWriteFile(path.join(appPath, "page.module.css"), `:root {
+  --bg-light: #ecf3ff;
+  --bg-dark: #0f172a;
+  --text-light: #1f2937;
+  --text-dark: #f1f5f9;
+  --gray-light: #6b7280;
+  --gray-dark: #cbd5e1;
+  --white-light: white;
+  --white-dark: #1e293b;
+  --border-light: #e5e7eb;
+  --border-dark: #334155;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg-light: var(--bg-dark);
+    --text-light: var(--text-dark);
+    --gray-light: var(--gray-dark);
+    --white-light: var(--white-dark);
+    --border-light: var(--border-dark);
+  }
+}
+
+.container {
   min-height: 100vh;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 2rem;
-  background: #ecf3ff;
+  background: var(--bg-light);
+  transition: background-color 0.3s ease, color 0.3s ease;
 }
 
 .wrapper {
@@ -2513,7 +2579,7 @@ function generateCSSModulesFiles(projectPath) {
 .title {
   font-size: 3rem;
   font-weight: bold;
-  color: #1f2937;
+  color: var(--text-light);
   margin-bottom: 1rem;
 }
 
@@ -2526,7 +2592,7 @@ function generateCSSModulesFiles(projectPath) {
 
 .subtitle {
   font-size: 1.25rem;
-  color: #6b7280;
+  color: var(--gray-light);
   margin-bottom: 2rem;
 }
 
@@ -2550,11 +2616,11 @@ function generateCSSModulesFiles(projectPath) {
 }
 
 .card {
-  background: white;
+  background: var(--white-light);
   border-radius: 0.5rem;
   padding: 1.5rem;
   box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--border-light);
   transition: all 0.2s ease;
 }
 
@@ -2571,12 +2637,12 @@ function generateCSSModulesFiles(projectPath) {
 .cardTitle {
   font-size: 1.125rem;
   font-weight: 600;
-  color: #1f2937;
+  color: var(--text-light);
   margin-bottom: 0.5rem;
 }
 
 .cardText {
-  color: #6b7280;
+  color: var(--gray-light);
   font-size: 0.875rem;
   line-height: 1.5;
 }
@@ -2586,11 +2652,11 @@ function generateCSSModulesFiles(projectPath) {
 }
 
 .ctaCard {
-  background: white;
+  background: var(--white-light);
   border-radius: 0.5rem;
   padding: 2rem;
   box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--border-light);
   text-align: center;
   margin-bottom: 2rem;
 }
@@ -2598,12 +2664,12 @@ function generateCSSModulesFiles(projectPath) {
 .ctaTitle {
   font-size: 1.875rem;
   font-weight: bold;
-  color: #1f2937;
+  color: var(--text-light);
   margin-bottom: 0.75rem;
 }
 
 .ctaText {
-  color: #4b5563;
+  color: var(--gray-light);
   font-size: 1.125rem;
   margin-bottom: 1.5rem;
   line-height: 1.6;
@@ -2644,7 +2710,7 @@ function generateCSSModulesFiles(projectPath) {
 .footer {
   text-align: center;
   font-size: 0.875rem;
-  color: #6b7280;
+  color: var(--gray-light);
 }
 
 .link {
@@ -2704,6 +2770,19 @@ function generateGlobalStyles(styling) {
   --shadow-md: 0 8px 15px rgba(0, 0, 0, 0.15);
 }
 
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-primary: #00CFFF;
+    --color-bg: #0f172a;
+    --color-text: #f1f5f9;
+    --color-gray: #cbd5e1;
+    --color-white: #1e293b;
+    --color-border: #334155;
+    --shadow-sm: 0 4px 6px rgba(0, 0, 0, 0.4);
+    --shadow-md: 0 8px 15px rgba(0, 0, 0, 0.5);
+  }
+}
+
 * { 
   box-sizing: border-box; 
   margin: 0; 
@@ -2721,6 +2800,7 @@ body {
   color: var(--color-text);
   background: var(--color-bg);
   min-height: 100vh;
+  transition: background-color 0.3s ease, color 0.3s ease;
 }
 
 #root {
@@ -2735,7 +2815,7 @@ body {
   display: inline-block;
   padding: 12px 24px;
   background: linear-gradient(to right, #00CFFF, #0077FF);
-  color: var(--color-white);
+  color: white;
   font-weight: 600;
   border-radius: 8px;
   text-decoration: none;
@@ -2753,8 +2833,8 @@ body {
 .btn-secondary {
   display: inline-block;
   padding: 12px 24px;
-  border: 2px solid #1f2937;
-  color: #1f2937;
+  border: 2px solid var(--color-text);
+  color: var(--color-text);
   font-weight: 600;
   border-radius: 8px;
   text-decoration: none;
@@ -2767,6 +2847,12 @@ body {
 .btn-secondary:hover {
   background: rgba(0, 0, 0, 0.04);
   transform: scale(1.05);
+}
+
+@media (prefers-color-scheme: dark) {
+  .btn-secondary:hover {
+    background: rgba(255, 255, 255, 0.1);
+  }
 }
 
 .card {
@@ -2850,11 +2936,12 @@ body {
 
 .home-container {
   min-height: 100vh;
-  background: linear-gradient(to bottom right, #ecf3ff, #e0e7ff);
+  background: linear-gradient(to bottom right, var(--color-bg), var(--color-bg));
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 2rem 1rem;
+  transition: background-color 0.3s ease;
 }
 
 .home-wrapper {
@@ -2876,14 +2963,14 @@ body {
 .title {
   font-size: 3rem;
   font-weight: bold;
-  color: #1f2937;
+  color: var(--color-text);
   margin-bottom: 1rem;
   text-align: center;
 }
 
 .subtitle {
   font-size: 1.25rem;
-  color: #4b5563;
+  color: var(--color-gray);
   line-height: 1.6;
   max-width: 32rem;
   margin: 0 auto 2rem;
@@ -2910,17 +2997,17 @@ body {
 }
 
 .feature-card {
-  background: white;
+  background: var(--color-white);
   border-radius: 0.5rem;
   padding: 1.5rem;
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-  border: 1px solid #e5e7eb;
+  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--color-border);
   transition: all 0.2s ease;
   text-align: center;
 }
 
 .feature-card:hover {
-  box-shadow: 0 8px 12px rgba(0, 0, 0, 0.15);
+  box-shadow: var(--shadow-md);
   transform: translateY(-2px);
 }
 
@@ -2932,7 +3019,7 @@ body {
 .feature-title {
   font-size: 1.125rem;
   font-weight: 600;
-  color: #1f2937;
+  color: var(--color-text);
 }
 
 .cta-buttons {
@@ -2953,7 +3040,7 @@ body {
 .footer-links {
   text-align: center;
   font-size: 0.875rem;
-  color: #6b7280;
+  color: var(--color-gray);
 }
 
 .footer-links a {
@@ -3019,6 +3106,7 @@ ${baseStyles}`;
     return baseStyles;
   }
 }
+
 
 function generatePackageJson(projectName, useTypeScript, styling) {
   const baseDependencies = {
@@ -3229,23 +3317,20 @@ export default function RootLayout({ children }) {
 }`);
   }
 
-  // Generate home page based on styling option
-  let homePageContent;
-  
-  if (styling === "Tailwind") {
-    homePageContent = `import { useEffect, useState } from "react";
+ // Generate home page based on styling option
+let homePageContent;
+
+if (styling === "Tailwind") {
+  homePageContent = `import { useEffect } from "react";
 
 export default function Home() {
-  const [isDark, setIsDark] = useState(false);
-
   useEffect(() => {
     const darkMode = window.matchMedia("(prefers-color-scheme: dark)").matches;
-    setIsDark(darkMode);
     document.documentElement.classList.toggle("dark", darkMode);
   }, []);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-blue-100 flex items-center justify-center px-4 py-8">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-blue-100 dark:from-slate-900 dark:to-slate-800 flex items-center justify-center px-4 py-8">
       <div className="w-full max-w-4xl">
         {/* Logo */}
         <div className="flex justify-center mb-12">
@@ -3280,13 +3365,13 @@ export default function Home() {
 
         {/* Header */}
         <div className="text-center mb-12">
-          <h1 className="text-5xl font-bold text-gray-900 mb-4">
+          <h1 className="text-5xl font-bold text-gray-900 dark:text-slate-100 mb-4">
             Build Better with{" "}
             <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-500 to-blue-600">
               Bini.js
             </span>
           </h1>
-          <p className="text-xl text-gray-700 leading-relaxed max-w-2xl mx-auto">
+          <p className="text-xl text-gray-700 dark:text-slate-300 leading-relaxed max-w-2xl mx-auto">
             A modern JavaScript framework designed for simplicity and performance.
             Start building stunning applications in seconds.
           </p>
@@ -3302,23 +3387,23 @@ export default function Home() {
           ].map((feature) => (
             <div
               key={feature.title}
-              className="bg-white rounded-lg p-6 shadow-md hover:shadow-lg transition-shadow border border-gray-200"
+              className="bg-white dark:bg-slate-800 rounded-lg p-6 shadow-md hover:shadow-lg transition-shadow border border-gray-200 dark:border-slate-700"
             >
               <div className="text-4xl mb-3">{feature.icon}</div>
-              <h3 className="text-lg font-semibold text-gray-900 mb-2">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-slate-100 mb-2">
                 {feature.title}
               </h3>
-              <p className="text-gray-600 text-sm">{feature.desc}</p>
+              <p className="text-gray-600 dark:text-slate-400 text-sm">{feature.desc}</p>
             </div>
           ))}
         </div>
 
         {/* CTA Section */}
-        <div className="bg-white rounded-lg shadow-lg p-8 text-center mb-8 border border-gray-200">
-          <h2 className="text-3xl font-bold text-gray-900 mb-3">
+        <div className="bg-white dark:bg-slate-800 rounded-lg shadow-lg p-8 text-center mb-8 border border-gray-200 dark:border-slate-700">
+          <h2 className="text-3xl font-bold text-gray-900 dark:text-slate-100 mb-3">
             Ready to Get Started?
           </h2>
-          <p className="text-gray-600 mb-6 text-lg">
+          <p className="text-gray-600 dark:text-slate-300 mb-6 text-lg">
             Explore the possibilities with Bini.js and build faster than ever.
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
@@ -3334,7 +3419,7 @@ export default function Home() {
               href="https://bini.js.org"
               target="_blank"
               rel="noopener noreferrer"
-              className="px-8 py-3 border-2 border-gray-900 text-gray-900 font-semibold rounded-lg hover:bg-gray-50 transition-colors inline-block"
+              className="px-8 py-3 border-2 border-gray-900 dark:border-slate-100 text-gray-900 dark:text-slate-100 font-semibold rounded-lg hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors inline-block"
             >
               Documentation
             </a>
@@ -3342,14 +3427,14 @@ export default function Home() {
         </div>
 
         {/* Footer */}
-        <div className="text-center text-sm text-gray-600">
+        <div className="text-center text-sm text-gray-600 dark:text-slate-400">
           <p>
             Get started by exploring the{" "}
             <a
               href="https://7jhv5n-3000.csb.app"
               target="_blank"
               rel="noopener noreferrer"
-              className="text-blue-600 hover:text-blue-700 font-medium underline"
+              className="text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 font-medium underline"
             >
               learning center
             </a>
@@ -3358,7 +3443,7 @@ export default function Home() {
               href="https://www.npmjs.com/package/create-bini-app"
               target="_blank"
               rel="noopener noreferrer"
-              className="text-blue-600 hover:text-blue-700 font-medium underline"
+              className="text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 font-medium underline"
             >
               npm
             </a>
@@ -3368,16 +3453,13 @@ export default function Home() {
     </div>
   );
 }`;
-  } else if (styling === "CSS Modules") {
-    homePageContent = `import { useEffect, useState } from "react";
+} else if (styling === "CSS Modules") {
+  homePageContent = `import { useEffect } from "react";
 import styles from "./page.module.css";
 
 export default function Home() {
-  const [isDark, setIsDark] = useState(false);
-
   useEffect(() => {
     const darkMode = window.matchMedia("(prefers-color-scheme: dark)").matches;
-    setIsDark(darkMode);
     document.documentElement.classList.toggle("dark", darkMode);
   }, []);
 
@@ -3496,16 +3578,13 @@ export default function Home() {
     </div>
   );
 }`;
-  } else {
-    // None styling option
-    homePageContent = `import { useEffect, useState } from "react";
+} else {
+  // None styling option
+  homePageContent = `import { useEffect } from "react";
 
 export default function Home() {
-  const [isDark, setIsDark] = useState(false);
-
   useEffect(() => {
     const darkMode = window.matchMedia("(prefers-color-scheme: dark)").matches;
-    setIsDark(darkMode);
     document.documentElement.classList.toggle("dark", darkMode);
   }, []);
 
@@ -3567,7 +3646,7 @@ export default function Home() {
             <div key={feature.title} className="feature-card">
               <div className="feature-icon">{feature.icon}</div>
               <h3 className="feature-title">{feature.title}</h3>
-              <p style={{color: '#6b7280'}}>{feature.desc}</p>
+              <p style={{color: 'var(--color-gray)'}}>{feature.desc}</p>
             </div>
           ))}
         </div>
@@ -3615,8 +3694,7 @@ export default function Home() {
     </div>
   );
 }`;
-  }
-
+}
   secureWriteFile(path.join(appPath, `page.${mainExt}`), homePageContent);
 
   secureWriteFile(path.join(projectPath, "src", `main.${mainExt}`), `import React from 'react';
@@ -3747,7 +3825,7 @@ function generateConfigFiles(projectPath, useTypeScript, configExt, styling) {
     }
   },
   "include": ["src", "bini-env.d.ts"],
-  "exclude": ["node_modules", "dist", ".bini"]
+  "exclude": ["node_modules", "dist"]
 }`);
     
     secureWriteFile(path.join(projectPath, "bini-env.d.ts"), `/// <reference types="bini/client" />
@@ -3763,7 +3841,7 @@ declare global {
 export {}`);
   }
 
-// UPDATED Vite config with fixed auto-opening and HMR
+// UPDATED Vite config with fixed auto-opening and HMR - CHANGED to dist folder
 secureWriteFile(path.join(projectPath, `vite.config.${configExt}`), 
 `import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
@@ -3806,7 +3884,7 @@ export default defineConfig(({ command, mode }) => {
         name: 'bini-html-minifier',
         apply: 'build',
         closeBundle: async () => {
-          const distDir = path.resolve('.bini/dist');
+          const distDir = path.resolve('dist'); // CHANGED: Now uses standard dist folder
           if (!fs.existsSync(distDir)) return;
 
           const processHTML = async (filePath) => {
@@ -3850,7 +3928,7 @@ export default defineConfig(({ command, mode }) => {
       hmr: hmrConfig,
       watch: {
         usePolling: env.CODESPACE_NAME ? true : false,
-        ignored: ['**/.bini/**', '**/node_modules/**']
+        ignored: ['**/dist/**', '**/node_modules/**'] // CHANGED: Updated ignore pattern
       },
     },
 
@@ -3863,7 +3941,7 @@ export default defineConfig(({ command, mode }) => {
     },
 
     build: {
-      outDir: '.bini/dist',
+      outDir: 'dist', // CHANGED: Now uses standard dist folder
       sourcemap: biniConfig.build?.sourcemap !== false && !isBuild,
       emptyOutDir: true,
       minify: 'terser',
@@ -3914,11 +3992,12 @@ export default defineConfig(({ command, mode }) => {
     },
   };
 });`);
-  // UPDATED: API directory now inside app folder
+
+  // UPDATED: Bini config with dist folder
   secureWriteFile(path.join(projectPath, `bini.config.${configExt}`), 
   `export default {
   // Where Bini will output compiled assets
-  outDir: ".bini",
+  outDir: "dist", // CHANGED: Now uses standard dist folder
 
   // Dev server settings
   port: 3000,
@@ -3980,7 +4059,7 @@ import reactHooks from 'eslint-plugin-react-hooks'
 import reactRefresh from 'eslint-plugin-react-refresh'
 
 export default [
-  { ignores: ['dist', '.bini', 'node_modules'] },
+  { ignores: ['dist', 'node_modules'] }, // CHANGED: Removed .bini from ignore
   {
     files: ['**/*.{js,jsx${useTypeScript ? ',ts,tsx' : ''}}'],
     languageOptions: {
@@ -4150,7 +4229,7 @@ export default function handler(req, res) {
 }`, { force: flags.force });
     }
 
-// Production server - UPDATED with silent operation and improved TypeScript support
+// Production server - UPDATED with silent operation and improved TypeScript support - CHANGED to dist folder
 secureWriteFile(path.join(projectPath, "api-server.js"), 
 `#!/usr/bin/env node
 
@@ -4543,7 +4622,7 @@ async function loadApiHandler(routePath) {
 }
 
 async function createFastifyServer() {
-  const distPath = validateDistPath(".bini/dist");
+  const distPath = validateDistPath("dist"); // CHANGED: Now uses standard dist folder
 
   const app = fastify({
     logger: false,
@@ -4935,7 +5014,7 @@ yarn-debug.log*
 yarn-error.log*
 
 # Build outputs
-.bini/
+dist/ # CHANGED: Now uses standard dist folder
 
 # Environment variables
 .env
@@ -4960,7 +5039,7 @@ logs
 
     progress.start('Creating documentation');
     
-    // UPDATED: Documentation with new API structure
+    // UPDATED: Documentation with new API structure and dist folder
     secureWriteFile(path.join(projectPath, "README.md"), `# ${projectName}
 
 ⚡ Lightning-fast Bini.js app with Next.js-like file structure.
@@ -5027,7 +5106,7 @@ ${projectName}/
 │   │   └── globals.css      # Global styles
 ├── public/            # Static assets
 ├── bini/              # Framework internals and plugins
-├── .bini/             # Build outputs (like Next.js .next)
+├── dist/              # Build outputs (standard dist folder)
 ├── api-server.js      # ⚡ Fastify production server with API support
 ├── bini.config.mjs    # Bini.js configuration (ES modules)
 ├── vite.config.mjs    # Vite configuration (ES modules)
@@ -5105,7 +5184,8 @@ ${useTypeScript ? '✅ TypeScript configured' : '✅ JavaScript ready'}
     console.log(`🎨 Background: Consistent blue (#ecf3ff) across all styling options`);
     console.log(`📱 Cards: Fully responsive for all screen sizes`);
     console.log(`⚙️  Config Files: MJS (ES modules for all projects)`);
-    console.log(`🔍 Environment Files: Displayed on ALL servers (like Next.js)\n`);
+    console.log(`🔍 Environment Files: Displayed on ALL servers (like Next.js)`);
+    console.log(`📁 Build Output: Standard 'dist' folder (no more .bini)\n`);
     
     console.log(`🚀 Get Started:\n`);
     
@@ -5125,6 +5205,7 @@ ${useTypeScript ? '✅ TypeScript configured' : '✅ JavaScript ready'}
     console.log(`🎨 Same beautiful UI with blue background across all styling options!`);
     console.log(`📱 Fully responsive cards that work on mobile, tablet, and desktop!`);
     console.log(`🔍 Environment files (.env, .env.local) displayed on ALL servers!`);
+    console.log(`📁 Build output now uses standard 'dist' folder (industry standard)`);
     console.log(`📚 Check README.md for production build instructions`);
     console.log(`🌐 Docs: https://bini.js.org\n`);
 
