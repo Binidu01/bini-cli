@@ -2,9 +2,6 @@
 @"
 # Dependencies
 node_modules/
-package-lock.json
-pnpm-lock.yaml
-yarn.lock
 
 # Logs
 *.log
@@ -54,7 +51,6 @@ coverage/
 
 # Lock files (optional - uncomment if needed)
 # yarn.lock
-# pnpm-lock.yaml
 "@ | Out-File -Encoding UTF8 .gitignore
 
 Write-Host "✅ .gitignore created successfully" -ForegroundColor Green
