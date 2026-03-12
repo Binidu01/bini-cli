@@ -1,0 +1,101 @@
+# Create .gitignore
+@"
+# Dependencies
+node_modules/
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Build outputs
+dist/
+.bini/
+build/
+
+# IDE & Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary & Test files
+*.tmp
+*.test.js
+temp/
+tmp/
+
+# Old/Deprecated files (development only)
+old*.js
+c.js
+chatgpt.js
+cluade.js
+deepseek.js
+new*.js
+badge.svg
+
+# Test coverage
+coverage/
+.nyc_output/
+
+# Lock files (optional - uncomment if needed)
+# yarn.lock
+# pnpm-lock.yaml
+"@ | Out-File -Encoding UTF8 .gitignore
+
+Write-Host "✅ .gitignore created successfully" -ForegroundColor Green
+
+# Verify .gitignore was created
+if (Test-Path .gitignore) {
+    Write-Host "✅ .gitignore file exists" -ForegroundColor Green
+    Write-Host ""
+    Write-Host "📝 Content:" -ForegroundColor Blue
+    Get-Content .gitignore
+} else {
+    Write-Host "❌ .gitignore creation failed" -ForegroundColor Red
+    exit 1
+}
+
+Write-Host ""
+Write-Host "Staging and committing .gitignore..." -ForegroundColor Yellow
+
+# Stage .gitignore
+git add .gitignore
+
+# Check git status
+Write-Host ""
+Write-Host "📊 Git status:" -ForegroundColor Blue
+git status
+
+# Commit
+git commit -m "chore: add comprehensive .gitignore"
+
+Write-Host ""
+Write-Host "Pushing to main branch..." -ForegroundColor Yellow
+
+# Push to main branch only
+git push origin main
+
+Write-Host ""
+Write-Host "✅ .gitignore successfully pushed to GitHub!" -ForegroundColor Green
+Write-Host ""
+Write-Host "📍 Next steps:" -ForegroundColor Cyan
+Write-Host "1. git add -A"
+Write-Host "2. git commit -m 'chore: release v9.1.6'"
+Write-Host "3. git push origin main --tags"
+Write-Host ""
+Write-Host "🚀 This will trigger GitHub Actions!" -ForegroundColor Green

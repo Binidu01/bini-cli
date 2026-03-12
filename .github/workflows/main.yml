@@ -1,0 +1,66 @@
+name: Release & Publish
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write       # For GitHub release & tag creation
+  id-token: write       # REQUIRED for OIDC Trusted Publishing
+  packages: write       # Needed to publish to npm
+
+jobs:
+  release:
+    name: Tag, Release & Publish
+    runs-on: ubuntu-latest
+    environment: production  # Reference your environment with protection rules
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Ensure full history for tags
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org/
+
+      - name: Ensure latest npm
+        run: npm install -g npm@latest
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Determine version
+        id: pkg
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Detected version: $VERSION"
+
+      - name: Create Git Tag (force if needed)
+        run: |
+          TAG="v${{ steps.pkg.outputs.version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -f "$TAG"
+          git push origin "$TAG" --force
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "v${{ steps.pkg.outputs.version }}"
+          name: "v${{ steps.pkg.outputs.version }}"
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+
+      - name: Publish to npm via OIDC
+        run: npm publish --access public
+        env:
+          # No token needed, uses OIDC
+          NPM_CONFIG_PROVENANCE: true
