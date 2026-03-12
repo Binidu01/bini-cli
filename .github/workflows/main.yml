@@ -23,20 +23,17 @@ jobs:
         with:
           fetch-depth: 0  # Ensure full history for tags
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: latest
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org/
-          cache: pnpm
+
+      - name: Ensure latest npm
+        run: npm install -g npm@latest
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: npm install
 
       - name: Determine version
         id: pkg
@@ -52,6 +49,7 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git tag -f "$TAG"
           git push origin "$TAG" --force
+          git push origin main --force
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -63,7 +61,7 @@ jobs:
           generate_release_notes: true
 
       - name: Publish to npm via OIDC
-        run: pnpm publish --access public --no-git-checks
+        run: npm publish --access public
         env:
           # No token needed, uses OIDC
           NPM_CONFIG_PROVENANCE: true
