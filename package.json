@@ -1,7 +1,7 @@
 {
   "name": "create-bini-app",
   "type": "module",
-  "version": "9.3.0",
+  "version": "9.3.2",
   "description": "Official CLI for Bini.js — scaffolds a React + Vite app with file-based routing, API routes, TypeScript or JavaScript, Tailwind CSS or CSS Modules, automatic favicon generation, and PWA support.",
   "keywords": [
     "bini",
