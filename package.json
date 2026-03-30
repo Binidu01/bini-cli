@@ -1,8 +1,8 @@
 {
   "name": "create-bini-app",
   "type": "module",
-  "version": "9.3.2",
-  "description": "Official CLI for Bini.js — scaffolds a React + Vite app with file-based routing, API routes, TypeScript or JavaScript, Tailwind CSS or CSS Modules, automatic favicon generation, and PWA support.",
+  "version": "9.3.3",
+  "description": "The Zero-Config React Framework for the Modern Web",
   "keywords": [
     "bini",
     "bini.js",
@@ -11,7 +11,8 @@
     "react",
     "react framework",
     "vite",
-    "vite react",
+    "vite 8",
+    "rolldown",
     "typescript",
     "javascript",
     "api routes",
@@ -20,7 +21,6 @@
     "create-react-app alternative",
     "pwa",
     "progressive web app",
-    "favicon generation",
     "hot module replacement",
     "hmr",
     "dev server",
@@ -36,6 +36,8 @@
     "web framework",
     "javascript framework",
     "node.js framework",
+    "oxlint",
+    "oxfmt",
     "javascript tools",
     "development tools",
     "build tools",
@@ -46,91 +48,98 @@
   "main": "dist/index.js",
   "bin": {
     "create-bini-app": "dist/index.js",
-    "bini"           : "dist/index.js",
-    "binijs"         : "dist/index.js"
+    "bini": "dist/index.js",
+    "binijs": "dist/index.js"
   },
   "files": [
     "dist",
+    "assets",
     "README.md",
     "LICENSE",
     "package.json"
   ],
   "scripts": {
-    "build"         : "tsup",
-    "dev"           : "tsup --watch",
-    "start"         : "node dist/index.js",
-    "typecheck"     : "tsc --noEmit",
-    "lint"          : "eslint src --ext .ts",
-    "test"          : "node dist/index.js --version",
-    "prepublishOnly": "npm run typecheck && npm run build && node dist/index.js --version"
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "lint": "oxlint src --plugin typescript",
+    "format": "oxfmt src",
+    "check": "oxlint src --plugin typescript && oxfmt --check src",
+    "test": "node dist/index.js --version",
+    "prepublishOnly": "pnpm run typecheck && pnpm run build && node dist/index.js --version",
+    "clean": "rm -rf dist"
   },
-  "homepage"     : "https://bini.js.org",
-  "documentation": "https://bini.js.org/docs",
+  "homepage": "https://bini.js.org",
+  "documentation": "https://bini.js.org/guide/",
   "repository": {
-    "type"     : "git",
-    "url"      : "git+https://github.com/Binidu01/bini-cli.git",
+    "type": "git",
+    "url": "git+https://github.com/Binidu01/bini-cli.git",
     "directory": "packages/create-bini-app"
   },
   "bugs": {
-    "url"  : "https://github.com/Binidu01/bini-cli/issues",
+    "url": "https://github.com/Binidu01/bini-cli/issues",
     "email": "rbinidu@gmail.com"
   },
   "author": {
-    "name" : "Binidu Ranasinghe",
+    "name": "Binidu Ranasinghe",
     "email": "rbinidu@gmail.com",
-    "url"  : "https://github.com/Binidu01"
+    "url": "https://github.com/Binidu01"
   },
   "license": "MIT",
   "dependencies": {
-    "@inquirer/prompts": "^8.3.0",
-    "sharp"            : "^0.34.5"
+    "@inquirer/prompts": "^8.3.0"
   },
   "devDependencies": {
     "@types/node": "^25.4.0",
-    "tsup"       : "^8.5.1",
-    "tsx"        : "^4.21.0",
-    "typescript" : "^5.9.3",
-    "eslint"     : "^10.0.3",
-    "prettier"   : "^3.8.1"
+    "oxfmt": "latest",
+    "oxlint": "latest",
+    "tsup": "^8.5.1",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.2"
   },
   "engines": {
-    "node": ">=18.0.0",
-    "npm" : ">=9.0.0",
+    "node": ">=20.19.0",
+    "npm": ">=9.0.0",
     "pnpm": ">=8.0.0",
     "yarn": ">=3.6.0",
-    "bun" : ">=1.0.0"
+    "bun": ">=1.0.0"
   },
   "publishConfig": {
-    "access"  : "public",
+    "access": "public",
     "registry": "https://registry.npmjs.org/",
-    "tag"      : "latest"
+    "tag": "latest"
   },
   "funding": [
     {
       "type": "individual",
-      "url" : "https://github.com/sponsors/Binidu01"
-    },
-    {
-      "type": "ko-fi",
-      "url" : "https://ko-fi.com/binidu"
+      "url": "https://github.com/sponsors/Binidu01"
     }
   ],
   "contributors": [
     {
-      "name" : "Binidu Ranasinghe",
+      "name": "Binidu Ranasinghe",
       "email": "rbinidu@gmail.com",
-      "url"  : "https://github.com/Binidu01"
+      "url": "https://github.com/Binidu01"
     }
   ],
   "maintainers": [
     {
-      "name" : "Binidu Ranasinghe",
+      "name": "Binidu Ranasinghe",
       "email": "rbinidu@gmail.com",
-      "url"  : "https://github.com/Binidu01"
+      "url": "https://github.com/Binidu01"
     }
   ],
-  "os" : ["darwin", "linux", "win32"],
-  "cpu": ["x64", "arm64", "ia32"],
-  "private"     : false,
+  "os": [
+    "darwin",
+    "linux",
+    "win32"
+  ],
+  "cpu": [
+    "x64",
+    "arm64",
+    "ia32"
+  ],
+  "private": false,
   "preferGlobal": true
 }

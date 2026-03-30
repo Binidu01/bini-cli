@@ -1,108 +1,120 @@
 import { confirm, select, input } from "@inquirer/prompts";
 import fs from "fs";
+import fsPromises from "fs/promises";
 import path from "path";
 import { execSync } from "child_process";
 import { fileURLToPath } from "url";
-import sharp from "sharp";
+import { isatty } from "tty";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface CliFlags {
-  force      : boolean;
-  typescript : boolean | undefined;
-  javascript : boolean;
-  tailwind   : boolean;
-  cssModules : boolean;
+  force: boolean;
+  typescript: boolean | undefined;
+  javascript: boolean;
+  tailwind: boolean;
+  cssModules: boolean;
 }
 
 interface ParsedArguments {
-  projectName : string | undefined;
-  flags       : CliFlags;
+  projectName: string | undefined;
+  flags: CliFlags;
 }
 
-type StylingOption    = "Tailwind" | "CSS Modules" | "None";
-type PackageManager   = "bun" | "pnpm" | "yarn" | "npm";
-type FileExtension    = "tsx" | "jsx";
-type ApiExtension     = "ts" | "js";
-type ConfigExtension  = "ts" | "js";
+type StylingOption = "Tailwind" | "CSS Modules" | "None";
+type PackageManager = "bun" | "pnpm" | "yarn" | "npm";
+type FileExtension = "tsx" | "jsx";
+type ApiExtension = "ts" | "js";
+type ConfigExtension = "ts" | "js";
 
 interface ProjectAnswers {
-  typescript : boolean;
-  styling    : StylingOption;
+  typescript: boolean;
+  styling: StylingOption;
 }
 
 interface FileExtensions {
-  main   : FileExtension;
-  config : ConfigExtension;
-  api    : ApiExtension;
+  main: FileExtension;
+  config: ConfigExtension;
+  api: ApiExtension;
 }
 
 interface PackageManagerEntry {
-  name     : PackageManager;
-  command  : string;
-  priority : number;
+  name: PackageManager;
+  command: string;
+  priority: number;
 }
 
 interface PackageJsonScripts {
-  dev           : string;
-  build         : string;
-  export        : string;
-  start         : string;
-  preview       : string;
-  "type-check"  : string;
-  lint          : string;
+  dev: string;
+  build: string;
+  export: string;
+  start: string;
+  preview: string;
+  "type-check": string;
+  lint: string;
+  format: string;
+  check: string;
 }
 
 interface PackageJsonShape {
-  name            : string;
-  type            : "module";
-  version         : string;
-  scripts         : PackageJsonScripts;
-  dependencies    : Record<string, string>;
-  devDependencies : Record<string, string>;
+  name: string;
+  type: "module";
+  version: string;
+  scripts: PackageJsonScripts;
+  dependencies: Record<string, string>;
+  devDependencies: Record<string, string>;
 }
 
 interface WebManifestIcon {
-  src   : string;
-  sizes : string;
-  type  : string;
+  src: string;
+  sizes: string;
+  type: string;
 }
 
 interface WebManifest {
-  name             : string;
-  short_name       : string;
-  description      : string;
-  start_url        : string;
-  display          : string;
-  background_color : string;
-  theme_color      : string;
-  icons            : WebManifestIcon[];
+  name: string;
+  short_name: string;
+  description: string;
+  start_url: string;
+  display: string;
+  background_color: string;
+  theme_color: string;
+  icons: WebManifestIcon[];
 }
 
 interface WriteFileOptions {
-  force ?: boolean;
-  mode  ?: number;
-  flag  ?: string;
+  force?: boolean;
+  mode?: number;
+  flag?: string;
 }
 
 interface ExecuteCommandOptions {
-  stdio   ?: "pipe" | "inherit" | "ignore";
-  timeout ?: number;
-  cwd     ?: string;
+  stdio?: "pipe" | "inherit" | "ignore";
+  timeout?: number;
+  cwd?: string;
+}
+
+interface ExecuteCommandError extends Error {
+  code?: number;
+  stdout?: string;
+  stderr?: string;
 }
 
 interface SafeRmOptions {
-  allowedBase ?: string;
+  allowedBase?: string;
 }
 
 // ─── Bootstrap ────────────────────────────────────────────────────────────────
 
 const __filename = fileURLToPath(import.meta.url);
-const __dirname  = path.dirname(__filename);
+const __dirname = path.dirname(__filename);
 
 const CLI_PACKAGE_PATH = path.join(__dirname, "..", "package.json");
-const cliPackageJson   = JSON.parse(fs.readFileSync(CLI_PACKAGE_PATH, "utf-8")) as { version: string };
-const BINIJS_VERSION   : string = cliPackageJson.version;
+const cliPackageJson = JSON.parse(fs.readFileSync(CLI_PACKAGE_PATH, "utf-8")) as { version: string };
+const BINIJS_VERSION: string = cliPackageJson.version;
+
+// Pre-baked assets bundled with the CLI — copied at scaffold time, no sharp needed
+const ASSETS_DIR = path.join(__dirname, "..", "assets");
 
 const LOGO = `
 ██████╗ ██╗███╗   ██╗██╗      ██╗███████╗
@@ -114,14 +126,36 @@ const LOGO = `
              Developed By Binidu
 `;
 
-const REQUIRED_NODE = "v18.0.0";
+// Vite 8 requires Node.js 20.19+ or 22.12+
+const REQUIRED_NODE = "v20.19.0";
+
+// ─── Hoisted constants ────────────────────────────────────────────────────────
+
+// Combined pattern for better performance
+const INVALID_NAME_PATTERN = /^(\.|\.\.|npm|node)|[<>:"|?*\\]|[^a-z0-9\-.]/i;
+
+// ─── Utility functions ────────────────────────────────────────────────────────
+
+function isInteractive(): boolean {
+  return isatty(process.stdin.fd) && isatty(process.stdout.fd);
+}
 
 // ─── System checks ────────────────────────────────────────────────────────────
 
 function checkNodeVersion(): void {
-  const [major, minor]       = process.version.slice(1).split(".").map(Number);
-  const [reqMajor, reqMinor] = REQUIRED_NODE.slice(1).split(".").map(Number);
-  if (major! < reqMajor! || (major === reqMajor && minor! < reqMinor!)) {
+  const versionParts = process.version.slice(1).split(".").map(Number);
+  const major = versionParts[0];
+  const minor = versionParts[1];
+  const reqParts = REQUIRED_NODE.slice(1).split(".").map(Number);
+  const reqMajor = reqParts[0];
+  const reqMinor = reqParts[1];
+
+  if (!major || !reqMajor) {
+    console.error("Unable to parse Node.js version");
+    process.exit(1);
+  }
+
+  if (major < reqMajor || (major === reqMajor && minor && minor < reqMinor)) {
     console.error(`Node.js ${REQUIRED_NODE} or higher required. Current: ${process.version}`);
     console.error("Please update Node.js from https://nodejs.org");
     process.exit(1);
@@ -130,12 +164,16 @@ function checkNodeVersion(): void {
 
 function checkDiskSpace(requiredMB = 100): void {
   try {
+    // Use statfsSync which is available in Node.js
     if (fs.statfsSync) {
-      const stats     = fs.statfsSync(process.cwd());
+      const stats = fs.statfsSync(process.cwd());
       const freeBytes = stats.bavail * stats.bsize;
       if (freeBytes < requiredMB * 1024 * 1024) {
         throw new Error(`Insufficient disk space. Required: ${requiredMB}MB`);
       }
+    } else {
+      // Fallback for older Node.js versions - skip check
+      console.warn("Disk space check not available, skipping...");
     }
   } catch (error) {
     if (error instanceof Error && (error as NodeJS.ErrnoException).code !== "ENOENT") {
@@ -144,19 +182,27 @@ function checkDiskSpace(requiredMB = 100): void {
   }
 }
 
-// FIX #1: actually warn the user when offline instead of silently ignoring the result
-async function checkNetworkConnectivity(): Promise<void> {
-  try {
-    const controller = new AbortController();
-    const timeout    = setTimeout(() => controller.abort(), 10_000);
-    const response   = await fetch("https://registry.npmjs.org", { signal: controller.signal });
-    clearTimeout(timeout);
-    if (!response.ok) {
-      console.warn("  ⚠  npm registry returned an unexpected response. Install may fail.");
-    }
-  } catch {
-    console.warn("  ⚠  No internet connection detected. Dependency install may fail.");
-  }
+function checkNetworkConnectivity(): void {
+  // Skip in non-interactive mode to prevent hanging
+  if (!isInteractive()) return;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10_000);
+
+  fetch("https://registry.npmjs.org", { signal: controller.signal })
+    .then((res) => {
+      clearTimeout(timeout);
+      if (!res.ok) {
+        console.warn("  ⚠  npm registry returned an unexpected response. Install may fail.");
+      }
+    })
+    .catch(() => {
+      clearTimeout(timeout);
+      console.warn("  ⚠  No internet connection detected. Dependency install may fail.");
+    })
+    .finally(() => {
+      clearTimeout(timeout);
+    });
 }
 
 // ─── Argument parsing ─────────────────────────────────────────────────────────
@@ -196,24 +242,17 @@ Examples:
   return {
     projectName: args.find((arg) => !arg.startsWith("--")),
     flags: {
-      force     : args.includes("--force"),
+      force: args.includes("--force"),
       typescript: hasExplicitTypeScript ? true : hasExplicitJavaScript ? false : undefined,
       javascript: hasExplicitJavaScript,
-      tailwind  : args.includes("--tailwind"),
+      tailwind: args.includes("--tailwind"),
       cssModules: args.includes("--css-modules"),
     },
   };
 }
 
-// FIX #4: updated regex to only allow lowercase, numbers, hyphens, and dots
-// and updated the error message to accurately reflect what's allowed
 function validateProjectName(name: string): boolean {
-  const invalidPatterns = [/\.\./, /[<>:"|?*]/, /^(npm|node|\.)/, /[^a-z0-9\-.]/];
-  return (
-    !invalidPatterns.some((p) => p.test(name)) &&
-    name.length > 0 &&
-    name.length <= 50
-  );
+  return name.length > 0 && name.length <= 50 && !INVALID_NAME_PATTERN.test(name);
 }
 
 // ─── File system helpers ──────────────────────────────────────────────────────
@@ -221,65 +260,75 @@ function validateProjectName(name: string): boolean {
 function robustMkdirSync(dirPath: string): void {
   try {
     if (!fs.existsSync(dirPath)) {
-      fs.mkdirSync(dirPath, { recursive: true, mode: 0o755 });
+      fs.mkdirSync(dirPath, { recursive: true, mode: 0o750 });
     }
   } catch {
     throw new Error(`Cannot write to directory: ${dirPath}. Check permissions.`);
   }
 }
 
-function secureWriteFile(
-  filePath : string,
-  content  : string | Buffer,
-  options  : WriteFileOptions = {}
-): void {
-  if (fs.existsSync(filePath) && !options.force) {
-    throw new Error(`File already exists: ${filePath}. Use --force to overwrite.`);
+async function secureWriteFileAsync(
+  filePath: string,
+  content: string | Buffer,
+  options: WriteFileOptions = {}
+): Promise<void> {
+  try {
+    const dir = path.dirname(filePath);
+    await fsPromises.mkdir(dir, { recursive: true, mode: 0o750 });
+    await fsPromises.writeFile(filePath, content, {
+      mode: options.mode ?? 0o640,
+      flag: options.flag ?? "w",
+    });
+  } catch (error) {
+    if (!options.force && (error as NodeJS.ErrnoException).code === "EEXIST") {
+      throw new Error(`File already exists: ${filePath}. Use --force to overwrite.`);
+    }
+    throw error;
   }
-  robustMkdirSync(path.dirname(filePath));
-  fs.writeFileSync(filePath, content, {
-    mode: options.mode ?? 0o644,
-    flag: options.flag ?? "w",
-  });
 }
 
-// FIX #5: safeRm now handles non-existent paths gracefully instead of throwing
 function safeRm(targetPath: string, options: SafeRmOptions = {}): void {
   const allowedBase = options.allowedBase ?? process.cwd();
   if (!targetPath) throw new Error("Path required");
 
   const resolved = path.resolve(targetPath);
-  const base     = path.resolve(allowedBase);
+  const base = path.resolve(allowedBase);
 
-  if (resolved === base)                        throw new Error("Refusing to rm project root");
-  if (!resolved.startsWith(base + path.sep))    throw new Error("Refusing to rm outside allowed base");
+  // Use relative path to check for traversal attempts
+  const relative = path.relative(base, resolved);
+  
+  // Check for path traversal
+  if (relative === "" || relative.startsWith("..") || path.isAbsolute(relative)) {
+    throw new Error(`Path traversal attempt detected: ${targetPath} is outside ${allowedBase}`);
+  }
 
-  const forbidden = [
+  // Additional safety: check against system directories
+  const systemPaths = [
     path.resolve("/"),
-    path.resolve(process.env["HOME"]        ?? ""),
-    path.resolve(process.env["USERPROFILE"] ?? ""),
-    path.resolve(process.cwd()),
-    path.resolve(__dirname),
+    path.resolve(process.env.HOME || ""),
+    path.resolve(process.env.USERPROFILE || ""),
   ].filter(Boolean);
 
-  if (forbidden.some((f) => resolved === f || resolved.startsWith(f + path.sep))) {
-    throw new Error("Refusing to rm forbidden path");
+  for (const sysPath of systemPaths) {
+    if (sysPath && path.resolve(sysPath) === resolved) {
+      throw new Error("Refusing to delete system directory");
+    }
   }
 
-  // FIX #5: return silently if path doesn't exist instead of throwing
   if (!fs.existsSync(resolved)) return;
 
-  try {
-    const stat = fs.statSync(resolved);
-    if (stat.isDirectory() && resolved.split(path.sep).length < 3) {
-      throw new Error("Refusing to rm shallow system directory");
-    }
-  } catch (error) {
-    if (error instanceof Error && error.message.startsWith("Refusing")) throw error;
-    return; // path vanished between existsSync and statSync — safe to ignore
+  // Depth check as additional safety (though relative check should catch most issues)
+  const depth = resolved.split(path.sep).filter(Boolean).length;
+  if (depth < 2) {
+    throw new Error("Refusing to delete shallow directory (safety check)");
   }
 
-  fs.rmSync(resolved, { recursive: true, force: true });
+  try {
+    fs.rmSync(resolved, { recursive: true, force: true });
+  } catch (err) {
+    console.error(`Failed to delete ${resolved}:`, err);
+    throw err;
+  }
 }
 
 // ─── Command execution ────────────────────────────────────────────────────────
@@ -288,17 +337,18 @@ function executeCommand(command: string, options: ExecuteCommandOptions = {}): s
   const isWindows = process.platform === "win32";
   try {
     const result = execSync(command, {
-      shell      : isWindows ? "cmd.exe" : "/bin/sh",
-      stdio      : options.stdio ?? "pipe",
-      timeout    : options.timeout ?? 120_000,
-      cwd        : options.cwd,
+      shell: isWindows ? "cmd.exe" : "/bin/sh",
+      stdio: options.stdio ?? "pipe",
+      timeout: options.timeout ?? 120_000,
+      cwd: options.cwd,
       windowsHide: true,
-      encoding   : "utf8",
+      encoding: "utf8",
     });
-    return typeof result === "string" ? result : "";
+    return result as string;
   } catch (error) {
+    const execError = error as ExecuteCommandError;
     throw new Error(
-      `Command failed: ${command}\nError: ${error instanceof Error ? error.message : String(error)}`
+      `Command failed: ${command}\nError: ${execError.message || String(error)}`
     );
   }
 }
@@ -307,39 +357,67 @@ function executeCommand(command: string, options: ExecuteCommandOptions = {}): s
 
 async function detectPackageManager(): Promise<PackageManager> {
   const candidates: PackageManagerEntry[] = [
-    { name: "bun",  command: "bun --version",  priority: 4 },
+    { name: "bun", command: "bun --version", priority: 4 },
     { name: "pnpm", command: "pnpm --version", priority: 3 },
     { name: "yarn", command: "yarn --version", priority: 2 },
-    { name: "npm",  command: "npm --version",  priority: 1 },
+    { name: "npm", command: "npm --version", priority: 1 },
   ];
 
-  const detected: PackageManagerEntry[] = [];
-  for (const pm of candidates) {
-    try {
-      executeCommand(pm.command, { stdio: "ignore" });
-      detected.push(pm);
-    } catch { /* not available */ }
-  }
+  // Run all version checks in parallel with proper error handling
+  const results = await Promise.allSettled(
+    candidates.map(async (pm) => {
+      try {
+        executeCommand(pm.command, { stdio: "ignore" });
+        return pm;
+      } catch (error) {
+        throw new Error(`Failed to detect ${pm.name}: ${error}`);
+      }
+    })
+  );
 
-  if (detected.length === 0) throw new Error("No package manager found.");
-  return detected.sort((a, b) => b.priority - a.priority)[0]!.name;
+  const detected = results
+    .filter((r): r is PromiseFulfilledResult<PackageManagerEntry> => r.status === "fulfilled")
+    .map((r) => r.value);
+
+  if (detected.length === 0) {
+    throw new Error("No package manager found. Please install npm, yarn, pnpm, or bun.");
+  }
+  
+  return detected.sort((a, b) => b.priority - a.priority)[0].name;
 }
 
 async function installDependenciesWithFallbacks(
-  projectPath    : string,
-  packageManager : PackageManager,
+  projectPath: string,
+  packageManager: PackageManager,
+  skipPrompt = false
 ): Promise<boolean> {
   const installCommands: Record<PackageManager, string> = {
-    npm : "npm install --no-audit --no-fund --loglevel=error",
+    npm: "npm install --no-audit --no-fund --loglevel=error",
     yarn: "yarn install --silent --no-progress",
     pnpm: "pnpm install --reporter=silent",
-    bun : "bun install --silent",
+    bun: "bun install --silent",
   };
+
+  let shouldInstall = skipPrompt;
+  
+  if (!skipPrompt && isInteractive()) {
+    try {
+      shouldInstall = await confirm({
+        message: "Would you like to install dependencies automatically?",
+        default: true,
+      });
+    } catch {
+      // Non-interactive or prompt error - assume false
+      shouldInstall = false;
+    }
+  }
+
+  if (!shouldInstall) return false;
 
   try {
     executeCommand(installCommands[packageManager], {
-      cwd    : projectPath,
-      stdio  : "inherit",
+      cwd: projectPath,
+      stdio: "inherit",
       timeout: 300_000,
     });
     return true;
@@ -361,114 +439,78 @@ function shouldUseTypeScript(flags: CliFlags, answers: ProjectAnswers): boolean 
 
 function getFileExtensions(useTypeScript: boolean): FileExtensions {
   return {
-    main  : useTypeScript ? "tsx" : "jsx",
-    config: useTypeScript ? "ts"  : "js",
-    api   : useTypeScript ? "ts"  : "js",
+    main: useTypeScript ? "tsx" : "jsx",
+    config: useTypeScript ? "ts" : "js",
+    api: useTypeScript ? "ts" : "js",
   };
 }
 
 async function askQuestions(flags: CliFlags): Promise<ProjectAnswers> {
   let typescript: boolean;
-  let styling   : StylingOption;
+  let styling: StylingOption;
 
   if (flags.typescript === true || flags.javascript === true) {
     typescript = flags.typescript === true;
-  } else {
+  } else if (isInteractive()) {
     typescript = await confirm({ message: "Would you like to use TypeScript?", default: true });
+  } else {
+    typescript = true; // Default to TypeScript in non-interactive mode
   }
 
   if (flags.tailwind === true || flags.cssModules === true) {
     styling = flags.tailwind ? "Tailwind" : "CSS Modules";
-  } else {
+  } else if (isInteractive()) {
     styling = await select<StylingOption>({
       message: "Which styling solution would you like to use?",
       choices: [
-        { name: "Tailwind CSS", value: "Tailwind"    },
-        { name: "CSS Modules",  value: "CSS Modules" },
-        { name: "None",         value: "None"        },
+        { name: "Tailwind CSS", value: "Tailwind" },
+        { name: "CSS Modules", value: "CSS Modules" },
+        { name: "None", value: "None" },
       ],
       default: "Tailwind",
     });
+  } else {
+    styling = "Tailwind"; // Default to Tailwind in non-interactive mode
   }
 
   return { typescript, styling };
 }
 
-// ─── Favicon generation ───────────────────────────────────────────────────────
+// ─── Asset copying ────────────────────────────────────────────────────────────
 
-const FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" fill="none">
-  <defs>
-    <linearGradient id="grad" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#00CFFF"/>
-      <stop offset="100%" stop-color="#0077FF"/>
-    </linearGradient>
-  </defs>
-  <text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle"
-    font-family="Segoe UI, Arial, sans-serif" font-size="90" font-weight="700" fill="url(#grad)">
-    ß
-  </text>
-</svg>`;
+async function copyFaviconFiles(publicPath: string): Promise<void> {
+  const files = ["favicon.ico", "apple-touch-icon.png", "og-image.png"] as const;
 
-const OG_IMAGE_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" fill="none">
-  <rect width="1200" height="630" fill="#ffffff"/>
-  <defs>
-    <linearGradient id="grad" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#00CFFF"/>
-      <stop offset="100%" stop-color="#0077FF"/>
-    </linearGradient>
-  </defs>
-  <text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle"
-    font-family="Segoe UI, Arial, sans-serif" font-size="450" font-weight="700" fill="url(#grad)">
-    ß
-  </text>
-</svg>`;
+  await Promise.all(
+    files.map(async (file) => {
+      const src = path.join(ASSETS_DIR, file);
+      const dest = path.join(publicPath, file);
 
-const FALLBACK_COLOR = { r: 0, g: 207, b: 255, alpha: 255 } as const;
-
-async function generateFaviconFiles(publicPath: string): Promise<void> {
-  secureWriteFile(path.join(publicPath, "favicon.svg"), FAVICON_SVG);
-
-  const svgBuffer = Buffer.from(FAVICON_SVG);
-  const ogBuffer  = Buffer.from(OG_IMAGE_SVG);
-
-  const writePng = async (buf: Buffer, dest: string, w: number, h = w) =>
-    sharp(buf).resize(w, h, { fit: "contain", background: { r: 255, g: 255, b: 255, alpha: 0 } }).png().toFile(dest);
-
-  const writeFallback = async (dest: string, w: number, h = w) => {
-    const data = await sharp({ create: { width: w, height: h, channels: 4, background: FALLBACK_COLOR } }).png().toBuffer();
-    secureWriteFile(dest, data);
-  };
-
-  try {
-    await Promise.all([
-      writePng(svgBuffer, path.join(publicPath, "favicon.png"),          512),
-      writePng(svgBuffer, path.join(publicPath, "apple-touch-icon.png"), 180),
-      writePng(ogBuffer,  path.join(publicPath, "og-image.png"),         1200, 630),
-    ]);
-  } catch {
-    await Promise.all([
-      writeFallback(path.join(publicPath, "favicon.png"),          512),
-      writeFallback(path.join(publicPath, "apple-touch-icon.png"), 180),
-      writeFallback(path.join(publicPath, "og-image.png"),         1200, 630),
-    ]);
-  }
+      try {
+        await fsPromises.access(src);
+        await fsPromises.copyFile(src, dest);
+      } catch (error) {
+        console.warn(`  ⚠  Asset not found or failed to copy: ${src} — skipping ${file}`);
+      }
+    })
+  );
 }
 
-function generateWebManifest(projectPath: string): void {
+async function generateWebManifest(projectPath: string): Promise<void> {
   const manifest: WebManifest = {
-    name            : "Bini.js App",
-    short_name      : "BiniApp",
-    description     : "Modern React application built with Bini.js",
-    start_url       : "/",
-    display         : "standalone",
+    name: "Bini.js App",
+    short_name: "BiniApp",
+    description: "Modern React application built with Bini.js",
+    start_url: "/",
+    display: "standalone",
     background_color: "#ffffff",
-    theme_color     : "#00CFFF",
+    theme_color: "#00CFFF",
     icons: [
-      { src: "/favicon.png",          sizes: "512x512",  type: "image/png" },
-      { src: "/apple-touch-icon.png", sizes: "180x180",  type: "image/png" },
+      { src: "/favicon.ico", sizes: "64x64 32x32 24x24 16x16", type: "image/x-icon" },
+      { src: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" },
     ],
   };
-  secureWriteFile(
+  await secureWriteFileAsync(
     path.join(projectPath, "public", "site.webmanifest"),
     JSON.stringify(manifest, null, 2)
   );
@@ -524,7 +566,6 @@ const CSS_PAGE_STYLES = `.root { min-height: 100vh; background: #fff; display: f
 .footer-link:hover { color: #404040; }
 `;
 
-// CSS Modules equivalent (camelCase keys)
 const CSS_MODULE_STYLES = `.root { min-height: 100vh; background: #fff; display: flex; flex-direction: column; }
 .header { display: flex; align-items: center; gap: 0.5rem; padding: 1.25rem 2rem; border-bottom: 1px solid #f5f5f5; }
 .headerLogo { width: 1.75rem; height: 1.75rem; }
@@ -565,77 +606,68 @@ const CSS_MODULE_STYLES = `.root { min-height: 100vh; background: #fff; display:
 }
 `;
 
-function generateCSSModulesFiles(projectPath: string): void {
-  secureWriteFile(path.join(projectPath, "src/app/page.module.css"), CSS_MODULE_STYLES);
+async function generateCSSModulesFiles(projectPath: string): Promise<void> {
+  await secureWriteFileAsync(path.join(projectPath, "src/app/page.module.css"), CSS_MODULE_STYLES);
 }
 
 function generateGlobalStyles(styling: StylingOption): string {
-  if (styling === "Tailwind") {
-    return `@import "tailwindcss";\n\n${CSS_RESET}`;
-  }
-  if (styling === "CSS Modules") {
-    return CSS_RESET;
-  }
+  if (styling === "Tailwind") return `@import "tailwindcss";\n\n${CSS_RESET}`;
+  if (styling === "CSS Modules") return CSS_RESET;
   return CSS_RESET + "\n" + CSS_PAGE_STYLES + CSS_DARK_OVERRIDES;
 }
 
 // ─── package.json ─────────────────────────────────────────────────────────────
 
 function generatePackageJson(
-  projectName  : string,
+  projectName: string,
   useTypeScript: boolean,
-  styling      : StylingOption
+  styling: StylingOption
 ): PackageJsonShape {
   const dependencies: Record<string, string> = {
-    react             : "^19.2.4",
-    "react-dom"       : "^19.2.4",
+    react: "^19.2.4",
+    "react-dom": "^19.2.4",
     "react-router-dom": "^7.13.1",
-    hono              : "^4.12.7",
-    "bini-router"     : "^1.0.25",
-    "bini-overlay"    : "^1.0.4",
-    "bini-server"     : "^1.0.0",
-    sharp             : "^0.34.5",
+    hono: "^4.12.9",
+    "bini-router": "^1.0.27",
+    "bini-overlay": "^1.0.5",
+    "bini-server": "^1.0.1",
   };
 
   const devDependencies: Record<string, string> = {
-    "@vitejs/plugin-react"        : "^5.1.4",
-    vite                          : "^7.3.1",
-    "@eslint/js"                  : "^10.0.1",
-    eslint                        : "^10.0.3",
-    "eslint-plugin-react-hooks"   : "^7.0.1",
-    "eslint-plugin-react-refresh" : "^0.5.2",
-    globals                       : "^17.4.0",
-    "html-minifier-terser"        : "^7.2.0",
-    terser                        : "^5.46.0",
-    "bini-env"                    : "^1.0.5",
-    "bini-export"                 : "^1.0.0",
+    "@vitejs/plugin-react": "^6.0.1",
+    vite: "^8.0.3",
+    oxlint: "latest",
+    oxfmt: "latest",
+    "bini-env": "^1.0.7",
+    "bini-export": "^1.0.1",
   };
 
   if (useTypeScript) {
-    devDependencies["@types/react"]       = "^19.2.14";
-    devDependencies["@types/react-dom"]   = "^19.2.3";
-    devDependencies["@types/node"]        = "^25.4.0";
-    devDependencies["typescript"]         = "^5.9.3";
-    devDependencies["typescript-eslint"]  = "^8.0.0";
+    devDependencies["@types/react"] = "^19.2.14";
+    devDependencies["@types/react-dom"] = "^19.2.3";
+    devDependencies["@types/node"] = "^25.4.0";
+    devDependencies["typescript"] = "^5.9.3";
   }
 
   if (styling === "Tailwind") {
-    devDependencies["tailwindcss"]        = "^4.2.1";
-    devDependencies["@tailwindcss/vite"]  = "^4.2.1";
+    devDependencies["tailwindcss"] = "^4.2.1";
+    devDependencies["@tailwindcss/vite"] = "^4.2.1";
   }
 
   return {
-    name   : projectName,
-    type   : "module",
+    name: projectName,
+    type: "module",
     version: "1.0.0",
     scripts: {
-      dev          : "vite --host --open",
-      build        : "vite build",
-      export       : "vite build --mode export",
-      start        : "bini-server",
-      preview      : "vite preview --host --open",
-      "type-check" : useTypeScript ? "tsc --noEmit" : "echo 'TypeScript not enabled'",
-      lint         : `eslint . --ext .js,.jsx${useTypeScript ? ",.ts,.tsx" : ""}`,
+      dev: "vite --host --open",
+      build: "vite build",
+      export: "vite build --mode export",
+      start: "bini-server",
+      preview: "vite preview --host --open",
+      "type-check": useTypeScript ? "tsc --noEmit" : "echo 'TypeScript not enabled'",
+      lint: "oxlint --plugin react --plugin react-hooks src",
+      format: "oxfmt src",
+      check: "oxlint --plugin react --plugin react-hooks src && oxfmt --check src",
     },
     dependencies,
     devDependencies,
@@ -644,77 +676,7 @@ function generatePackageJson(
 
 // ─── vite.config ──────────────────────────────────────────────────────────────
 
-const HTML_MINIFIER_PLUGIN_BODY = `{
-        name : 'bini-html-minifier',
-        apply: 'build' as const,
-        closeBundle: async () => {
-          const distDir = path.resolve('dist');
-          if (!fs.existsSync(distDir)) return;
-
-          const processHTML = async (filePath: string): Promise<void> => {
-            const html = await fs.promises.readFile(filePath, 'utf8');
-            const minified = await minify(html, {
-              collapseWhitespace           : true,
-              removeComments               : true,
-              removeRedundantAttributes    : true,
-              removeEmptyAttributes        : false,
-              removeScriptTypeAttributes   : true,
-              removeStyleLinkTypeAttributes: false,
-              minifyCSS                    : false,
-              minifyJS                     : false,
-            });
-            await fs.promises.writeFile(filePath, minified, 'utf8');
-          };
-
-          const walk = async (dir: string): Promise<void> => {
-            const entries = await fs.promises.readdir(dir, { withFileTypes: true });
-            for (const entry of entries) {
-              const fullPath = path.join(dir, entry.name);
-              if (entry.isDirectory()) await walk(fullPath);
-              else if (entry.name.endsWith('.html')) await processHTML(fullPath);
-            }
-          };
-
-          await walk(distDir);
-        },
-      }`;
-
-const HTML_MINIFIER_PLUGIN_BODY_JS = `{
-        name : 'bini-html-minifier',
-        apply: 'build',
-        closeBundle: async () => {
-          const distDir = path.resolve('dist');
-          if (!fs.existsSync(distDir)) return;
-
-          const processHTML = async (filePath) => {
-            const html = await fs.promises.readFile(filePath, 'utf8');
-            const minified = await minify(html, {
-              collapseWhitespace           : true,
-              removeComments               : true,
-              removeRedundantAttributes    : true,
-              removeEmptyAttributes        : false,
-              removeScriptTypeAttributes   : true,
-              removeStyleLinkTypeAttributes: false,
-              minifyCSS                    : false,
-              minifyJS                     : false,
-            });
-            await fs.promises.writeFile(filePath, minified, 'utf8');
-          };
-
-          const walk = async (dir) => {
-            const entries = await fs.promises.readdir(dir, { withFileTypes: true });
-            for (const entry of entries) {
-              const fullPath = path.join(dir, entry.name);
-              if (entry.isDirectory()) await walk(fullPath);
-              else if (entry.name.endsWith('.html')) await processHTML(fullPath);
-            }
-          };
-
-          await walk(distDir);
-        },
-      }`;
-
-const ROLLUP_ASSET_NAMES = `(assetInfo) => {
+const ROLLDOWN_ASSET_NAMES = `(assetInfo) => {
             const name = assetInfo.names?.[0] ?? assetInfo.name ?? '';
             const ext  = name.split('.').pop() ?? '';
             if (/png|jpe?g|gif|svg|webp|avif/.test(ext)) return 'assets/images/[name]-[hash][extname]';
@@ -724,34 +686,30 @@ const ROLLUP_ASSET_NAMES = `(assetInfo) => {
             return 'assets/[name]-[hash][extname]';
           }`;
 
-function generateViteConfig(
-  projectPath  : string,
+async function generateViteConfig(
+  projectPath: string,
   useTypeScript: boolean,
-  configExt    : ConfigExtension,
-  styling      : StylingOption
-): void {
+  configExt: ConfigExtension,
+  styling: StylingOption
+): Promise<void> {
   const tailwindImport = styling === "Tailwind" ? `import tailwindcss from '@tailwindcss/vite';\n` : "";
-  const tailwindPlugin = styling === "Tailwind" ? `tailwindcss(),\n      `                         : "";
+  const tailwindPlugin = styling === "Tailwind" ? `tailwindcss(),\n      ` : "";
 
   const content = useTypeScript
     ? `import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
-import fs from 'fs';
-import path from 'path';
-import { minify } from 'html-minifier-terser';
-import biniConfig from './bini.config.ts';
 import { biniroute } from 'bini-router';
 import { biniOverlay } from 'bini-overlay';
-import biniEnv from 'bini-env';
+import { biniEnv } from 'bini-env';
 import { biniExport } from 'bini-export';
 ${tailwindImport}
 export default defineConfig(({ command, mode }) => {
   const env      = loadEnv(mode, process.cwd(), '');
   const isBuild  = command === 'build';
-  const port     = (biniConfig as { port?: number }).port || 3000;
+  const port     = parseInt(env['PORT'] ?? '3000', 10);
   const hmrConfig = env['CODESPACE_NAME']
-    ? { clientPort: 443, overlay: true }
-    : { overlay: true, host: 'localhost' };
+    ? { clientPort: 443, overlay: false }
+    : { overlay: false, host: 'localhost' };
 
   return {
     plugins: [
@@ -760,12 +718,11 @@ export default defineConfig(({ command, mode }) => {
       biniOverlay(),
       biniEnv(),
       biniExport(),
-      ${HTML_MINIFIER_PLUGIN_BODY},
     ],
 
     server: {
       port,
-      host   : env['CODESPACE_NAME'] ? '0.0.0.0' : ((biniConfig as { host?: string }).host || 'localhost'),
+      host   : env['CODESPACE_NAME'] ? '0.0.0.0' : 'localhost',
       open   : true,
       cors   : true,
       headers: { 'Access-Control-Allow-Origin': '*' },
@@ -780,49 +737,41 @@ export default defineConfig(({ command, mode }) => {
 
     build: {
       outDir               : 'dist',
-      sourcemap            : (biniConfig as { build?: { sourcemap?: boolean } }).build?.sourcemap !== false && !isBuild,
+      sourcemap            : !isBuild,
       emptyOutDir          : true,
-      minify               : 'terser',
+      minify               : isBuild,
       cssCodeSplit         : true,
       reportCompressedSize : true,
       chunkSizeWarningLimit: 1000,
-      rollupOptions: {
+      rolldownOptions: {
         output: {
           chunkFileNames: 'js/[name]-[hash].js',
           entryFileNames: 'js/[name]-[hash].js',
-          assetFileNames: ${ROLLUP_ASSET_NAMES},
+          assetFileNames: ${ROLLDOWN_ASSET_NAMES},
         },
-      },
-      terserOptions: {
-        compress: { drop_console: isBuild, drop_debugger: isBuild, passes: 2 },
-        format  : { comments: false },
       },
     },
 
     resolve    : { alias: { '@': '/src' } },
     css        : { modules: { localsConvention: 'camelCase' }, devSourcemap: true },
-    optimizeDeps: { include: ['react', 'react-dom', 'react-router-dom'], exclude: ['@bini/internal'] },
+    optimizeDeps: { include: ['react', 'react-dom', 'react-router-dom'] },
   };
 });
 `
     : `import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
-import fs from 'fs';
-import path from 'path';
-import { minify } from 'html-minifier-terser';
-import biniConfig from './bini.config.js';
 import { biniroute } from 'bini-router';
 import { biniOverlay } from 'bini-overlay';
-import biniEnv from 'bini-env';
+import { biniEnv } from 'bini-env';
 import { biniExport } from 'bini-export';
 ${tailwindImport}
 export default defineConfig(({ command, mode }) => {
   const env      = loadEnv(mode, process.cwd(), '');
   const isBuild  = command === 'build';
-  const port     = biniConfig?.port || 3000;
+  const port     = parseInt(env['PORT'] ?? '3000', 10);
   const hmrConfig = env['CODESPACE_NAME']
-    ? { clientPort: 443, overlay: true }
-    : { overlay: true, host: 'localhost' };
+    ? { clientPort: 443, overlay: false }
+    : { overlay: false, host: 'localhost' };
 
   return {
     plugins: [
@@ -831,12 +780,11 @@ export default defineConfig(({ command, mode }) => {
       biniOverlay(),
       biniEnv(),
       biniExport(),
-      ${HTML_MINIFIER_PLUGIN_BODY_JS},
     ],
 
     server: {
       port,
-      host   : env['CODESPACE_NAME'] ? '0.0.0.0' : (biniConfig?.host || 'localhost'),
+      host   : env['CODESPACE_NAME'] ? '0.0.0.0' : 'localhost',
       open   : true,
       cors   : true,
       headers: { 'Access-Control-Allow-Origin': '*' },
@@ -851,88 +799,93 @@ export default defineConfig(({ command, mode }) => {
 
     build: {
       outDir               : 'dist',
-      sourcemap            : biniConfig?.build?.sourcemap !== false && !isBuild,
+      sourcemap            : !isBuild,
       emptyOutDir          : true,
-      minify               : 'terser',
+      minify               : isBuild,
       cssCodeSplit         : true,
       reportCompressedSize : true,
       chunkSizeWarningLimit: 1000,
-      rollupOptions: {
+      rolldownOptions: {
         output: {
           chunkFileNames: 'js/[name]-[hash].js',
           entryFileNames: 'js/[name]-[hash].js',
-          assetFileNames: ${ROLLUP_ASSET_NAMES},
+          assetFileNames: ${ROLLDOWN_ASSET_NAMES},
         },
-      },
-      terserOptions: {
-        compress: { drop_console: isBuild, drop_debugger: isBuild, passes: 2 },
-        format  : { comments: false },
       },
     },
 
     resolve    : { alias: { '@': '/src' } },
     css        : { modules: { localsConvention: 'camelCase' }, devSourcemap: true },
-    optimizeDeps: { include: ['react', 'react-dom', 'react-router-dom'], exclude: ['@bini/internal'] },
+    optimizeDeps: { include: ['react', 'react-dom', 'react-router-dom'] },
   };
 });
 `;
 
-  secureWriteFile(path.join(projectPath, `vite.config.${configExt}`), content);
+  await secureWriteFileAsync(path.join(projectPath, `vite.config.${configExt}`), content);
 }
 
-// ─── bini.config ──────────────────────────────────────────────────────────────
+// ─── Oxlint + Oxfmt config ────────────────────────────────────────────────────
 
-function generateBiniConfig(projectPath: string, configExt: ConfigExtension): void {
-  secureWriteFile(
-    path.join(projectPath, `bini.config.${configExt}`),
-    `export default {
-  outDir: 'dist',
-  port  : 3000,
-  host  : '0.0.0.0',
+async function generateLintAndFormatConfigs(
+  projectPath: string,
+  useTypeScript: boolean
+): Promise<void> {
+  const oxlintConfig = {
+    $schema: "./node_modules/oxlint/configuration_schema.json",
+    plugins: ["react", "react-hooks"],
+    env: { browser: true, es2022: true, node: true },
+    rules: {
+      correctness: "error",
+      suspicious: "warn",
+      "react/jsx-key": "error",
+      "react-hooks/rules-of-hooks": "error",
+      "react-hooks/exhaustive-deps": "warn",
+      ...(useTypeScript
+        ? {
+            "@typescript-eslint/no-unused-vars": [
+              "error",
+              { argsIgnorePattern: "^_", varsIgnorePattern: "^_" },
+            ],
+          }
+        : {}),
+    },
+    ignorePatterns: ["dist", "node_modules"],
+  };
 
-  api: {
-    dir          : 'src/app/api',
-    bodySizeLimit: '2mb',
-    extensions   : ['.js', '.ts', '.mjs'],
-  },
-
-  static: {
-    dir      : 'public',
-    maxAge   : 3600,
-    dotfiles : 'deny',
-    immutable: false,
-  },
-
-  build: {
-    minify      : true,
-    sourcemap   : true,
-    target      : 'esnext',
-    clean       : true,
-    cssCodeSplit: true,
-  },
-
-  cors: {
-    origin        : '*',
-    methods       : ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
-  },
-
-  security: {
-    csp           : { enabled: false },
-    hidePoweredBy : true,
-    referrerPolicy: 'no-referrer',
-    xssFilter     : true,
-    frameguard    : 'deny',
-  },
-
-  logging: {
-    level    : 'info',
-    color    : true,
-    timestamp: true,
-  },
-};
-`
+  await secureWriteFileAsync(
+    path.join(projectPath, ".oxlintrc.json"),
+    JSON.stringify(oxlintConfig, null, 2)
   );
+
+  const oxfmtConfig = {
+    semi: false,
+    singleQuote: true,
+    tabWidth: 2,
+    printWidth: 100,
+    trailingComma: "es5",
+    sortImports: true,
+    sortTailwindcssClasses: true,
+  };
+
+  await secureWriteFileAsync(
+    path.join(projectPath, ".oxfmt.json"),
+    JSON.stringify(oxfmtConfig, null, 2)
+  );
+}
+
+function generateGitignore(apiExt: ApiExtension): string {
+  return `node_modules/
+dist/
+.env
+.env.local
+.env.*.local
+.DS_Store
+Thumbs.db
+*.log
+
+# bini-router generated production entry — do not edit directly
+netlify/edge-functions/api.${apiExt}
+`;
 }
 
 // ─── App files ────────────────────────────────────────────────────────────────
@@ -1081,15 +1034,15 @@ export default function Home() {
 `;
 }
 
-function generateAppFiles(
-  projectPath  : string,
-  mainExt      : FileExtension,
+async function generateAppFiles(
+  projectPath: string,
+  mainExt: FileExtension,
   useTypeScript: boolean,
-  styling      : StylingOption
-): void {
+  styling: StylingOption
+): Promise<void> {
   const appPath = path.join(projectPath, "src/app");
 
-  secureWriteFile(
+  await secureWriteFileAsync(
     path.join(projectPath, "src", `main.${mainExt}`),
     `import React from 'react';
 import { createRoot } from 'react-dom/client';
@@ -1105,7 +1058,7 @@ createRoot(container).render(<App />);
     ? `{ children }: { children: React.ReactNode }`
     : `{ children }`;
 
-  secureWriteFile(
+  await secureWriteFileAsync(
     path.join(appPath, `layout.${mainExt}`),
     `import React from 'react';
 import './globals.css';
@@ -1130,7 +1083,7 @@ export const metadata = {
     images : ['/og-image.png'],
   },
   icons: {
-    icon : [{ url: '/favicon.svg', type: 'image/svg+xml' }],
+    icon : [{ url: '/favicon.ico', type: 'image/x-icon' }],
     apple: [{ url: '/apple-touch-icon.png', sizes: '180x180' }],
   },
 };
@@ -1142,34 +1095,37 @@ export default function RootLayout(${childrenProp}) {
 `
   );
 
-  secureWriteFile(path.join(appPath, `page.${mainExt}`), buildPageContent(mainExt, styling));
+  await secureWriteFileAsync(
+    path.join(appPath, `page.${mainExt}`),
+    buildPageContent(mainExt, styling)
+  );
 }
 
 // ─── Other config files ───────────────────────────────────────────────────────
 
-function generateOtherConfigFiles(
-  projectPath  : string,
+async function generateOtherConfigFiles(
+  projectPath: string,
   useTypeScript: boolean
-): void {
+): Promise<void> {
   if (useTypeScript) {
-    secureWriteFile(
+    await secureWriteFileAsync(
       path.join(projectPath, "tsconfig.json"),
       JSON.stringify(
         {
           compilerOptions: {
-            target                          : "ES2020",
-            lib                             : ["ES2020", "DOM", "DOM.Iterable"],
-            module                          : "ESNext",
-            skipLibCheck                    : true,
-            moduleResolution                : "bundler",
-            allowImportingTsExtensions      : true,
-            resolveJsonModule               : true,
-            isolatedModules                 : true,
-            noEmit                          : true,
-            jsx                             : "react-jsx",
-            strict                          : true,
-            baseUrl                         : ".",
-            paths                           : { "@/*": ["./src/*"] },
+            target: "ES2022",
+            lib: ["ES2022", "DOM", "DOM.Iterable"],
+            module: "ESNext",
+            skipLibCheck: true,
+            moduleResolution: "bundler",
+            allowImportingTsExtensions: true,
+            resolveJsonModule: true,
+            isolatedModules: true,
+            noEmit: true,
+            jsx: "react-jsx",
+            strict: true,
+            baseUrl: ".",
+            paths: { "@/*": ["./src/*"] },
             forceConsistentCasingInFileNames: true,
           },
           include: ["src"],
@@ -1181,190 +1137,50 @@ function generateOtherConfigFiles(
     );
   }
 
-  const eslintConfig = useTypeScript
-    ? `import js from '@eslint/js'
-import globals from 'globals'
-import reactHooks from 'eslint-plugin-react-hooks'
-import reactRefresh from 'eslint-plugin-react-refresh'
-import tseslint from 'typescript-eslint'
-
-export default tseslint.config(
-  { ignores: ['dist', 'node_modules'] },
-  {
-    extends: [js.configs.recommended, ...tseslint.configs.recommended],
-    files  : ['**/*.{ts,tsx}'],
-    languageOptions: {
-      ecmaVersion: 2020,
-      globals    : globals.browser,
-      parserOptions: { ecmaFeatures: { jsx: true }, sourceType: 'module' },
-    },
-    plugins: { 'react-hooks': reactHooks, 'react-refresh': reactRefresh },
-    rules: {
-      ...reactHooks.configs.recommended.rules,
-      'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
-      'prefer-const': 'error',
-      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
-    },
-  },
-)
-`
-    : `import js from '@eslint/js'
-import globals from 'globals'
-import reactHooks from 'eslint-plugin-react-hooks'
-import reactRefresh from 'eslint-plugin-react-refresh'
-
-export default [
-  { ignores: ['dist', 'node_modules'] },
-  {
-    files: ['**/*.{js,jsx}'],
-    languageOptions: {
-      ecmaVersion  : 2020,
-      globals      : globals.browser,
-      parserOptions: { ecmaVersion: 'latest', ecmaFeatures: { jsx: true }, sourceType: 'module' },
-    },
-    plugins: { 'react-hooks': reactHooks, 'react-refresh': reactRefresh },
-    rules: {
-      ...js.configs.recommended.rules,
-      ...reactHooks.configs.recommended.rules,
-      'no-unused-vars'                       : ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
-      'react-refresh/only-export-components' : ['warn', { allowConstantExport: true }],
-      'prefer-const'                         : 'error',
-      ...globals.node,
-    },
-  },
-]
-`;
-
-  secureWriteFile(path.join(projectPath, "eslint.config.mjs"), eslintConfig);
+  await generateLintAndFormatConfigs(projectPath, useTypeScript);
 }
 
-// ─── Project generator ────────────────────────────────────────────────────────
+// ─── README ───────────────────────────────────────────────────────────────────
 
-async function generateProject(
-  projectName : string,
-  answers     : ProjectAnswers,
-  flags       : CliFlags
-): Promise<void> {
-  const projectPath = path.join(process.cwd(), projectName);
-
-  try {
-    checkDiskSpace(100);
-    await checkNetworkConnectivity(); // FIX #1: now warns user if offline
-
-    if (fs.existsSync(projectPath) && !flags.force) {
-      throw new Error(`Directory "${projectName}" already exists. Use --force to overwrite.`);
-    }
-    if (flags.force && fs.existsSync(projectPath)) safeRm(projectPath);
-
-    const useTypeScript = shouldUseTypeScript(flags, answers);
-    const ext           = getFileExtensions(useTypeScript);
-
-    robustMkdirSync(path.join(projectPath, "src/app/api"));
-    robustMkdirSync(path.join(projectPath, "public"));
-
-    await generateFaviconFiles(path.join(projectPath, "public"));
-    generateWebManifest(projectPath);
-
-    secureWriteFile(
-      path.join(projectPath, "index.html"),
-      `<!DOCTYPE html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <!-- bini-router injects title, meta, icons, and OG tags here at build time -->
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.${ext.main}"></script>
-  </body>
-</html>
-`,
-      { force: flags.force }
-    );
-
-    generateAppFiles(projectPath, ext.main, useTypeScript, answers.styling);
-    if (answers.styling === "CSS Modules") generateCSSModulesFiles(projectPath);
-    secureWriteFile(
-      path.join(projectPath, "src/app/globals.css"),
-      generateGlobalStyles(answers.styling),
-      { force: flags.force }
-    );
-
-    secureWriteFile(
-      path.join(projectPath, `src/app/api/hello.${ext.api}`),
-      `import { Hono } from 'hono'
-
-const app = new Hono().basePath('/api')
-
-app.all('/hello', (c) => {
-  return c.json({
-    message  : 'Hello from Bini.js!',
-    timestamp: new Date().toISOString(),
-    method   : c.req.method,
-  })
-})
-
-export default app
-`,
-      { force: flags.force }
-    );
-
-    // FIX #2: .gitignore only includes the netlify entry since that's the only
-    // platform scaffolded by default. Other platform entries removed to avoid noise.
-    secureWriteFile(
-      path.join(projectPath, ".gitignore"),
-      `node_modules/
-dist/
-.env
-.env.local
-.env.*.local
-.DS_Store
-Thumbs.db
-*.log
-
-# bini-router generated production entry — do not edit directly
-netlify/edge-functions/api.${ext.api}
-`
-    );
-
-    secureWriteFile(
-      path.join(projectPath, "package.json"),
-      JSON.stringify(generatePackageJson(projectName, useTypeScript, answers.styling), null, 2),
-      { force: flags.force }
-    );
-
-    generateViteConfig(projectPath, useTypeScript, ext.config, answers.styling);
-    generateBiniConfig(projectPath, ext.config);
-    generateOtherConfigFiles(projectPath, useTypeScript);
-
-    secureWriteFile(
-      path.join(projectPath, "README.md"),
-      `# ${projectName}
+function generateReadme(
+  projectName: string,
+  useTypeScript: boolean,
+  ext: FileExtensions,
+  pm: PackageManager
+): string {
+  return `# ${projectName}
 
 A Bini.js app — zero-config React framework.
 
 ## Quick Start
 
 \`\`\`bash
-npm install
-npm run dev
+${pm} install
+${pm} run dev
 \`\`\`
 
 ## Production
 
 \`\`\`bash
-npm run build
-npm start        # served by bini-server
+${pm} run build
+${pm} start        # served by bini-server
 \`\`\`
 
 ## Static Export (GitHub Pages / Netlify Static / S3)
 
 \`\`\`bash
-npm run export   # vite build --mode export
+${pm} run export   # vite build --mode export
 \`\`\`
 
 Generates a fully pre-rendered \`dist/\` with per-route \`index.html\` files and a smart \`404.html\` — no server required.
+
+## Linting & Formatting
+
+\`\`\`bash
+${pm} run lint     # Oxlint — 50-100x faster than ESLint
+${pm} run format   # Oxfmt  — Prettier-compatible formatter
+${pm} run check    # lint + format check combined (great for CI)
+\`\`\`
 
 ## API Routes
 
@@ -1396,7 +1212,12 @@ ${projectName}/
 │   │   └── globals.css
 │   └── main.${ext.main}             ← mounts <App /> (auto-generated by bini-router)
 ├── public/
-├── bini.config.${ext.config}
+│   ├── favicon.ico
+│   ├── apple-touch-icon.png
+│   ├── og-image.png
+│   └── site.webmanifest
+├── .oxlintrc.json
+├── .oxfmt.json
 ├── vite.config.${ext.config}
 └── package.json
 \`\`\`
@@ -1408,47 +1229,152 @@ ${projectName}/
 
 ## Powered by
 
-- **bini-router** — filesystem routing + API middleware
-- **bini-export** — static SPA export (GitHub Pages, Netlify, S3)
+- **Vite 8**       — Rolldown-powered builds, dramatically faster
+- **bini-router**  — filesystem routing + API middleware
+- **bini-export**  — static SPA export (GitHub Pages, Netlify, S3)
 - **bini-overlay** — dev overlay badge
-- **bini-env**    — environment file display
-- **bini-server** — production server (zero dependencies)
+- **bini-env**     — environment file display
+- **bini-server**  — production server (zero dependencies)
+- **Oxlint**       — fast Rust-based linter (replaces ESLint)
+- **Oxfmt**        — fast Prettier-compatible formatter
 
 ---
 
 **Built with Bini.js v${BINIJS_VERSION}** | [Documentation](https://bini.js.org)
-`,
-      { force: flags.force }
-    );
+`;
+}
 
-    let installedDependencies  = false;
-    let detectedPackageManager : PackageManager = "npm";
+// ─── Project generator ────────────────────────────────────────────────────────
+
+async function generateProject(
+  projectName: string,
+  answers: ProjectAnswers,
+  flags: CliFlags
+): Promise<void> {
+  const projectPath = path.join(process.cwd(), projectName);
+  const publicPath = path.join(projectPath, "public");
+
+  try {
+    checkDiskSpace(100);
+    checkNetworkConnectivity(); // non-blocking — returns immediately
+
+    if (fs.existsSync(projectPath) && !flags.force) {
+      throw new Error(`Directory "${projectName}" already exists. Use --force to overwrite.`);
+    }
+    if (flags.force && fs.existsSync(projectPath)) safeRm(projectPath);
+
+    const useTypeScript = shouldUseTypeScript(flags, answers);
+    const ext = getFileExtensions(useTypeScript);
+
+    robustMkdirSync(path.join(projectPath, "src/app/api"));
+    robustMkdirSync(publicPath);
+
+    // Copy assets and generate manifest in parallel
+    const assetPromises = Promise.all([
+      copyFaviconFiles(publicPath),
+      generateWebManifest(projectPath),
+    ]);
+
+    // Generate all files in parallel for better performance
+    await Promise.all([
+      secureWriteFileAsync(
+        path.join(projectPath, "index.html"),
+        `<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- bini-router injects title, meta, icons, and OG tags here at build time -->
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.${ext.main}"></script>
+  </body>
+</html>
+`,
+        { force: flags.force }
+      ),
+      generateAppFiles(projectPath, ext.main, useTypeScript, answers.styling),
+      answers.styling === "CSS Modules"
+        ? generateCSSModulesFiles(projectPath)
+        : Promise.resolve(),
+      secureWriteFileAsync(
+        path.join(projectPath, "src/app/globals.css"),
+        generateGlobalStyles(answers.styling),
+        { force: flags.force }
+      ),
+      secureWriteFileAsync(
+        path.join(projectPath, `src/app/api/hello.${ext.api}`),
+        `import { Hono } from 'hono'
+
+const app = new Hono().basePath('/api')
+
+app.all('/hello', (c) => {
+  return c.json({
+    message  : 'Hello from Bini.js!',
+    timestamp: new Date().toISOString(),
+    method   : c.req.method,
+  })
+})
+
+export default app
+`,
+        { force: flags.force }
+      ),
+      secureWriteFileAsync(
+        path.join(projectPath, ".gitignore"),
+        generateGitignore(ext.api),
+        { force: flags.force }
+      ),
+      secureWriteFileAsync(
+        path.join(projectPath, "package.json"),
+        JSON.stringify(generatePackageJson(projectName, useTypeScript, answers.styling), null, 2),
+        { force: flags.force }
+      ),
+      generateViteConfig(projectPath, useTypeScript, ext.config, answers.styling),
+      generateOtherConfigFiles(projectPath, useTypeScript),
+    ]);
+
+    // Wait for asset copying to complete
+    await assetPromises;
+
+    let installedDependencies = false;
+    let detectedPackageManager: PackageManager = "npm";
 
     try {
       detectedPackageManager = await detectPackageManager();
-      const shouldInstall = await confirm({
-        message: "Would you like to install dependencies automatically?",
-        default: true,
-      });
-      if (shouldInstall) {
-        installedDependencies = await installDependenciesWithFallbacks(
-          projectPath,
-          detectedPackageManager,
-        );
+      installedDependencies = await installDependenciesWithFallbacks(
+        projectPath,
+        detectedPackageManager,
+        !isInteractive() // Skip prompt in non-interactive mode
+      );
+    } catch (error) {
+      // Non-fatal - user can install manually
+      if (isInteractive()) {
+        console.warn(`  ⚠  Could not detect package manager: ${error instanceof Error ? error.message : String(error)}`);
       }
-    } catch { /* non-fatal — user can install manually */ }
+    }
+
+    await secureWriteFileAsync(
+      path.join(projectPath, "README.md"),
+      generateReadme(projectName, useTypeScript, ext, detectedPackageManager),
+      { force: flags.force }
+    );
 
     console.log(`\nSuccess! Created ${projectName} at ${path.join(process.cwd(), projectName)}\n`);
     console.log(`We suggest that you begin by typing:\n`);
     console.log(`  cd ${projectName}`);
     if (!installedDependencies) console.log(`  ${detectedPackageManager} install`);
     console.log(`  ${detectedPackageManager} run dev\n`);
-
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`\nAborted! ${message}`);
     if (fs.existsSync(projectPath)) {
-      try { safeRm(projectPath); } catch { /* best-effort cleanup */ }
+      try {
+        safeRm(projectPath);
+      } catch {
+        // best-effort cleanup
+      }
     }
     throw error;
   }
@@ -1459,22 +1385,32 @@ ${projectName}/
 async function main(): Promise<void> {
   try {
     checkNodeVersion();
+
     const args = parseArguments();
 
     console.log(LOGO);
 
     let projectName = args.projectName;
     if (!projectName) {
+      if (!isInteractive()) {
+        console.error("Project name required in non-interactive mode");
+        process.exit(1);
+      }
       projectName = await input({
-        message : "What is your project named?",
-        default : "my-bini-app",
+        message: "What is your project named?",
+        default: "my-bini-app",
         validate: (value: string) => {
           if (!value) return "Name required";
-          // FIX #4: error message now accurately reflects the lowercase-only rule
-          if (!validateProjectName(value)) return "Use lowercase letters, numbers, and hyphens only. Max 50 chars.";
+          if (!validateProjectName(value))
+            return "Use lowercase letters, numbers, and hyphens only. Max 50 chars.";
           return true;
         },
       });
+    }
+
+    if (!validateProjectName(projectName)) {
+      console.error("Invalid project name. Use lowercase letters, numbers, and hyphens only. Max 50 chars.");
+      process.exit(1);
     }
 
     const answers = await askQuestions(args.flags);
@@ -1486,7 +1422,18 @@ async function main(): Promise<void> {
   }
 }
 
-process.on("uncaughtException",  (e: Error)   => { console.error("\nAborted!", e.message); process.exit(1); });
-process.on("unhandledRejection", (r: unknown) => { console.error("\nAborted!", r);          process.exit(1); });
+// Global error handlers
+process.on("uncaughtException", (e: Error) => {
+  console.error("\nUncaught Exception:", e.message);
+  process.exit(1);
+});
+process.on("unhandledRejection", (r: unknown) => {
+  console.error("\nUnhandled Rejection:", r);
+  process.exit(1);
+});
 
-main().catch(console.error);
+// Run main with proper error handling
+main().catch((error) => {
+  console.error("\nFatal Error:", error instanceof Error ? error.message : String(error));
+  process.exit(1);
+});
