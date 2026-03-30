@@ -67,7 +67,7 @@
     "format": "oxfmt src",
     "check": "oxlint src --plugin typescript && oxfmt --check src",
     "test": "node dist/index.js --version",
-    "prepublishOnly": "pnpm run typecheck && pnpm run build && node dist/index.js --version",
+    "prepublishOnly": "npm run typecheck && npm run build && node dist/index.js --version",
     "clean": "rm -rf dist"
   },
   "homepage": "https://bini.js.org",
