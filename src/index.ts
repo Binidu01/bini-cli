@@ -630,7 +630,7 @@ function generatePackageJson(
     hono: "^4.12.9",
     "bini-router": "^1.0.27",
     "bini-overlay": "^1.0.5",
-    "bini-server": "^1.0.1",
+    "bini-server": "^1.0.2",
   };
 
   const devDependencies: Record<string, string> = {
@@ -638,7 +638,7 @@ function generatePackageJson(
     vite: "^8.0.3",
     oxlint: "latest",
     oxfmt: "latest",
-    "bini-env": "^1.0.7",
+    "bini-env": "^1.0.8",
     "bini-export": "^1.0.1",
   };
 
