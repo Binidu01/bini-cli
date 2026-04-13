@@ -1,7 +1,7 @@
 {
   "name": "create-bini-app",
   "type": "module",
-  "version": "9.3.4",
+  "version": "9.3.5",
   "description": "The Zero-Config React Framework for the Modern Web",
   "keywords": [
     "bini",
@@ -88,10 +88,10 @@
   },
   "license": "MIT",
   "dependencies": {
-    "@inquirer/prompts": "^8.3.0"
+    "@inquirer/prompts": "^8.4.1"
   },
   "devDependencies": {
-    "@types/node": "^25.4.0",
+    "@types/node": "^25.6.0",
     "oxfmt": "latest",
     "oxlint": "latest",
     "tsup": "^8.5.1",

@@ -1,13 +1,22 @@
 <div align="center">
 
 ```
-██████╗ ██╗███╗   ██╗██╗      ██╗███████╗
-██╔══██╗██║████╗  ██║██║      ██║██╔════╝
-██████╔╝██║██╔██╗ ██║██║      ██║███████╗
-██╔══██╗██║██║╚██╗██║██║ ██╗  ██║╚════██║
-██████╔╝██║██║ ╚████║██║ ╚█████╔╝███████║
-╚═════╝ ╚═╝╚═╝  ╚═══╝╚═╝  ╚════╝ ╚══════╝
-             Developed By Binidu
+            XXXXXXXXXXXXXXXX               
+         XXXXXXXXXXXXXXXXXXXXXz            
+       YXXXXXXXXXXXXXXXXXXXXXXXX           
+      vXXXXXXXXXXn    YXXXXXXXXXX          
+      XXXXXXXXX        XXXXXXXXXX          
+      XXXXXXXXX       XXXXXXXXXX           
+      XXXXXXXXX  XXXXXXXXXXXXXX            
+      XXXXXXXXX  XXXXXXXXXXXYz             
+      XXXXXXXXX  XXXXXXXXXXXXXXXXY         
+      XXXXXXXXX      YXXXXXXXXXXXXX        
+      XXXXXXXXX          YXXXXXXXXX        
+      XXXXXXXXX           XXXXXXXXXz       
+      XXXXXXXXX  Xn     YXXXXXXXXXX        
+      XXXXXXXXX  XXXXXXXXXXXXXXXXXX        
+      XXXXXXXXX  XXXXXXXXXXXXXXXX          
+      XXXXXXXXX  XXXXXXXXXXXXX             
 ```
 
 ### The Zero-Config React Framework for the Modern Web
@@ -17,11 +26,12 @@
 [![license](https://img.shields.io/badge/license-MIT-blue?style=for-the-badge)](https://github.com/Binidu01/bini-cli/blob/main/LICENSE)
 [![node version](https://img.shields.io/badge/node-%3E%3D20.19.0-brightgreen?style=for-the-badge)](https://nodejs.org)
 
-[![vite](https://img.shields.io/badge/vite-^8.0.3-646CFF?style=for-the-badge&logo=vite&logoColor=white)](https://vitejs.dev)
-[![react](https://img.shields.io/badge/react-^19.2.4-61DAFB?style=for-the-badge&logo=react&logoColor=black)](https://react.dev)
-[![typescript](https://img.shields.io/badge/typescript-^5.9.3-3178C6?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org)
-[![hono](https://img.shields.io/badge/hono-^4.12.9-E36002?style=for-the-badge&logo=hono&logoColor=white)](https://hono.dev)
-
+[![vite](https://img.shields.io/badge/vite-^8.0.8-646CFF?style=for-the-badge&logo=vite&logoColor=white)](https://vitejs.dev)
+[![react](https://img.shields.io/badge/react-^19.2.5-61DAFB?style=for-the-badge&logo=react&logoColor=black)](https://react.dev)
+[![typescript](https://img.shields.io/badge/typescript-^6.0.2-3178C6?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org)
+[![hono](https://img.shields.io/badge/hono-^4.12.12-E36002?style=for-the-badge&logo=hono&logoColor=white)](https://hono.dev)
+[![tailwindcss](https://img.shields.io/badge/tailwindcss-^4.2.2-06B6D4?style=for-the-badge&logo=tailwindcss&logoColor=white)](https://tailwindcss.com)
+[![react-router](https://img.shields.io/badge/react--router-^7.14.0-CA4245?style=for-the-badge&logo=reactrouter&logoColor=white)](https://reactrouter.com)
 </div>
 
 ---
@@ -51,10 +61,9 @@ Running `create-bini-app` scaffolds a complete, production-ready project with:
 - **Environment variable system** via `bini-env` — displays active `.env` files on startup, works across Node.js, Bun, Deno, and edge runtimes
 - **Auto-imports** — `useState`, `useEffect`, `Link`, `useNavigate`, `useParams`, `Outlet`, `getEnv`, `requireEnv`, and more available in every page and layout without writing a single import
 - **Automatic favicons** — `favicon.ico`, `apple-touch-icon.png`, `og-image.png`, and `site.webmanifest` generated at scaffold time, zero manual setup
-- **Official plugin system** — extend Bini.js with first-party and community plugins via `bini.config.ts`
 - **TypeScript or JavaScript** — your choice at scaffold time, auto-detected by `bini-router`
 - **Tailwind CSS v4, CSS Modules, or plain CSS** — your choice at scaffold time
-- **Netlify Edge Functions** — API routes deploy to Netlify Edge by default, zero extra config
+- **Deploy anywhere** — Netlify Edge Functions, Vercel Edge, Cloudflare Workers, Node.js, Deno
 - **Oxlint + Oxfmt** — Rust-based linter and formatter, 50–100× faster than ESLint and Prettier
 - **GitHub Codespaces support** — HMR polling and `0.0.0.0` host binding configured automatically via `CODESPACE_NAME`
 
@@ -78,7 +87,9 @@ npx create-bini-app@latest my-app
 # Skip prompts with flags
 npx create-bini-app@latest my-app --typescript --tailwind
 npx create-bini-app@latest my-app --javascript --css-modules
-npx create-bini-app@latest my-app --force   # overwrite existing directory
+npx create-bini-app@latest my-app --force         # overwrite existing directory
+npx create-bini-app@latest my-app --install        # auto-install dependencies
+npx create-bini-app@latest my-app --no-install     # skip dependency installation
 ```
 
 | Flag | Description |
@@ -88,11 +99,12 @@ npx create-bini-app@latest my-app --force   # overwrite existing directory
 | `--tailwind` | Use Tailwind CSS v4 |
 | `--css-modules` | Use CSS Modules |
 | `--force` | Overwrite an existing directory |
-| `--minimal` | Scaffold with fewer files |
+| `--install` | Auto-install dependencies without prompting |
+| `--no-install` | Skip dependency installation without prompting |
 | `--version`, `-v` | Print CLI version |
 | `--help`, `-h` | Show help |
 
-> **Non-interactive mode** — when stdin/stdout is not a TTY (e.g. CI), the CLI skips all prompts and uses defaults: TypeScript and Tailwind CSS. Pass flags to override.
+> **Non-interactive mode** — when stdin/stdout is not a TTY (e.g. CI), the CLI skips all prompts and uses defaults: TypeScript and Tailwind CSS. Pass flags to override. Use `--install` or `--no-install` to control dependency installation without a prompt.
 
 ---
 
@@ -116,13 +128,9 @@ my-app/
 │   ├── apple-touch-icon.png
 │   ├── og-image.png
 │   └── site.webmanifest
-├── netlify/
-│   └── edge-functions/
-│       └── api.ts                  ← Auto-generated by bini-router on build — do not edit
-├── bini.config.ts
-├── vite.config.ts
 ├── .oxlintrc.json
-├── .oxfmt.json
+├── .oxfmtrc.json
+├── vite.config.ts
 └── package.json
 ```
 
@@ -133,14 +141,14 @@ my-app/
 | Command | Description |
 |---|---|
 | `npm run dev` | Start Vite dev server with HMR (opens browser automatically) |
-| `npm run build` | Bundle for production into `dist/` + generate Netlify edge function |
+| `npm run build` | Type-check then bundle for production into `dist/` |
 | `npm run export` | Static SPA export — pre-renders routes, generates `404.html`, strips platform files |
 | `npm start` | Serve the production build via `bini-server` |
 | `npm run preview` | Preview the production build via Vite |
 | `npm run type-check` | TypeScript type check — `tsc --noEmit` (TS projects only) |
-| `npm run lint` | Lint with Oxlint (react + react-hooks plugins) |
+| `npm run lint` | Lint with Oxlint |
 | `npm run format` | Format with Oxfmt |
-| `npm run check` | Lint + format check combined — ideal for CI |
+| `npm run check` | Lint + format + type-check combined — ideal for CI |
 
 ---
 
@@ -188,8 +196,7 @@ export default function Post() {
 
 ### Layouts
 
-Root layouts use `{children}` — they wrap from outside the router.  
-Nested layouts use `<Outlet />` — they are React Router route wrappers.
+All layouts — root and nested — use `<Outlet />` from React Router.
 
 ```tsx
 // src/app/layout.tsx — root layout
@@ -198,8 +205,8 @@ export const metadata = {
   description: 'Built with Bini.js',
 }
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
-  return <>{children}</>;
+export default function RootLayout() {
+  return <Outlet />
 }
 ```
 
@@ -211,11 +218,11 @@ export default function DashboardLayout() {
       <aside>Sidebar</aside>
       <main><Outlet /></main>
     </div>
-  );
+  )
 }
 ```
 
-> **Note:** Root layouts that render an `<html>` tag are automatically skipped by `bini-router` — they are treated as HTML shell layouts and excluded from the route wrapping chain.
+> **Note:** Layouts that contain an `<html>` tag are automatically excluded from the route chain. Layouts without a default export are also excluded.
 
 ### Custom Loading Screen
 
@@ -331,7 +338,7 @@ export default function handler(req: Request) {
 // src/app/api/users.ts
 import { Hono } from 'hono'
 
-const app = new Hono().basePath('/api')
+const app = new Hono()
 
 app.get('/users', (c) => c.json({ users: ['alice', 'bob'] }))
 
@@ -349,7 +356,7 @@ export default app
 // src/app/api/posts/[id].ts
 import { Hono } from 'hono'
 
-const app = new Hono().basePath('/api')
+const app = new Hono()
 
 app.get('/posts/:id', (c) => c.json({ id: c.req.param('id') }))
 
@@ -363,7 +370,7 @@ export default app
 import { Hono } from 'hono'
 import nodemailer from 'nodemailer'
 
-const app = new Hono().basePath('/api')
+const app = new Hono()
 
 const transporter = nodemailer.createTransport({
   host: 'smtp-relay.brevo.com',
@@ -431,92 +438,6 @@ import.meta.env.BINI_PUBLIC_API_URL
 const user = requireEnv('SMTP_USER'); // throws if missing
 const debug = getEnv('DEBUG_MODE');   // returns undefined if missing
 ```
-
----
-
-## Plugin System
-
-Bini.js has an **official plugin system**. Plugins extend the framework with reusable behaviour — hook into the dev server, build pipeline, routing, and API layer without touching your app code.
-
-### Using Plugins
-
-Install a plugin and register it in `bini.config.ts`:
-
-```ts
-// bini.config.ts
-import { defineConfig } from 'bini-router'
-import myPlugin from 'bini-plugin-example'
-
-export default defineConfig({
-  plugins: [
-    myPlugin({ /* options */ }),
-  ],
-})
-```
-
-Multiple plugins are supported and run in order:
-
-```ts
-export default defineConfig({
-  plugins: [
-    authPlugin(),
-    analyticsPlugin({ trackPageViews: true }),
-    i18nPlugin({ locales: ['en', 'si'] }),
-  ],
-})
-```
-
-### Writing a Plugin
-
-A Bini.js plugin is a function that returns a plugin object:
-
-```ts
-import type { BiniPlugin } from 'bini-router'
-
-export default function myPlugin(options = {}): BiniPlugin {
-  return {
-    name: 'bini-plugin-my-plugin',
-
-    onDevStart({ server }) {
-      console.log('Dev server ready')
-    },
-
-    onBuildStart({ config }) {
-      console.log('Building...')
-    },
-
-    onBuildEnd({ outDir }) {
-      console.log(`Built to ${outDir}`)
-    },
-
-    onApiSetup({ app }) {
-      app.get('/api/my-plugin/status', (c) => c.json({ ok: true }))
-    },
-  }
-}
-```
-
-All lifecycle hooks are optional — implement only what your plugin needs.
-
-### Available Hooks
-
-| Hook | When it runs | Arguments |
-|---|---|---|
-| `onDevStart` | Dev server ready | `{ server, config }` |
-| `onBuildStart` | Before `vite build` | `{ config }` |
-| `onBuildEnd` | After `vite build` | `{ outDir, config }` |
-| `onApiSetup` | API router initialised | `{ app: Hono }` |
-| `onRequest` | Every incoming request | `{ req, next }` |
-
-### Official Plugins
-
-| Plugin | Description |
-|---|---|
-| [`bini-plugin-auth`](https://npmjs.com/package/bini-plugin-auth) | Session-based and JWT authentication |
-| [`bini-plugin-i18n`](https://npmjs.com/package/bini-plugin-i18n) | Internationalisation and locale routing |
-| [`bini-plugin-analytics`](https://npmjs.com/package/bini-plugin-analytics) | Privacy-first page view analytics |
-
-> Community plugins follow the `bini-plugin-*` naming convention. See the [plugin registry](https://bini.js.org/plugins) for the full list.
 
 ---
 
@@ -650,14 +571,6 @@ The panel closes automatically when an error is fixed and HMR fires. **Never app
 DISABLE_BINI_OVERLAY=true npm run dev
 ```
 
-**HMR events:**
-
-| Event | Action |
-|---|---|
-| `vite:error` | Shows error pill + auto-opens panel |
-| `vite:beforeUpdate` | Clears resolved errors, shows loading animation |
-| `vite:afterUpdate` | Returns to idle |
-
 ---
 
 ## Linting & Formatting
@@ -665,9 +578,9 @@ DISABLE_BINI_OVERLAY=true npm run dev
 Every scaffolded project comes pre-configured with **Oxlint** and **Oxfmt** — Rust-based tools that are 50–100× faster than ESLint and Prettier.
 
 ```bash
-npm run lint     # Oxlint — react + react-hooks plugins enabled
+npm run lint     # Oxlint — react plugin enabled
 npm run format   # Oxfmt  — Prettier-compatible formatter
-npm run check    # lint + format check combined (great for CI)
+npm run check    # lint + format + type-check combined (great for CI)
 ```
 
 Configuration files are auto-generated at scaffold time:
@@ -675,19 +588,15 @@ Configuration files are auto-generated at scaffold time:
 ```json
 // .oxlintrc.json
 {
-  "plugins": ["react", "react-hooks"],
-  "rules": {
-    "correctness": "error",
-    "suspicious": "warn",
-    "react/jsx-key": "error",
-    "react-hooks/rules-of-hooks": "error",
-    "react-hooks/exhaustive-deps": "warn"
-  }
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["react"],
+  "env": { "browser": true, "es2022": true },
+  "ignorePatterns": ["dist", "node_modules"]
 }
 ```
 
 ```json
-// .oxfmt.json
+// .oxfmtrc.json
 {
   "semi": false,
   "singleQuote": true,
@@ -699,18 +608,7 @@ Configuration files are auto-generated at scaffold time:
 }
 ```
 
----
-
-## HMR & File Watcher
-
-`bini-router` watches `src/app/` during development and regenerates `App.tsx` automatically:
-
-- New file → picked up immediately
-- New folder → watched instantly
-- Deleted file or folder → removed from routes and reloaded
-- Changes are debounced — no redundant reloads
-
-You never need to restart the dev server when adding new routes.
+You never need to restart the dev server when adding or removing routes — `bini-router` picks up new files, folders, and deletions automatically.
 
 ---
 
@@ -738,12 +636,16 @@ Every Bini.js project is pre-configured for Netlify. Running `vite build` automa
 
 > Use `[[edge_functions]]` for the API — not `[[redirects]]`.
 
+> ⚠️ Netlify Edge Functions run on the Deno runtime, not Node.js. Packages that depend on Node.js built-ins (e.g. `nodemailer`, `fs`, `path`) will not work. Use Web API alternatives instead.
+
 ### Node.js servers (Railway, Render, Fly.io, VPS)
 
 ```bash
 npm run build
 npm start
 ```
+
+> ⚠️ `bini-server` runs your API handlers directly from `src/app/api/` — they are **not** compiled into `dist/`. Make sure your server has access to both `dist/` and `src/app/api/`. On Railway and Render this happens automatically. On a VPS, deploy your full project directory, not just `dist/`.
 
 Railway and Render inject `PORT` automatically. Use [pm2](https://pm2.keymetrics.io/) on a VPS:
 
@@ -766,16 +668,36 @@ vite build && npx wrangler deploy
 
 ### Other Platforms
 
-`bini-router` supports `netlify` · `cloudflare` · `node` · `deno` · `bun` · `aws`. Set `platform` in `vite.config.ts` once — `vite build` generates the correct platform entry file automatically.
+`bini-router` supports `netlify` · `vercel` · `cloudflare` · `node` · `deno`. Set `platform` in `vite.config.ts` once — `vite build` generates the correct platform entry file automatically.
 
 | Platform | Output file |
 |---|---|
 | `netlify` | `netlify/edge-functions/api.ts` |
+| `vercel` | `api/index.ts` / `api/index.js` |
 | `cloudflare` | `worker.ts` / `worker.js` |
-| `node` | `server/index.ts` / `server/index.js` |
+| `node` | (none — handled by `bini-server`) |
 | `deno` | `server/index.ts` / `server/index.js` |
-| `bun` | `server/index.ts` / `server/index.js` |
-| `aws` | `handler.ts` / `handler.js` |
+
+> ⚠️ **Vercel** reads `api/` before the build step runs. You must commit the generated file before deploying:
+> ```bash
+> git add api/index.ts && git commit -m "chore: update vercel api entry" && git push
+> ```
+
+> ⚠️ **Deno Deploy** reads `server/` before the build step runs. You must commit the generated file before deploying:
+> ```bash
+> git add server/index.ts && git commit -m "chore: update deno server entry" && git push
+> ```
+> Deno Deploy does not run Node.js — use Web API or Deno-compatible alternatives in your API routes.
+
+> Add `vercel.json`:
+> ```json
+> {
+>   "rewrites": [
+>     { "source": "/api/(.*)", "destination": "/api/index.ts" },
+>     { "source": "/(.*)",     "destination": "/index.html" }
+>   ]
+> }
+> ```
 
 ### GitHub Pages / Subpath Deployments
 
@@ -791,23 +713,21 @@ export default defineConfig({
 
 Then run `npm run export` to generate a fully pre-rendered `dist/` ready for GitHub Pages.
 
-> ⚠️ **Vercel is not yet supported.** A Vercel adapter is actively being worked on — follow [the issue](https://github.com/Binidu01/bini-cli/issues) for updates.
-
 ---
 
 ## Powered By
 
 | Package | Version | Role |
 |---|---|---|
-| [`bini-router`](https://npmjs.com/package/bini-router) | `^1.0.27` | File-based routing, nested layouts, metadata, auto-imports, Hono API routes, HMR watcher, multi-platform deployment |
-| [`bini-server`](https://npmjs.com/package/bini-server) | `^1.0.1` | Zero-dependency production server — ETag, timeouts, graceful shutdown |
-| [`bini-overlay`](https://npmjs.com/package/bini-overlay) | `^1.0.5` | Dev animated logo badge + Shiki-highlighted error overlay |
-| [`bini-env`](https://npmjs.com/package/bini-env) | `^1.0.7` | Environment variable system + dev/preview startup banner |
-| [`bini-export`](https://npmjs.com/package/bini-export) | `^1.0.1` | Static SPA export — per-route pre-rendering, smart 404.html |
-| [`hono`](https://hono.dev) | `^4.12.9` | API route handler runtime |
-| [`vite`](https://vitejs.dev) | `^8.0.3` | Dev server and Rolldown-powered production bundler |
-| [`react`](https://react.dev) | `^19.2.4` | UI library |
-| [`react-router-dom`](https://reactrouter.com) | `^7.13.1` | Client-side routing |
+| [`bini-router`](https://npmjs.com/package/bini-router) | `latest` | File-based routing, nested layouts, metadata, auto-imports, Hono API routes, HMR watcher, multi-platform deployment |
+| [`bini-server`](https://npmjs.com/package/bini-server) | `latest` | Zero-dependency production server — ETag, timeouts, graceful shutdown |
+| [`bini-overlay`](https://npmjs.com/package/bini-overlay) | `latest` | Dev animated logo badge + Shiki-highlighted error overlay |
+| [`bini-env`](https://npmjs.com/package/bini-env) | `latest` | Environment variable system + dev/preview startup banner |
+| [`bini-export`](https://npmjs.com/package/bini-export) | `latest` | Static SPA export — per-route pre-rendering, smart 404.html |
+| [`hono`](https://hono.dev) | `latest` | API route handler runtime |
+| [`vite`](https://vitejs.dev) | `latest` | Dev server and Rolldown-powered production bundler |
+| [`react`](https://react.dev) | `latest` | UI library |
+| [`react-router-dom`](https://reactrouter.com) | `latest` | Client-side routing |
 | [`oxlint`](https://oxc.rs) | `latest` | Rust-based linter — 50–100× faster than ESLint |
 | [`oxfmt`](https://oxc.rs) | `latest` | Rust-based formatter — Prettier-compatible |
 

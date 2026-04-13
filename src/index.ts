@@ -1,4 +1,4 @@
-import { confirm, select, input } from "@inquirer/prompts";
+import { select, input } from "@inquirer/prompts";
 import fs from "fs";
 import fsPromises from "fs/promises";
 import path from "path";
@@ -14,6 +14,7 @@ interface CliFlags {
   javascript: boolean;
   tailwind: boolean;
   cssModules: boolean;
+  install: boolean | undefined;  // true = auto-install, false = skip install, undefined = prompt
 }
 
 interface ParsedArguments {
@@ -116,28 +117,107 @@ const BINIJS_VERSION: string = cliPackageJson.version;
 // Pre-baked assets bundled with the CLI — copied at scaffold time, no sharp needed
 const ASSETS_DIR = path.join(__dirname, "..", "assets");
 
+// Vite-style color codes
+const colors = {
+  reset: "\x1b[0m",
+  bold: "\x1b[1m",
+  dim: "\x1b[2m",
+  cyan: "\x1b[36m",
+  green: "\x1b[32m",
+  yellow: "\x1b[33m",
+  red: "\x1b[31m",
+  blue: "\x1b[34m",
+  magenta: "\x1b[35m",
+};
+
 const LOGO = `
-██████╗ ██╗███╗   ██╗██╗      ██╗███████╗
-██╔══██╗██║████╗  ██║██║      ██║██╔════╝
-██████╔╝██║██╔██╗ ██║██║      ██║███████╗
-██╔══██╗██║██║╚██╗██║██║ ██╗  ██║╚════██║
-██████╔╝██║██║ ╚████║██║ ╚█████╔╝███████║
-╚═════╝ ╚═╝╚═╝  ╚═══╝╚═╝  ╚════╝ ╚══════╝
-             Developed By Binidu
+${colors.cyan}${colors.bold}                XXXXXXXXXXXXXXXX               
+             XXXXXXXXXXXXXXXXXXXXXz            
+           YXXXXXXXXXXXXXXXXXXXXXXXX           
+          vXXXXXXXXXXn    YXXXXXXXXXX          
+          XXXXXXXXX        XXXXXXXXXX          
+          XXXXXXXXX       XXXXXXXXXX           
+          XXXXXXXXX  XXXXXXXXXXXXXX            
+          XXXXXXXXX  XXXXXXXXXXXYz             
+          XXXXXXXXX  XXXXXXXXXXXXXXXXY         
+          XXXXXXXXX      YXXXXXXXXXXXXX        
+          XXXXXXXXX          YXXXXXXXXX        
+          XXXXXXXXX           XXXXXXXXXz       
+          XXXXXXXXX  Xn     YXXXXXXXXXX        
+          XXXXXXXXX  XXXXXXXXXXXXXXXXXX        
+          XXXXXXXXX  XXXXXXXXXXXXXXXX          
+          XXXXXXXXX  XXXXXXXXXXXXX              
+${colors.reset}
+${colors.dim}             Developed By Binidu${colors.reset}
 `;
 
 // Vite 8 requires Node.js 20.19+ or 22.12+
 const REQUIRED_NODE = "v20.19.0";
 
-// ─── Hoisted constants ────────────────────────────────────────────────────────
+// Windows reserved device names — creating dirs with these names causes OS-level failures
+const WINDOWS_RESERVED_NAMES = /^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/i;
 
-// Combined pattern for better performance
+// Combined pattern for project name validation
 const INVALID_NAME_PATTERN = /^(\.|\.\.|npm|node)|[<>:"|?*\\]|[^a-z0-9\-.]/i;
+
+// ─── Vite-style console utilities ─────────────────────────────────────────────
+
+function logInfo(message: string): void {
+  console.log(`${colors.cyan}ℹ${colors.reset} ${message}`);
+}
+
+function logSuccess(message: string): void {
+  console.log(`${colors.green}✓${colors.reset} ${message}`);
+}
+
+function logWarning(message: string): void {
+  console.log(`${colors.yellow}⚠${colors.reset} ${message}`);
+}
+
+function logError(message: string): void {
+  console.error(`${colors.red}✖${colors.reset} ${message}`);
+}
+
+function logStep(message: string): void {
+  console.log(`${colors.blue}▶${colors.reset} ${message}`);
+}
+
+function logViteStyle(message: string, type: 'info' | 'success' | 'warn' | 'error' = 'info'): void {
+  switch(type) {
+    case 'success':
+      console.log(`${colors.green}${colors.bold}✓${colors.reset} ${message}`);
+      break;
+    case 'warn':
+      console.log(`${colors.yellow}${colors.bold}⚠${colors.reset} ${message}`);
+      break;
+    case 'error':
+      console.log(`${colors.red}${colors.bold}✖${colors.reset} ${message}`);
+      break;
+    default:
+      console.log(`${colors.cyan}${colors.bold}ℹ${colors.reset} ${message}`);
+  }
+}
 
 // ─── Utility functions ────────────────────────────────────────────────────────
 
 function isInteractive(): boolean {
   return isatty(process.stdin.fd) && isatty(process.stdout.fd);
+}
+
+/**
+ * Keyboard-navigable yes/no prompt using arrow keys.
+ * Uses @inquirer/prompts `select` so the user never has to type — just ↑/↓ + Enter.
+ */
+async function confirm(options: { message: string; default?: boolean }): Promise<boolean> {
+  const result = await select<boolean>({
+    message: options.message,
+    choices: [
+      { name: "Yes", value: true },
+      { name: "No",  value: false },
+    ],
+    default: options.default !== false,
+  });
+  return result;
 }
 
 // ─── System checks ────────────────────────────────────────────────────────────
@@ -151,20 +231,19 @@ function checkNodeVersion(): void {
   const reqMinor = reqParts[1];
 
   if (!major || !reqMajor) {
-    console.error("Unable to parse Node.js version");
+    logError("Unable to parse Node.js version");
     process.exit(1);
   }
 
-  if (major < reqMajor || (major === reqMajor && minor && minor < reqMinor)) {
-    console.error(`Node.js ${REQUIRED_NODE} or higher required. Current: ${process.version}`);
-    console.error("Please update Node.js from https://nodejs.org");
+  if (major < reqMajor || (major === reqMajor && minor !== undefined && minor < (reqMinor ?? 0))) {
+    logError(`Node.js ${REQUIRED_NODE} or higher required. Current: ${process.version}`);
+    logInfo("Please update Node.js from https://nodejs.org");
     process.exit(1);
   }
 }
 
 function checkDiskSpace(requiredMB = 100): void {
   try {
-    // Use statfsSync which is available in Node.js
     if (fs.statfsSync) {
       const stats = fs.statfsSync(process.cwd());
       const freeBytes = stats.bavail * stats.bsize;
@@ -172,37 +251,13 @@ function checkDiskSpace(requiredMB = 100): void {
         throw new Error(`Insufficient disk space. Required: ${requiredMB}MB`);
       }
     } else {
-      // Fallback for older Node.js versions - skip check
-      console.warn("Disk space check not available, skipping...");
+      logWarning("Disk space check not available, skipping...");
     }
   } catch (error) {
     if (error instanceof Error && (error as NodeJS.ErrnoException).code !== "ENOENT") {
-      console.warn("Could not check disk space:", error.message);
+      logWarning(`Could not check disk space: ${error.message}`);
     }
   }
-}
-
-function checkNetworkConnectivity(): void {
-  // Skip in non-interactive mode to prevent hanging
-  if (!isInteractive()) return;
-
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 10_000);
-
-  fetch("https://registry.npmjs.org", { signal: controller.signal })
-    .then((res) => {
-      clearTimeout(timeout);
-      if (!res.ok) {
-        console.warn("  ⚠  npm registry returned an unexpected response. Install may fail.");
-      }
-    })
-    .catch(() => {
-      clearTimeout(timeout);
-      console.warn("  ⚠  No internet connection detected. Dependency install may fail.");
-    })
-    .finally(() => {
-      clearTimeout(timeout);
-    });
 }
 
 // ─── Argument parsing ─────────────────────────────────────────────────────────
@@ -211,33 +266,40 @@ function parseArguments(): ParsedArguments {
   const args = process.argv.slice(2);
 
   if (args.includes("--version") || args.includes("-v")) {
-    console.log(`Bini.js CLI v${BINIJS_VERSION}`);
+    console.log(`${colors.cyan}Bini.js CLI${colors.reset} v${BINIJS_VERSION}`);
     process.exit(0);
   }
 
   if (args.includes("--help") || args.includes("-h")) {
     console.log(`
-Usage: create-bini-app [project-name] [options]
+${colors.bold}${colors.cyan}Usage:${colors.reset} create-bini-app [project-name] [options]
 
-Options:
-  --version, -v    Show version number
-  --help, -h       Show help
-  --typescript     Use TypeScript
-  --javascript     Use JavaScript (default)
-  --tailwind       Use Tailwind CSS
-  --css-modules    Use CSS Modules
-  --force          Overwrite existing directory
+${colors.bold}${colors.cyan}Options:${colors.reset}
+  --version, -v       Show version number
+  --help, -h          Show help
+  --typescript        Use TypeScript (default: prompt or true if non-interactive)
+  --javascript        Use JavaScript
+  --tailwind          Use Tailwind CSS
+  --css-modules       Use CSS Modules
+  --force             Overwrite existing directory
+  --install           Auto-install dependencies (skip prompt)
+  --no-install        Skip dependency installation (skip prompt)
 
-Examples:
-  create-bini-app my-app
-  create-bini-app my-app --typescript --tailwind
-  create-bini-app my-app --javascript --force
+${colors.bold}${colors.cyan}Examples:${colors.reset}
+  ${colors.dim}create-bini-app my-app${colors.reset}
+  ${colors.dim}create-bini-app my-app --typescript --tailwind${colors.reset}
+  ${colors.dim}create-bini-app my-app --javascript --force --no-install${colors.reset}
+  
+${colors.bold}${colors.cyan}Non-interactive mode (CI/CD):${colors.reset}
+  ${colors.dim}create-bini-app my-app --typescript --tailwind --install --force${colors.reset}
     `);
     process.exit(0);
   }
 
   const hasExplicitTypeScript = args.includes("--typescript");
   const hasExplicitJavaScript = args.includes("--javascript") || args.includes("--no-typescript");
+  const hasInstall = args.includes("--install");
+  const hasNoInstall = args.includes("--no-install");
 
   return {
     projectName: args.find((arg) => !arg.startsWith("--")),
@@ -247,12 +309,18 @@ Examples:
       javascript: hasExplicitJavaScript,
       tailwind: args.includes("--tailwind"),
       cssModules: args.includes("--css-modules"),
+      install: hasInstall ? true : hasNoInstall ? false : undefined,
     },
   };
 }
 
+/**
+ * FIX #8 — also blocks Windows reserved device names (CON, NUL, COM1, etc.)
+ */
 function validateProjectName(name: string): boolean {
-  return name.length > 0 && name.length <= 50 && !INVALID_NAME_PATTERN.test(name);
+  if (!name || name.length > 50) return false;
+  if (WINDOWS_RESERVED_NAMES.test(name)) return false;
+  return !INVALID_NAME_PATTERN.test(name);
 }
 
 // ─── File system helpers ──────────────────────────────────────────────────────
@@ -287,26 +355,30 @@ async function secureWriteFileAsync(
   }
 }
 
+/**
+ * FIX #4 — explicit comment on same-dir edge case; also guards against deleting allowedBase itself.
+ */
 function safeRm(targetPath: string, options: SafeRmOptions = {}): void {
   const allowedBase = options.allowedBase ?? process.cwd();
   if (!targetPath) throw new Error("Path required");
 
   const resolved = path.resolve(targetPath);
-  const base = path.resolve(allowedBase);
-
-  // Use relative path to check for traversal attempts
+  const base     = path.resolve(allowedBase);
   const relative = path.relative(base, resolved);
-  
-  // Check for path traversal
+
+  // `relative === ""` means resolved === base, i.e. caller is trying to delete the
+  // allowed-base itself. `startsWith("..")` catches upward traversal. `isAbsolute`
+  // catches cross-drive paths on Windows where path.relative returns an absolute path.
   if (relative === "" || relative.startsWith("..") || path.isAbsolute(relative)) {
-    throw new Error(`Path traversal attempt detected: ${targetPath} is outside ${allowedBase}`);
+    throw new Error(
+      `Path traversal attempt detected: "${targetPath}" is at or outside "${allowedBase}"`
+    );
   }
 
-  // Additional safety: check against system directories
   const systemPaths = [
     path.resolve("/"),
-    path.resolve(process.env.HOME || ""),
-    path.resolve(process.env.USERPROFILE || ""),
+    path.resolve(process.env.HOME ?? ""),
+    path.resolve(process.env.USERPROFILE ?? ""),
   ].filter(Boolean);
 
   for (const sysPath of systemPaths) {
@@ -317,7 +389,6 @@ function safeRm(targetPath: string, options: SafeRmOptions = {}): void {
 
   if (!fs.existsSync(resolved)) return;
 
-  // Depth check as additional safety (though relative check should catch most issues)
   const depth = resolved.split(path.sep).filter(Boolean).length;
   if (depth < 2) {
     throw new Error("Refusing to delete shallow directory (safety check)");
@@ -326,13 +397,16 @@ function safeRm(targetPath: string, options: SafeRmOptions = {}): void {
   try {
     fs.rmSync(resolved, { recursive: true, force: true });
   } catch (err) {
-    console.error(`Failed to delete ${resolved}:`, err);
+    logError(`Failed to delete ${resolved}: ${err}`);
     throw err;
   }
 }
 
 // ─── Command execution ────────────────────────────────────────────────────────
 
+/**
+ * FIX #10 — explicit String() cast instead of `as string` to handle Buffer edge cases.
+ */
 function executeCommand(command: string, options: ExecuteCommandOptions = {}): string {
   const isWindows = process.platform === "win32";
   try {
@@ -344,7 +418,7 @@ function executeCommand(command: string, options: ExecuteCommandOptions = {}): s
       windowsHide: true,
       encoding: "utf8",
     });
-    return result as string;
+    return String(result);
   } catch (error) {
     const execError = error as ExecuteCommandError;
     throw new Error(
@@ -355,76 +429,65 @@ function executeCommand(command: string, options: ExecuteCommandOptions = {}): s
 
 // ─── Package manager ──────────────────────────────────────────────────────────
 
-async function detectPackageManager(): Promise<PackageManager> {
+/**
+ * FIX #5 — removed fake-async wrapper. execSync is synchronous; Promise.allSettled
+ * over sync calls gives zero parallelism. Simple synchronous loop is honest and faster.
+ */
+function detectPackageManager(): PackageManager {
   const candidates: PackageManagerEntry[] = [
-    { name: "bun", command: "bun --version", priority: 4 },
+    { name: "bun",  command: "bun --version",  priority: 4 },
     { name: "pnpm", command: "pnpm --version", priority: 3 },
     { name: "yarn", command: "yarn --version", priority: 2 },
-    { name: "npm", command: "npm --version", priority: 1 },
+    { name: "npm",  command: "npm --version",  priority: 1 },
   ];
 
-  // Run all version checks in parallel with proper error handling
-  const results = await Promise.allSettled(
-    candidates.map(async (pm) => {
-      try {
-        executeCommand(pm.command, { stdio: "ignore" });
-        return pm;
-      } catch (error) {
-        throw new Error(`Failed to detect ${pm.name}: ${error}`);
-      }
-    })
-  );
+  const detected: PackageManagerEntry[] = [];
 
-  const detected = results
-    .filter((r): r is PromiseFulfilledResult<PackageManagerEntry> => r.status === "fulfilled")
-    .map((r) => r.value);
+  for (const pm of candidates) {
+    try {
+      executeCommand(pm.command, { stdio: "ignore" });
+      detected.push(pm);
+    } catch {
+      // not available — skip
+    }
+  }
 
   if (detected.length === 0) {
     throw new Error("No package manager found. Please install npm, yarn, pnpm, or bun.");
   }
-  
+
   return detected.sort((a, b) => b.priority - a.priority)[0].name;
 }
 
-async function installDependenciesWithFallbacks(
+async function installDependencies(
   projectPath: string,
   packageManager: PackageManager,
-  skipPrompt = false
+  shouldInstall: boolean
 ): Promise<boolean> {
-  const installCommands: Record<PackageManager, string> = {
-    npm: "npm install --no-audit --no-fund --loglevel=error",
-    yarn: "yarn install --silent --no-progress",
-    pnpm: "pnpm install --reporter=silent",
-    bun: "bun install --silent",
-  };
-
-  let shouldInstall = skipPrompt;
-  
-  if (!skipPrompt && isInteractive()) {
-    try {
-      shouldInstall = await confirm({
-        message: "Would you like to install dependencies automatically?",
-        default: true,
-      });
-    } catch {
-      // Non-interactive or prompt error - assume false
-      shouldInstall = false;
-    }
-  }
-
   if (!shouldInstall) return false;
 
+  const installCommands: Record<PackageManager, string> = {
+    npm:  "npm install --no-audit --no-fund --loglevel=error",
+    yarn: "yarn install --silent --no-progress",
+    pnpm: "pnpm install --reporter=silent",
+    bun:  "bun install --silent",
+  };
+
+  logStep(`Installing dependencies with ${packageManager}...`);
+  
   try {
     executeCommand(installCommands[packageManager], {
       cwd: projectPath,
       stdio: "inherit",
       timeout: 300_000,
     });
+    logSuccess("Dependencies installed successfully");
     return true;
   } catch {
-    console.log("\n  To install dependencies manually:");
-    console.log(`    cd ${path.basename(projectPath)}`);
-    console.log(`    ${packageManager} install`);
+    logWarning("Failed to install dependencies automatically");
+    console.log(`\n  ${colors.dim}To install dependencies manually:${colors.reset}`);
+    console.log(`    ${colors.green}cd ${path.basename(projectPath)}${colors.reset}`);
+    console.log(`    ${colors.green}${packageManager} install${colors.reset}`);
     return false;
   }
 }
@@ -439,9 +502,9 @@ function shouldUseTypeScript(flags: CliFlags, answers: ProjectAnswers): boolean 
 
 function getFileExtensions(useTypeScript: boolean): FileExtensions {
   return {
-    main: useTypeScript ? "tsx" : "jsx",
-    config: useTypeScript ? "ts" : "js",
-    api: useTypeScript ? "ts" : "js",
+    main:   useTypeScript ? "tsx" : "jsx",
+    config: useTypeScript ? "ts"  : "js",
+    api:    useTypeScript ? "ts"  : "js",
   };
 }
 
@@ -449,28 +512,30 @@ async function askQuestions(flags: CliFlags): Promise<ProjectAnswers> {
   let typescript: boolean;
   let styling: StylingOption;
 
+  // TypeScript/JavaScript decision
   if (flags.typescript === true || flags.javascript === true) {
     typescript = flags.typescript === true;
   } else if (isInteractive()) {
     typescript = await confirm({ message: "Would you like to use TypeScript?", default: true });
   } else {
-    typescript = true; // Default to TypeScript in non-interactive mode
+    typescript = true; // Default in non-interactive mode
   }
 
+  // Styling decision
   if (flags.tailwind === true || flags.cssModules === true) {
     styling = flags.tailwind ? "Tailwind" : "CSS Modules";
   } else if (isInteractive()) {
     styling = await select<StylingOption>({
       message: "Which styling solution would you like to use?",
       choices: [
-        { name: "Tailwind CSS", value: "Tailwind" },
-        { name: "CSS Modules", value: "CSS Modules" },
-        { name: "None", value: "None" },
+        { name: "Tailwind CSS",  value: "Tailwind"     },
+        { name: "CSS Modules",   value: "CSS Modules"  },
+        { name: "None",          value: "None"         },
       ],
       default: "Tailwind",
     });
   } else {
-    styling = "Tailwind"; // Default to Tailwind in non-interactive mode
+    styling = "Tailwind"; // Default in non-interactive mode
   }
 
   return { typescript, styling };
@@ -483,14 +548,13 @@ async function copyFaviconFiles(publicPath: string): Promise<void> {
 
   await Promise.all(
     files.map(async (file) => {
-      const src = path.join(ASSETS_DIR, file);
+      const src  = path.join(ASSETS_DIR, file);
       const dest = path.join(publicPath, file);
-
       try {
         await fsPromises.access(src);
         await fsPromises.copyFile(src, dest);
-      } catch (error) {
-        console.warn(`  ⚠  Asset not found or failed to copy: ${src} — skipping ${file}`);
+      } catch {
+        logWarning(`Asset not found or failed to copy: ${src} — skipping ${file}`);
       }
     })
   );
@@ -506,8 +570,8 @@ async function generateWebManifest(projectPath: string): Promise<void> {
     background_color: "#ffffff",
     theme_color: "#00CFFF",
     icons: [
-      { src: "/favicon.ico", sizes: "64x64 32x32 24x24 16x16", type: "image/x-icon" },
-      { src: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" },
+      { src: "/favicon.ico",         sizes: "64x64 32x32 24x24 16x16", type: "image/x-icon" },
+      { src: "/apple-touch-icon.png", sizes: "180x180",                 type: "image/png"    },
     ],
   };
   await secureWriteFileAsync(
@@ -518,32 +582,16 @@ async function generateWebManifest(projectPath: string): Promise<void> {
 
 // ─── CSS ──────────────────────────────────────────────────────────────────────
 
-const CSS_RESET = `* { box-sizing: border-box; }
+function getCSSReset(): string {
+  return `* { box-sizing: border-box; }
 html { font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; -webkit-font-smoothing: antialiased; }
 body { line-height: 1.5; min-height: 100vh; margin: 0; }
 #root { min-height: 100vh; }
 `;
-
-const CSS_DARK_OVERRIDES = `
-@media (prefers-color-scheme: dark) {
-  .root { background: #000; }
-  .header { border-bottom-color: #111; }
-  .header-name { color: #fff; }
-  .title { color: #fff; }
-  .subtitle { color: #737373; }
-  .hint { color: #525252; }
-  .code { background: #111; color: #d4d4d4; border-color: #222; }
-  .card { border-color: #1a1a1a; }
-  .card:hover { border-color: #333; background: #0a0a0a; }
-  .card-label { color: #fff; }
-  .card-desc { color: #737373; }
-  .footer { border-top-color: #111; color: #525252; }
-  .footer-link { color: #737373; }
-  .footer-link:hover { color: #a3a3a3; }
 }
-`;
 
-const CSS_PAGE_STYLES = `.root { min-height: 100vh; background: #fff; display: flex; flex-direction: column; }
+function getCSSPageStyles(): string {
+  return `.root { min-height: 100vh; background: #fff; display: flex; flex-direction: column; }
 .header { display: flex; align-items: center; gap: 0.5rem; padding: 1.25rem 2rem; border-bottom: 1px solid #f5f5f5; }
 .header-logo { width: 1.75rem; height: 1.75rem; }
 .header-name { font-size: 0.875rem; font-weight: 600; color: #000; }
@@ -565,8 +613,31 @@ const CSS_PAGE_STYLES = `.root { min-height: 100vh; background: #fff; display: f
 .footer-link { color: #737373; text-decoration: underline; }
 .footer-link:hover { color: #404040; }
 `;
+}
 
-const CSS_MODULE_STYLES = `.root { min-height: 100vh; background: #fff; display: flex; flex-direction: column; }
+function getCSSDarkOverrides(): string {
+  return `
+@media (prefers-color-scheme: dark) {
+  .root { background: #000; }
+  .header { border-bottom-color: #111; }
+  .header-name { color: #fff; }
+  .title { color: #fff; }
+  .subtitle { color: #737373; }
+  .hint { color: #525252; }
+  .code { background: #111; color: #d4d4d4; border-color: #222; }
+  .card { border-color: #1a1a1a; }
+  .card:hover { border-color: #333; background: #0a0a0a; }
+  .card-label { color: #fff; }
+  .card-desc { color: #737373; }
+  .footer { border-top-color: #111; color: #525252; }
+  .footer-link { color: #737373; }
+  .footer-link:hover { color: #a3a3a3; }
+}
+`;
+}
+
+function getCSSModuleStyles(): string {
+  return `.root { min-height: 100vh; background: #fff; display: flex; flex-direction: column; }
 .header { display: flex; align-items: center; gap: 0.5rem; padding: 1.25rem 2rem; border-bottom: 1px solid #f5f5f5; }
 .headerLogo { width: 1.75rem; height: 1.75rem; }
 .headerName { font-size: 0.875rem; font-weight: 600; color: #000; }
@@ -605,15 +676,20 @@ const CSS_MODULE_STYLES = `.root { min-height: 100vh; background: #fff; display:
   .footerLink:hover { color: #a3a3a3; }
 }
 `;
+}
 
 async function generateCSSModulesFiles(projectPath: string): Promise<void> {
-  await secureWriteFileAsync(path.join(projectPath, "src/app/page.module.css"), CSS_MODULE_STYLES);
+  await secureWriteFileAsync(
+    path.join(projectPath, "src/app/page.module.css"),
+    getCSSModuleStyles()
+  );
 }
 
 function generateGlobalStyles(styling: StylingOption): string {
-  if (styling === "Tailwind") return `@import "tailwindcss";\n\n${CSS_RESET}`;
-  if (styling === "CSS Modules") return CSS_RESET;
-  return CSS_RESET + "\n" + CSS_PAGE_STYLES + CSS_DARK_OVERRIDES;
+  const reset = getCSSReset();
+  if (styling === "Tailwind")     return `@import "tailwindcss";\n\n${reset}`;
+  if (styling === "CSS Modules")  return reset;
+  return reset + "\n" + getCSSPageStyles() + getCSSDarkOverrides();
 }
 
 // ─── package.json ─────────────────────────────────────────────────────────────
@@ -624,51 +700,55 @@ function generatePackageJson(
   styling: StylingOption
 ): PackageJsonShape {
   const dependencies: Record<string, string> = {
-    react: "^19.2.4",
-    "react-dom": "^19.2.4",
-    "react-router-dom": "^7.13.1",
-    hono: "^4.12.9",
-    "bini-router": "^1.0.27",
-    "bini-overlay": "^1.0.5",
-    "bini-server": "^1.0.2",
+    react:             "latest",
+    "react-dom":       "latest",
+    "react-router-dom":"latest",
+    hono:              "latest",
+    "bini-router":     "latest",
+    "bini-overlay":    "latest",
+    "bini-server":     "latest",
   };
 
   const devDependencies: Record<string, string> = {
-    "@vitejs/plugin-react": "^6.0.1",
-    vite: "^8.0.3",
-    oxlint: "latest",
-    oxfmt: "latest",
-    "bini-env": "^1.0.8",
-    "bini-export": "^1.0.1",
+    "@vitejs/plugin-react": "latest",
+    vite:        "latest",
+    oxlint:      "latest",
+    oxfmt:       "latest",
+    "bini-env":  "latest",
+    "bini-export":"latest",
   };
 
   if (useTypeScript) {
-    devDependencies["@types/react"] = "^19.2.14";
-    devDependencies["@types/react-dom"] = "^19.2.3";
-    devDependencies["@types/node"] = "^25.4.0";
-    devDependencies["typescript"] = "^5.9.3";
+    devDependencies["@types/react"]     = "latest";
+    devDependencies["@types/react-dom"] = "latest";
+    devDependencies["@types/node"]      = "latest";
+    devDependencies["typescript"]       = "latest";
   }
 
   if (styling === "Tailwind") {
-    devDependencies["tailwindcss"] = "^4.2.1";
-    devDependencies["@tailwindcss/vite"] = "^4.2.1";
+    devDependencies["tailwindcss"]         = "latest";
+    devDependencies["@tailwindcss/vite"]   = "latest";
   }
+
+  const scripts: PackageJsonScripts = {
+    dev:           "vite --host --open",
+    build:         useTypeScript ? "tsc --noEmit && vite build" : "vite build",
+    export:        "vite build --mode export",
+    start:         "bini-server",
+    preview:       "vite preview --host --open",
+    "type-check":  useTypeScript ? "tsc --noEmit" : "echo 'TypeScript not enabled'",
+    lint:          "oxlint src",
+    format:        "oxfmt src",
+    check:         useTypeScript 
+      ? "oxlint src && oxfmt src && tsc --noEmit"
+      : "oxlint src && oxfmt src",
+  };
 
   return {
     name: projectName,
     type: "module",
     version: "1.0.0",
-    scripts: {
-      dev: "vite --host --open",
-      build: "vite build",
-      export: "vite build --mode export",
-      start: "bini-server",
-      preview: "vite preview --host --open",
-      "type-check": useTypeScript ? "tsc --noEmit" : "echo 'TypeScript not enabled'",
-      lint: "oxlint --plugin react --plugin react-hooks src",
-      format: "oxfmt src",
-      check: "oxlint --plugin react --plugin react-hooks src && oxfmt --check src",
-    },
+    scripts,
     dependencies,
     devDependencies,
   };
@@ -693,10 +773,11 @@ async function generateViteConfig(
   styling: StylingOption
 ): Promise<void> {
   const tailwindImport = styling === "Tailwind" ? `import tailwindcss from '@tailwindcss/vite';\n` : "";
-  const tailwindPlugin = styling === "Tailwind" ? `tailwindcss(),\n      ` : "";
+  const tailwindPlugin = styling === "Tailwind" ? `tailwindcss(),\n      `                          : "";
+  const typesSection = useTypeScript ? `,
+    types: ["vite/client"]` : "";
 
-  const content = useTypeScript
-    ? `import { defineConfig, loadEnv } from 'vite';
+  const content = `import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 import { biniroute } from 'bini-router';
 import { biniOverlay } from 'bini-overlay';
@@ -714,7 +795,7 @@ export default defineConfig(({ command, mode }) => {
   return {
     plugins: [
       ${tailwindPlugin}react(),
-      biniroute({ platform: 'netlify' }),
+      biniroute({ platform: 'node' }),
       biniOverlay(),
       biniEnv(),
       biniExport(),
@@ -754,69 +835,7 @@ export default defineConfig(({ command, mode }) => {
 
     resolve    : { alias: { '@': '/src' } },
     css        : { modules: { localsConvention: 'camelCase' }, devSourcemap: true },
-    optimizeDeps: { include: ['react', 'react-dom', 'react-router-dom'] },
-  };
-});
-`
-    : `import { defineConfig, loadEnv } from 'vite';
-import react from '@vitejs/plugin-react';
-import { biniroute } from 'bini-router';
-import { biniOverlay } from 'bini-overlay';
-import { biniEnv } from 'bini-env';
-import { biniExport } from 'bini-export';
-${tailwindImport}
-export default defineConfig(({ command, mode }) => {
-  const env      = loadEnv(mode, process.cwd(), '');
-  const isBuild  = command === 'build';
-  const port     = parseInt(env['PORT'] ?? '3000', 10);
-  const hmrConfig = env['CODESPACE_NAME']
-    ? { clientPort: 443, overlay: false }
-    : { overlay: false, host: 'localhost' };
-
-  return {
-    plugins: [
-      ${tailwindPlugin}react(),
-      biniroute({ platform: 'netlify' }),
-      biniOverlay(),
-      biniEnv(),
-      biniExport(),
-    ],
-
-    server: {
-      port,
-      host   : env['CODESPACE_NAME'] ? '0.0.0.0' : 'localhost',
-      open   : true,
-      cors   : true,
-      headers: { 'Access-Control-Allow-Origin': '*' },
-      hmr    : hmrConfig,
-      watch  : {
-        usePolling: !!env['CODESPACE_NAME'],
-        ignored   : ['**/dist/**', '**/node_modules/**'],
-      },
-    },
-
-    preview: { port, host: '0.0.0.0', open: true, cors: true },
-
-    build: {
-      outDir               : 'dist',
-      sourcemap            : !isBuild,
-      emptyOutDir          : true,
-      minify               : isBuild,
-      cssCodeSplit         : true,
-      reportCompressedSize : true,
-      chunkSizeWarningLimit: 1000,
-      rolldownOptions: {
-        output: {
-          chunkFileNames: 'js/[name]-[hash].js',
-          entryFileNames: 'js/[name]-[hash].js',
-          assetFileNames: ${ROLLDOWN_ASSET_NAMES},
-        },
-      },
-    },
-
-    resolve    : { alias: { '@': '/src' } },
-    css        : { modules: { localsConvention: 'camelCase' }, devSourcemap: true },
-    optimizeDeps: { include: ['react', 'react-dom', 'react-router-dom'] },
+    optimizeDeps: { include: ['react', 'react-dom', 'react-router-dom'] }${typesSection}
   };
 });
 `;
@@ -824,31 +843,48 @@ export default defineConfig(({ command, mode }) => {
   await secureWriteFileAsync(path.join(projectPath, `vite.config.${configExt}`), content);
 }
 
+// ─── tsconfig.json ────────────────────────────────────────────────────────────
+
+async function generateTsConfig(projectPath: string): Promise<void> {
+  const tsConfig = {
+    compilerOptions: {
+      target: "ES2022",
+      lib: ["ES2022", "DOM", "DOM.Iterable"],
+      module: "ESNext",
+      skipLibCheck: true,
+      moduleResolution: "bundler",
+      allowImportingTsExtensions: true,
+      allowArbitraryExtensions: true,
+      resolveJsonModule: true,
+      isolatedModules: true,
+      noEmit: true,
+      jsx: "react-jsx",
+      strict: true,
+      paths: { "@/*": ["./src/*"] },
+      forceConsistentCasingInFileNames: true,
+      types: ["vite/client"],
+    },
+    include: ["src"],
+    exclude: ["node_modules", "dist"],
+  };
+
+  await secureWriteFileAsync(
+    path.join(projectPath, "tsconfig.json"),
+    JSON.stringify(tsConfig, null, 2)
+  );
+}
+
 // ─── Oxlint + Oxfmt config ────────────────────────────────────────────────────
 
 async function generateLintAndFormatConfigs(
   projectPath: string,
-  useTypeScript: boolean
+  _useTypeScript: boolean  // Prefix with underscore to indicate intentionally unused
 ): Promise<void> {
+  // .oxlintrc.json
   const oxlintConfig = {
     $schema: "./node_modules/oxlint/configuration_schema.json",
-    plugins: ["react", "react-hooks"],
-    env: { browser: true, es2022: true, node: true },
-    rules: {
-      correctness: "error",
-      suspicious: "warn",
-      "react/jsx-key": "error",
-      "react-hooks/rules-of-hooks": "error",
-      "react-hooks/exhaustive-deps": "warn",
-      ...(useTypeScript
-        ? {
-            "@typescript-eslint/no-unused-vars": [
-              "error",
-              { argsIgnorePattern: "^_", varsIgnorePattern: "^_" },
-            ],
-          }
-        : {}),
-    },
+    plugins: ["react"],
+    env: { browser: true, es2022: true },
     ignorePatterns: ["dist", "node_modules"],
   };
 
@@ -857,6 +893,7 @@ async function generateLintAndFormatConfigs(
     JSON.stringify(oxlintConfig, null, 2)
   );
 
+  // .oxfmtrc.json
   const oxfmtConfig = {
     semi: false,
     singleQuote: true,
@@ -868,7 +905,7 @@ async function generateLintAndFormatConfigs(
   };
 
   await secureWriteFileAsync(
-    path.join(projectPath, ".oxfmt.json"),
+    path.join(projectPath, ".oxfmtrc.json"),
     JSON.stringify(oxfmtConfig, null, 2)
   );
 }
@@ -1101,6 +1138,31 @@ export default function RootLayout(${childrenProp}) {
   );
 }
 
+// ─── API file ─────────────────────────────────────────────────────────────────
+
+async function generateApiFile(
+  projectPath: string,
+  apiExt: ApiExtension
+): Promise<void> {
+  await secureWriteFileAsync(
+    path.join(projectPath, `src/app/api/hello.${apiExt}`),
+    `import { Hono } from 'hono'
+
+const app = new Hono()
+
+app.all('/hello', (c) => {
+  return c.json({
+    message: 'Hello from Bini.js!',
+    timestamp: new Date().toISOString(),
+    method: c.req.method,
+  })
+})
+
+export default app
+`
+  );
+}
+
 // ─── Other config files ───────────────────────────────────────────────────────
 
 async function generateOtherConfigFiles(
@@ -1108,33 +1170,7 @@ async function generateOtherConfigFiles(
   useTypeScript: boolean
 ): Promise<void> {
   if (useTypeScript) {
-    await secureWriteFileAsync(
-      path.join(projectPath, "tsconfig.json"),
-      JSON.stringify(
-        {
-          compilerOptions: {
-            target: "ES2022",
-            lib: ["ES2022", "DOM", "DOM.Iterable"],
-            module: "ESNext",
-            skipLibCheck: true,
-            moduleResolution: "bundler",
-            allowImportingTsExtensions: true,
-            resolveJsonModule: true,
-            isolatedModules: true,
-            noEmit: true,
-            jsx: "react-jsx",
-            strict: true,
-            baseUrl: ".",
-            paths: { "@/*": ["./src/*"] },
-            forceConsistentCasingInFileNames: true,
-          },
-          include: ["src"],
-          exclude: ["node_modules", "dist"],
-        },
-        null,
-        2
-      )
-    );
+    await generateTsConfig(projectPath);
   }
 
   await generateLintAndFormatConfigs(projectPath, useTypeScript);
@@ -1162,35 +1198,55 @@ ${pm} run dev
 ## Production
 
 \`\`\`bash
-${pm} run build
+${pm} run build    # type-checks then builds
 ${pm} start        # served by bini-server
 \`\`\`
 
-## Static Export (GitHub Pages / Netlify Static / S3)
+## Static Export (GitHub Pages / S3 / Firebase / Surge)
 
 \`\`\`bash
 ${pm} run export   # vite build --mode export
 \`\`\`
 
-Generates a fully pre-rendered \`dist/\` with per-route \`index.html\` files and a smart \`404.html\` — no server required.
+Pre-renders every static route into \`dist/\`, generates the right \`404.html\`, and strips all platform server files — leaving \`dist/\` ready for any fully static host. No server required.
 
-## Linting & Formatting
+> **Note:** Static export has no API routes. Use a full deployment platform if you need \`src/app/api/\`.
+
+### Static hosts
+
+| Host | Static routes | Dynamic routes |
+|---|---|---|
+| GitHub Pages | ✅ | ✅ via \`404.html\` |
+| AWS S3 + CloudFront | ✅ | ✅ set error page to \`404.html\` |
+| Firebase Hosting | ✅ | ✅ via \`404.html\` |
+| Surge.sh | ✅ | ✅ via \`404.html\` |
+
+### \`base\` in \`vite.config.${ext.config}\`
+
+| Situation | \`base\` |
+|---|---|
+| GitHub Pages without a custom domain | \`'/your-repo-name/'\` |
+| GitHub Pages with a custom domain | not needed — remove it |
+| S3, Firebase, Surge, or any other static host | not needed — remove it |
+
+## Linting, Formatting & Type Checking
 
 \`\`\`bash
-${pm} run lint     # Oxlint — 50-100x faster than ESLint
-${pm} run format   # Oxfmt  — Prettier-compatible formatter
-${pm} run check    # lint + format check combined (great for CI)
+${pm} run lint         # Oxlint — 50-100x faster than ESLint
+${pm} run format       # Oxfmt  — Prettier-compatible formatter
+${pm} run type-check   # tsc --noEmit${!useTypeScript ? ' (TypeScript not enabled)' : ''}
+${pm} run check        # lint + format + type-check combined (great for CI)
 \`\`\`
 
 ## API Routes
 
-Create files in \`src/app/api/\`. Export a Hono app:
+Create files in \`src/app/api/\`. Export a Hono app — write routes **without** the \`/api\` prefix; bini-router strips it before your handler sees the request:
 
 \`\`\`${useTypeScript ? "typescript" : "javascript"}
 // src/app/api/hello.${ext.api}
 import { Hono } from 'hono'
 
-const app = new Hono().basePath('/api')
+const app = new Hono()
 
 app.get('/hello', (c) => c.json({ message: 'Hello!' }))
 
@@ -1198,6 +1254,81 @@ export default app
 \`\`\`
 
 Access at \`http://localhost:3000/api/hello\`
+
+## Deployment
+
+Set \`platform\` in \`vite.config.${ext.config}\` and bini-router generates the production entry automatically on \`${pm} run build\`.
+
+| Platform | Config | API runtime | Notes |
+|---|---|---|---|
+| **Netlify** | \`platform: 'netlify'\` | Edge Functions (Deno) | No Node.js built-ins — use Deno-compatible alternatives |
+| **Vercel** | \`platform: 'vercel'\` | Edge Functions | Commit generated \`api/index.${ext.api}\` before deploying |
+| **Cloudflare Workers** | \`platform: 'cloudflare'\` | Workers | Requires \`wrangler.toml\` with \`ASSETS\` binding |
+| **Node.js** | \`platform: 'node'\` | Node.js | Railway, Render, Fly.io, VPS — run \`${pm} start\` |
+| **Deno** | \`platform: 'deno'\` | Deno.serve | Commit generated \`server/index.${ext.api}\` before deploying |
+
+\`\`\`${useTypeScript ? "ts" : "js"}
+// vite.config.${ext.config}
+biniroute({ platform: 'netlify' })
+\`\`\`
+
+### Netlify
+
+\`${pm} run build\` generates \`netlify/edge-functions/api.${ext.api}\` automatically. Add \`netlify.toml\`:
+
+\`\`\`toml
+[build]
+  command = "${pm} run build"
+  publish = "dist"
+
+[[edge_functions]]
+  path     = "/api/*"
+  function = "api"
+
+[[redirects]]
+  from   = "/*"
+  to     = "/index.html"
+  status = 200
+\`\`\`
+
+### Vercel
+
+\`${pm} run build\` generates \`api/index.${ext.api}\`. You must commit it — Vercel reads \`api/\` before the build step runs. Add \`vercel.json\`:
+
+\`\`\`json
+{
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "/api/index.${ext.api}" },
+    { "source": "/(.*)",     "destination": "/index.html" }
+  ]
+}
+\`\`\`
+
+### Cloudflare Workers
+
+\`${pm} run build\` generates \`worker.${ext.api}\`. Add \`wrangler.toml\`:
+
+\`\`\`toml
+name = "${projectName}"
+main = "worker.${ext.api}"
+compatibility_date = "2025-04-09"
+
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+\`\`\`
+
+### Node.js (Railway, Render, Fly.io, VPS)
+
+No entry file is generated — \`bini-server\` handles everything:
+
+\`\`\`bash
+${pm} run build && ${pm} start
+\`\`\`
+
+### Deno
+
+\`${pm} run build\` generates \`server/index.${ext.api}\`. Commit it before deploying. In Deno Console set entrypoint to \`server/index.${ext.api}\`, build command to \`${pm} run build\`, and runtime to Dynamic App.
 
 ## File Structure
 
@@ -1208,35 +1339,37 @@ ${projectName}/
 │   │   ├── api/              ← API routes (Hono)
 │   │   ├── layout.${ext.main}       ← root layout + metadata
 │   │   ├── page.${ext.main}         ← /
-│   │   ├── not-found.${ext.main}    ← custom 404
 │   │   └── globals.css
-│   └── main.${ext.main}             ← mounts <App /> (auto-generated by bini-router)
+│   ├── App.${ext.main}               ← auto-generated by bini-router — do not edit
+│   └── main.${ext.main}              ← mounts <App />
 ├── public/
 │   ├── favicon.ico
 │   ├── apple-touch-icon.png
 │   ├── og-image.png
 │   └── site.webmanifest
 ├── .oxlintrc.json
-├── .oxfmt.json
+├── .oxfmtrc.json
 ├── vite.config.${ext.config}
 └── package.json
 \`\`\`
 
 ## Layouts
 
-- \`src/app/layout.${ext.main}\` — root layout, uses \`{children}\`, export \`metadata\` here
-- Nested layouts (e.g. \`src/app/dashboard/layout.${ext.main}\`) use \`<Outlet />\` from react-router-dom
+- \`src/app/layout.${ext.main}\` — root layout, uses \`<Outlet />\`, export \`metadata\` here
+- Nested layouts (e.g. \`src/app/dashboard/layout.${ext.main}\`) also use \`<Outlet />\` from react-router-dom
 
 ## Powered by
 
-- **Vite 8**       — Rolldown-powered builds, dramatically faster
+- **Vite**         — Rolldown-powered builds, dramatically faster
 - **bini-router**  — filesystem routing + API middleware
-- **bini-export**  — static SPA export (GitHub Pages, Netlify, S3)
+- **bini-export**  — static SPA export (GitHub Pages, S3, Firebase, Surge)
 - **bini-overlay** — dev overlay badge
-- **bini-env**     — environment file display
+- **bini-env**     — environment file loading
 - **bini-server**  — production server (zero dependencies)
+- **Tailwind CSS** — utility-first CSS framework
 - **Oxlint**       — fast Rust-based linter (replaces ESLint)
 - **Oxfmt**        — fast Prettier-compatible formatter
+- **TypeScript**   — full type safety across pages, layouts, and API routes
 
 ---
 
@@ -1252,31 +1385,32 @@ async function generateProject(
   flags: CliFlags
 ): Promise<void> {
   const projectPath = path.join(process.cwd(), projectName);
-  const publicPath = path.join(projectPath, "public");
+  const publicPath  = path.join(projectPath, "public");
 
   try {
+    logViteStyle(`Creating project in ${colors.cyan}${projectPath}${colors.reset}`, 'info');
+    
     checkDiskSpace(100);
-    checkNetworkConnectivity(); // non-blocking — returns immediately
 
     if (fs.existsSync(projectPath) && !flags.force) {
       throw new Error(`Directory "${projectName}" already exists. Use --force to overwrite.`);
     }
-    if (flags.force && fs.existsSync(projectPath)) safeRm(projectPath);
+    if (flags.force && fs.existsSync(projectPath)) {
+      logViteStyle(`Removing existing directory ${colors.dim}${projectPath}${colors.reset}`, 'warn');
+      safeRm(projectPath);
+    }
 
     const useTypeScript = shouldUseTypeScript(flags, answers);
-    const ext = getFileExtensions(useTypeScript);
+    const ext           = getFileExtensions(useTypeScript);
 
     robustMkdirSync(path.join(projectPath, "src/app/api"));
     robustMkdirSync(publicPath);
 
-    // Copy assets and generate manifest in parallel
-    const assetPromises = Promise.all([
+    logViteStyle('Scaffolding project files...', 'info');
+
+    await Promise.all([
       copyFaviconFiles(publicPath),
       generateWebManifest(projectPath),
-    ]);
-
-    // Generate all files in parallel for better performance
-    await Promise.all([
       secureWriteFileAsync(
         path.join(projectPath, "index.html"),
         `<!DOCTYPE html>
@@ -1303,24 +1437,7 @@ async function generateProject(
         generateGlobalStyles(answers.styling),
         { force: flags.force }
       ),
-      secureWriteFileAsync(
-        path.join(projectPath, `src/app/api/hello.${ext.api}`),
-        `import { Hono } from 'hono'
-
-const app = new Hono().basePath('/api')
-
-app.all('/hello', (c) => {
-  return c.json({
-    message  : 'Hello from Bini.js!',
-    timestamp: new Date().toISOString(),
-    method   : c.req.method,
-  })
-})
-
-export default app
-`,
-        { force: flags.force }
-      ),
+      generateApiFile(projectPath, ext.api),
       secureWriteFileAsync(
         path.join(projectPath, ".gitignore"),
         generateGitignore(ext.api),
@@ -1335,23 +1452,40 @@ export default app
       generateOtherConfigFiles(projectPath, useTypeScript),
     ]);
 
-    // Wait for asset copying to complete
-    await assetPromises;
+    logViteStyle(`Generated ${colors.green}${useTypeScript ? 'TypeScript' : 'JavaScript'}${colors.reset} project with ${colors.green}${answers.styling}${colors.reset}`, 'success');
+
+    // Handle installation decision
+    let shouldInstall = false;
+    if (flags.install === true) {
+      shouldInstall = true;
+    } else if (flags.install === false) {
+      shouldInstall = false;
+    } else if (isInteractive()) {
+      shouldInstall = await confirm({
+        message: "Would you like to install dependencies automatically?",
+        default: true,
+      });
+    } else {
+      shouldInstall = false; // Default to no install in non-interactive mode without explicit flag
+    }
 
     let installedDependencies = false;
     let detectedPackageManager: PackageManager = "npm";
+    let pmDetectionFailed = false;
 
     try {
-      detectedPackageManager = await detectPackageManager();
-      installedDependencies = await installDependenciesWithFallbacks(
+      detectedPackageManager = detectPackageManager();
+      logViteStyle(`Detected package manager: ${colors.cyan}${detectedPackageManager}${colors.reset}`, 'info');
+      installedDependencies = await installDependencies(
         projectPath,
         detectedPackageManager,
-        !isInteractive() // Skip prompt in non-interactive mode
+        shouldInstall
       );
     } catch (error) {
-      // Non-fatal - user can install manually
+      pmDetectionFailed = true;
       if (isInteractive()) {
-        console.warn(`  ⚠  Could not detect package manager: ${error instanceof Error ? error.message : String(error)}`);
+        logWarning(`Could not detect package manager: ${error instanceof Error ? error.message : String(error)}`);
+        logWarning(`README will use "npm" as a fallback — update manually if needed.`);
       }
     }
 
@@ -1361,19 +1495,28 @@ export default app
       { force: flags.force }
     );
 
-    console.log(`\nSuccess! Created ${projectName} at ${path.join(process.cwd(), projectName)}\n`);
-    console.log(`We suggest that you begin by typing:\n`);
-    console.log(`  cd ${projectName}`);
-    if (!installedDependencies) console.log(`  ${detectedPackageManager} install`);
-    console.log(`  ${detectedPackageManager} run dev\n`);
+    console.log(`\n${colors.green}${colors.bold}✓${colors.reset} ${colors.bold}Success!${colors.reset} Created ${colors.cyan}${projectName}${colors.reset} at ${colors.dim}${path.join(process.cwd(), projectName)}${colors.reset}\n`);
+    
+    if (pmDetectionFailed) {
+      logWarning(`Package manager could not be detected. README uses "npm" as a placeholder.\n`);
+    }
+    
+    logViteStyle(`Ready to start! Run:`, 'success');
+    console.log(`\n  ${colors.green}cd ${projectName}${colors.reset}`);
+    if (!installedDependencies && shouldInstall) {
+      console.log(`  ${colors.green}${detectedPackageManager} install${colors.reset}`);
+    }
+    console.log(`  ${colors.green}${detectedPackageManager} run dev${colors.reset}\n`);
+    
+    logViteStyle(`✨ Happy coding! ✨`, 'success');
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    console.error(`\nAborted! ${message}`);
+    logError(`Aborted! ${message}`);
     if (fs.existsSync(projectPath)) {
       try {
         safeRm(projectPath);
-      } catch {
-        // best-effort cleanup
+      } catch (cleanupError) {
+        logError(`Cleanup failed: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`);
       }
     }
     throw error;
@@ -1393,7 +1536,7 @@ async function main(): Promise<void> {
     let projectName = args.projectName;
     if (!projectName) {
       if (!isInteractive()) {
-        console.error("Project name required in non-interactive mode");
+        logError("Project name required in non-interactive mode");
         process.exit(1);
       }
       projectName = await input({
@@ -1409,7 +1552,7 @@ async function main(): Promise<void> {
     }
 
     if (!validateProjectName(projectName)) {
-      console.error("Invalid project name. Use lowercase letters, numbers, and hyphens only. Max 50 chars.");
+      logError("Invalid project name. Use lowercase letters, numbers, and hyphens only. Max 50 chars.");
       process.exit(1);
     }
 
@@ -1417,23 +1560,22 @@ async function main(): Promise<void> {
     await generateProject(projectName, answers, args.flags);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    console.error("\nAborted!", message);
+    logError(`Aborted! ${message}`);
     process.exit(1);
   }
 }
 
 // Global error handlers
 process.on("uncaughtException", (e: Error) => {
-  console.error("\nUncaught Exception:", e.message);
+  logError(`Uncaught Exception: ${e.message}`);
   process.exit(1);
 });
 process.on("unhandledRejection", (r: unknown) => {
-  console.error("\nUnhandled Rejection:", r);
+  logError(`Unhandled Rejection: ${r}`);
   process.exit(1);
 });
 
-// Run main with proper error handling
 main().catch((error) => {
-  console.error("\nFatal Error:", error instanceof Error ? error.message : String(error));
+  logError(`Fatal Error: ${error instanceof Error ? error.message : String(error)}`);
   process.exit(1);
 });
