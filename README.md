@@ -19,7 +19,7 @@
       XXXXXXXXX  XXXXXXXXXXXXX             
 ```
 
-### The Zero-Config React Framework for the Modern Web
+**Build full-stack React apps for web, desktop, and mobile — from one codebase.**
 
 [![npm version](https://img.shields.io/npm/v/create-bini-app?color=00CFFF&label=npm&style=for-the-badge)](https://www.npmjs.com/package/create-bini-app)
 [![total downloads](https://img.shields.io/npm/dt/create-bini-app?color=764ba2&style=for-the-badge&label=downloads)](https://www.npmjs.com/package/create-bini-app)
@@ -32,6 +32,8 @@
 [![hono](https://img.shields.io/badge/hono-^4.12.12-E36002?style=for-the-badge&logo=hono&logoColor=white)](https://hono.dev)
 [![tailwindcss](https://img.shields.io/badge/tailwindcss-^4.2.2-06B6D4?style=for-the-badge&logo=tailwindcss&logoColor=white)](https://tailwindcss.com)
 [![react-router](https://img.shields.io/badge/react--router-^7.14.0-CA4245?style=for-the-badge&logo=reactrouter&logoColor=white)](https://reactrouter.com)
+[![tauri](https://img.shields.io/badge/tauri-^2.11.4-FFC131?style=for-the-badge&logo=tauri&logoColor=black)](https://v2.tauri.app)
+
 </div>
 
 ---
@@ -45,66 +47,77 @@ npm install
 npm run dev
 ```
 
-Opens `http://localhost:3000` automatically.
+That's it — `http://localhost:3000` opens automatically.
 
 ---
 
-## What You Get
+## Why Bini.js
 
-Running `create-bini-app` scaffolds a complete, production-ready project with:
+Most React starters give you a bundler and call it a day. Bini.js gives you a framework: file-based routing, a backend, environment handling, and a native app story, wired together and configured correctly from the first commit.
 
-- **File-based routing** via `bini-router` — `page.tsx` files map to URLs, nested layouts, per-route metadata, and automatic code splitting
-- **API routes** powered by Hono — plain function handlers or full Hono apps in `src/app/api/`
-- **Zero-dependency production server** via `bini-server` — pure Node.js `http`, serves `dist/` with ETag/304 support and proxies `/api/*`
-- **Static SPA export** via `bini-export` — pre-renders every static route, generates a smart `404.html`, and strips platform files for GitHub Pages, Netlify static, S3, and more
-- **Dev overlay** via `bini-overlay` — animated Bini.js logo badge with stroke-drawing animation, full error panel with Shiki-highlighted code frames and call stacks
-- **Environment variable system** via `bini-env` — displays active `.env` files on startup, works across Node.js, Bun, Deno, and edge runtimes
-- **Auto-imports** — `useState`, `useEffect`, `Link`, `useNavigate`, `useParams`, `Outlet`, `getEnv`, `requireEnv`, and more available in every page and layout without writing a single import
-- **Automatic favicons** — `favicon.ico`, `apple-touch-icon.png`, `og-image.png`, and `site.webmanifest` generated at scaffold time, zero manual setup
-- **TypeScript or JavaScript** — your choice at scaffold time, auto-detected by `bini-router`
-- **Tailwind CSS v4, CSS Modules, or plain CSS** — your choice at scaffold time
-- **Deploy anywhere** — Netlify Edge Functions, Vercel Edge, Cloudflare Workers, Node.js, Deno
-- **Oxlint + Oxfmt** — Rust-based linter and formatter, 50–100× faster than ESLint and Prettier
-- **GitHub Codespaces support** — HMR polling and `0.0.0.0` host binding configured automatically via `CODESPACE_NAME`
+- **One codebase, every target.** The same routes, API handlers, and components compile to a web app, a desktop binary, or a mobile app. Nothing is emulated or wrapped — desktop and mobile builds are real Tauri apps.
+- **Convention over configuration.** Drop a file in `src/app/`, get a route. Drop a file in `src/app/api/`, get an endpoint. No router config, no manual code splitting, no boilerplate.
+- **Fast by default.** Vite + Rolldown for bundling, Oxlint + Oxfmt for linting and formatting — all Rust-based, all pre-configured.
+
+---
+
+## Features
+
+**Framework**
+- File-based routing with nested layouts, dynamic segments, and per-route metadata
+- Automatic code splitting — every route is lazy-loaded with no `React.lazy()` boilerplate
+- Auto-imports for common React, React Router, and env hooks — zero import statements needed
+
+**Backend**
+- API routes powered by [Hono](https://hono.dev) — plain functions or full Hono apps, colocated in `src/app/api/`
+- One handler, every runtime: dev middleware, `bini-server`, or an edge function, generated automatically per deploy target
+- Environment variable loading with startup banners, across Node.js, Bun, Deno, and edge runtimes
+
+**Native**
+- Desktop and mobile builds via Tauri — Windows, macOS, Linux, Android, and iOS from the same project
+- Native plugin wiring generated automatically from the web APIs you actually call
+- Code signing, bundle identifiers, and app icons handled at scaffold time
+
+**Developer Experience**
+- Animated dev overlay with Shiki-highlighted error panels and clickable stack frames
+- TypeScript or JavaScript, Tailwind CSS v4, CSS Modules, or no styling — your choice at scaffold time
+- Oxlint + Oxfmt — 50–100× faster than ESLint and Prettier, pre-configured out of the box
+
+**Deployment**
+- Static export with smart `404.html` fallback for any static host
+- First-class support for Netlify Edge Functions, Vercel Edge, Cloudflare Workers, Node.js, and Deno
 
 ---
 
 ## Requirements
 
-- **Node.js** `>= 20.19.0` (Vite 8 requirement)
+| | |
+|---|---|
+| Node.js | `>= 20.19.0` (required by Vite 8) |
 
 ---
 
-## CLI Usage
+## CLI
 
 ```bash
-# Interactive — prompts for name and options
-npx create-bini-app@latest
-
-# Pass project name directly
-npx create-bini-app@latest my-app
-
-# Skip prompts with flags
-npx create-bini-app@latest my-app --typescript --tailwind
-npx create-bini-app@latest my-app --javascript --css-modules
-npx create-bini-app@latest my-app --force         # overwrite existing directory
-npx create-bini-app@latest my-app --install        # auto-install dependencies
-npx create-bini-app@latest my-app --no-install     # skip dependency installation
+npx create-bini-app@latest              # interactive
+npx create-bini-app@latest my-app       # skip the name prompt
+npx create-bini-app@latest my-app --typescript --tailwind --platform macos
 ```
 
 | Flag | Description |
 |---|---|
-| `--typescript` | Use TypeScript |
-| `--javascript` | Use JavaScript |
-| `--tailwind` | Use Tailwind CSS v4 |
-| `--css-modules` | Use CSS Modules |
+| `--typescript` / `--javascript` | Language |
+| `--tailwind` / `--css-modules` / `--none` | Styling |
+| `--platform <target>` | `web` (default) · `windows` · `macos` · `linux` · `android` · `ios` |
+| `--app-name <name>` | Display name — desktop/mobile app name and window title |
+| `--sign` / `--nosign` | Auto-confirm or skip code-signing setup |
+| `--npm` / `--pnpm` / `--yarn` / `--bun` | Force a package manager instead of auto-detecting |
+| `--install` / `--no-install` | Install dependencies without prompting |
 | `--force` | Overwrite an existing directory |
-| `--install` | Auto-install dependencies without prompting |
-| `--no-install` | Skip dependency installation without prompting |
-| `--version`, `-v` | Print CLI version |
-| `--help`, `-h` | Show help |
+| `--version`, `-v` / `--help`, `-h` | Print version / show help |
 
-> **Non-interactive mode** — when stdin/stdout is not a TTY (e.g. CI), the CLI skips all prompts and uses defaults: TypeScript and Tailwind CSS. Pass flags to override. Use `--install` or `--no-install` to control dependency installation without a prompt.
+In non-interactive environments (CI, no TTY), prompts are skipped and defaults apply: TypeScript, Tailwind, `web` platform. Flags always override the defaults.
 
 ---
 
@@ -116,17 +129,18 @@ my-app/
 │   ├── app/
 │   │   ├── api/                    ← API route handlers
 │   │   │   └── hello.ts            → /api/hello
-│   │   ├── layout.tsx              ← Root layout + global metadata
-│   │   ├── page.tsx                ← / (home page)
-│   │   ├── not-found.tsx           ← Custom 404 page (optional)
+│   │   ├── layout.tsx              ← Root layout + metadata
+│   │   ├── page.tsx                ← /
+│   │   ├── not-found.tsx           ← Custom 404 (optional)
 │   │   ├── loading.tsx             ← Custom loading screen (optional)
 │   │   └── globals.css
-│   ├── main.tsx                    ← React entry point
-│   └── App.tsx                     ← Auto-generated by bini-router — do not edit
+│   ├── main.tsx                    ← Entry point
+│   └── App.tsx                     ← Generated by bini-router — don't edit
 ├── public/
 │   ├── favicon.ico
 │   ├── apple-touch-icon.png
 │   ├── og-image.png
+│   ├── logo.png                    ← Source icon for native app icons
 │   └── site.webmanifest
 ├── .oxlintrc.json
 ├── .oxfmtrc.json
@@ -140,483 +154,325 @@ my-app/
 
 | Command | Description |
 |---|---|
-| `npm run dev` | Start Vite dev server with HMR (opens browser automatically) |
-| `npm run build` | Type-check then bundle for production into `dist/` |
-| `npm run export` | Static SPA export — pre-renders routes, generates `404.html`, strips platform files |
-| `npm start` | Serve the production build via `bini-server` |
-| `npm run preview` | Preview the production build via Vite |
-| `npm run type-check` | TypeScript type check — `tsc --noEmit` (TS projects only) |
-| `npm run lint` | Lint with Oxlint |
-| `npm run format` | Format with Oxfmt |
-| `npm run check` | Lint + format + type-check combined — ideal for CI |
+| `dev` | Start the Vite dev server with HMR |
+| `build` | Type-check, then bundle for production |
+| `preview` | Preview the production build |
+| `type-check` | `tsc --noEmit` |
+| `lint` / `format` / `check` | Oxlint / Oxfmt / both + type-check |
+| `export` *(web only)* | Static SPA export |
+| `start` *(web only)* | Serve the production build via `bini-server` |
+| `tauri:dev` / `tauri:build` *(desktop only)* | Run or build the desktop app |
+| `android` / `android:build`, `ios` / `ios:build` *(mobile only)* | Run or build the mobile app |
+
+Scripts are added per platform — a web scaffold never sees `tauri:dev`, and a desktop scaffold never sees `export`. See [Platforms](#platforms) for the full command and requirement breakdown per target.
 
 ---
 
-## File-Based Routing
+## Routing
 
-`bini-router` maps `page.tsx` (or `page.jsx`) files to URLs — pure SPA, no server required at runtime.
+`bini-router` maps files in `src/app/` to URLs. No router config, no manual `React.lazy()` — every route is code-split automatically.
 
 ```
 src/app/
   page.tsx                 → /
-  about.tsx                → /about  (file-based, no folder needed)
+  about.tsx                → /about
   dashboard/
-    layout.tsx             → wraps /dashboard and all children
-    page.tsx               → /dashboard
-    [id]/
-      page.tsx             → /dashboard/:id
-  blog/
-    [slug]/
-      page.tsx             → /blog/:slug
-  not-found.tsx            → custom 404 (optional)
-  loading.tsx              → custom loading screen (optional)
+    layout.tsx              wraps /dashboard and its children
+    page.tsx                → /dashboard
+    [id]/page.tsx           → /dashboard/:id
+  not-found.tsx             custom 404 (optional)
+  loading.tsx                custom loading screen (optional)
 ```
 
-Every route is **automatically code-split** — no manual `React.lazy()` needed.
-
-### Pages
-
 ```tsx
-// No imports needed — useState, useEffect, and more are auto-injected
+// src/app/dashboard/[id]/page.tsx — useParams is auto-imported, no import needed
 export default function Dashboard() {
+  const { id } = useParams();
   const [count, setCount] = useState(0);
-  return <h1>Dashboard {count}</h1>;
+  return <h1>Dashboard {id}: {count}</h1>;
 }
 ```
 
-### Dynamic Routes
+Layouts — root and nested — render children through `<Outlet />`:
 
 ```tsx
-// src/app/blog/[slug]/page.tsx — useParams is auto-imported
-export default function Post() {
-  const { slug } = useParams();
-  return <h1>Post: {slug}</h1>;
-}
-```
-
-### Layouts
-
-All layouts — root and nested — use `<Outlet />` from React Router.
-
-```tsx
-// src/app/layout.tsx — root layout
-export const metadata = {
-  title      : 'My App',
-  description: 'Built with Bini.js',
-}
-
-export default function RootLayout() {
-  return <Outlet />
-}
-```
-
-```tsx
-// src/app/dashboard/layout.tsx — nested layout (Outlet is auto-imported)
+// src/app/dashboard/layout.tsx
 export default function DashboardLayout() {
   return (
     <div>
       <aside>Sidebar</aside>
       <main><Outlet /></main>
     </div>
-  )
-}
-```
-
-> **Note:** Layouts that contain an `<html>` tag are automatically excluded from the route chain. Layouts without a default export are also excluded.
-
-### Custom Loading Screen
-
-Create `src/app/loading.tsx` with a default export to replace the built-in spinner. Used as the Suspense fallback for every lazy-loaded route.
-
-```tsx
-// src/app/loading.tsx
-export default function Loading() {
-  return (
-    <div className="flex items-center justify-center min-h-screen">
-      <div className="animate-spin rounded-full h-10 w-10 border-t-2 border-blue-500" />
-    </div>
   );
 }
 ```
 
-If the file is empty or has no default export, the built-in spinner is used automatically.
-
-### Custom 404
-
-```tsx
-// src/app/not-found.tsx — Link is auto-imported
-export default function NotFound() {
-  return (
-    <div>
-      <h1>404 — Page not found</h1>
-      <Link to="/">Go home</Link>
-    </div>
-  );
-}
-```
-
-### Metadata
-
-Export `metadata` from any `layout.tsx`. Root layout metadata is injected into `index.html` at build time. Nested layout titles update `document.title` at runtime via an auto-injected `<TitleSetter>`. Metadata is **stripped from the browser bundle** — it never ships to the client.
+Export `metadata` from any layout to control `<title>`, Open Graph, Twitter cards, and icons. Root metadata is injected into `index.html` at build time; nested metadata updates `document.title` at runtime. It never ships to the client bundle.
 
 ```tsx
 export const metadata = {
-  title       : 'Dashboard',
-  description : 'Your personal dashboard',
-  viewport    : 'width=device-width, initial-scale=1.0',
-  themeColor  : '#00CFFF',
-  charset     : 'UTF-8',
-  robots      : 'index, follow',
-  manifest    : '/site.webmanifest',
-  keywords    : ['react', 'vite', 'dashboard'],
-  authors     : [{ name: 'Your Name', url: 'https://example.com' }],
-  metadataBase: new URL('https://myapp.com'),
-  openGraph: {
-    title      : 'Dashboard',
-    description: 'Your personal dashboard',
-    url        : 'https://myapp.com/dashboard',
-    type       : 'website',
-    images     : [{ url: '/og-image.png', width: 1200, height: 630 }],
-  },
-  twitter: {
-    card       : 'summary_large_image',
-    title      : 'Dashboard',
-    description: 'Your personal dashboard',
-    creator    : '@yourhandle',
-    images     : ['/og-image.png'],
-  },
-  icons: {
-    icon    : [{ url: '/favicon.svg', type: 'image/svg+xml' }],
-    shortcut: [{ url: '/favicon.png' }],
-    apple   : [{ url: '/apple-touch-icon.png', sizes: '180x180' }],
-  },
-}
+  title: 'Dashboard',
+  description: 'Your personal dashboard',
+  openGraph: { images: [{ url: '/og-image.png', width: 1200, height: 630 }] },
+};
 ```
 
----
-
-## Auto-Imports
-
-`bini-router` automatically injects imports into every page and layout file in `src/app/`. You never need to write import statements for these:
-
-**From `react`:** `useState` `useEffect` `useRef` `useMemo` `useCallback` `useContext` `createContext` `useReducer` `useId` `useTransition` `useDeferredValue`
-
-**From `react-router-dom`:** `Link` `NavLink` `useNavigate` `useParams` `useLocation` `useSearchParams` `Outlet`
-
-**From `bini-env`:** `getEnv` `requireEnv`
-
-If you already import from one of these packages manually, `bini-router` detects it and skips injection — no duplicates ever.
+> Layouts with an `<html>` tag, or without a default export, are excluded from the route chain automatically.
 
 ---
 
 ## API Routes
 
-Create files in `src/app/api/`. Both **plain function handlers** and **Hono apps** are supported. The same files run in dev (Vite middleware), production (`bini-server`), and on Netlify Edge (auto-generated edge function). `getEnv` and `requireEnv` are auto-imported — no dotenv setup needed.
-
-```
-src/app/api/
-  hello.ts           → /api/hello
-  users.ts           → /api/users
-  posts/
-    index.ts         → /api/posts
-    [id].ts          → /api/posts/:id
-  [...catch].ts      → /api/* catch-all
-```
-
-### Plain Function Handler
+Files in `src/app/api/` become endpoints. Export a plain function or a Hono app — both work identically in dev, in production, and on every deploy target.
 
 ```ts
-// src/app/api/hello.ts
+// src/app/api/hello.ts — plain handler
 export default function handler(req: Request) {
   return Response.json({ message: 'hello', method: req.method });
 }
 ```
 
-### Hono App
-
 ```ts
-// src/app/api/users.ts
-import { Hono } from 'hono'
+// src/app/api/users/[id].ts — Hono app, dynamic segment
+import { Hono } from 'hono';
 
-const app = new Hono()
+const app = new Hono();
+app.get('/users/:id', (c) => c.json({ id: c.req.param('id') }));
 
-app.get('/users', (c) => c.json({ users: ['alice', 'bob'] }))
-
-app.post('/users', async (c) => {
-  const body = await c.req.json()
-  return c.json({ created: body }, 201)
-})
-
-export default app
+export default app;
 ```
 
-### Dynamic API Routes
+`getEnv` and `requireEnv` are auto-imported for reading environment variables server-side — no `dotenv` setup needed.
 
-```ts
-// src/app/api/posts/[id].ts
-import { Hono } from 'hono'
-
-const app = new Hono()
-
-app.get('/posts/:id', (c) => c.json({ id: c.req.param('id') }))
-
-export default app
-```
-
-### Environment Variables in API Routes
-
-```ts
-// src/app/api/email.ts — requireEnv and getEnv are auto-imported
-import { Hono } from 'hono'
-import nodemailer from 'nodemailer'
-
-const app = new Hono()
-
-const transporter = nodemailer.createTransport({
-  host: 'smtp-relay.brevo.com',
-  port: 587,
-  auth: {
-    user: requireEnv('SMTP_USER'), // throws at startup if missing
-    pass: requireEnv('SMTP_PASS'),
-  },
-})
-
-app.post('/email', async (c) => {
-  const { to, subject, html } = await c.req.json()
-  await transporter.sendMail({ from: requireEnv('FROM_EMAIL'), to, subject, html })
-  return c.json({ ok: true })
-})
-
-export default app
-```
-
-### How API Routing Works
-
-In **dev**, `bini-router` registers a Vite middleware that intercepts `/api/*` requests, scans `src/app/api/`, matches the route, and calls the handler — with hot module replacement on every save.
-
-On **build**, `bini-router` auto-generates `netlify/edge-functions/api.ts`. Hono apps are detected by their import and merged via `app.route()` — a single shared Hono instance, no duplicate module loading. Plain function handlers are wrapped with `app.all()`.
+**How it routes:** in dev, a Vite middleware matches `/api/*` against `src/app/api/` with HMR on every save. On build, matching Hono apps merge into one instance per deploy target (`netlify/edge-functions/api.ts`, `api/index.ts`, etc.); plain handlers are wrapped with `app.all()`. In packaged desktop/mobile apps, the same Hono instance runs in-memory — no server process, no code changes required.
 
 ---
 
 ## Environment Variables
 
-`bini-env` handles all environment variable loading automatically. On every dev and preview server start, it displays which `.env` files are active:
-
-```
-  ß Bini.js (dev)
-
-  ➜  Environments: .env.local, .env
-  ➜  Local:   http://localhost:3000/
-  ➜  Network: http://192.168.1.10:3000/
-```
-
-**File resolution order** (highest priority first):
-1. `.env.local`
-2. `.env.[mode].local`
-3. `.env.[mode]`
-4. `.env`
+`bini-env` loads `.env` files automatically and prints which ones are active on every dev/preview start, in priority order: `.env.local` → `.env.[mode].local` → `.env.[mode]` → `.env`.
 
 ```bash
 # .env
-BINI_PUBLIC_API_URL=https://api.example.com  # client-side — use import.meta.env.BINI_*
-VITE_ANALYTICS_ID=UA-XXXX                    # client-side — use import.meta.env.VITE_*
-SMTP_USER=user@smtp.example.com              # server-side — use requireEnv() in API routes
-SMTP_PASS=your_password
-FROM_EMAIL=App <noreply@example.com>
+BINI_PUBLIC_API_URL=https://api.example.com   # client-side: import.meta.env.BINI_*
+SMTP_USER=user@smtp.example.com               # server-side: requireEnv() in API routes
 ```
 
-> ⚠️ **Never put secrets in `BINI_*` or `VITE_*` variables.** Anything with those prefixes is exposed to the browser bundle.
-
-**In client code:**
 ```ts
-import.meta.env.BINI_PUBLIC_API_URL
+import.meta.env.BINI_PUBLIC_API_URL             // client code
+const user = requireEnv('SMTP_USER');           // API routes — throws if missing, auto-imported
 ```
 
-**In API routes (server-side only):**
-```ts
-// getEnv and requireEnv are auto-imported — no import statement needed
-const user = requireEnv('SMTP_USER'); // throws if missing
-const debug = getEnv('DEBUG_MODE');   // returns undefined if missing
-```
+> ⚠️ Never put secrets in `BINI_*` or `VITE_*` variables — both prefixes are exposed to the browser bundle.
 
 ---
 
 ## Production Server
 
-`bini-server` is a **zero-dependency** production server — pure Node.js `http`, no Express, no Fastify.
+*Web target only.* `bini-server` is a zero-dependency Node.js server — no Express, no Fastify — that serves `dist/`, proxies `/api/*` to your Hono handlers, and adds what `vite preview` doesn't: ETag/304 caching, graceful shutdown, body/handler timeouts, and automatic port fallback.
 
 ```bash
-npm run build   # vite build → dist/
-npm start       # bini-server
+npm run build
+npm start                 # PORT=8080 npm start to override the port
 ```
 
-**Terminal output:**
-```
-  ß Bini.js (production)
-
-  ➜  Environments: .env
-  ➜  Local:   http://localhost:3000/
-  ➜  Network: http://192.168.1.5:3000/
-```
-
-**Request flow:**
-```
-Request
-  ├─ /api/*  →  src/app/api/ handlers  (Hono apps or plain functions)
-  ├─ /*      →  stream static file from dist/  (ETag + cache headers)
-  └─ /*      →  dist/index.html  (SPA fallback)
-```
-
-| Feature | `vite preview` | `bini-server` |
-|---|---|---|
-| Serves `dist/` | ✅ | ✅ |
-| API routes | ✅ | ✅ |
-| SPA fallback | ✅ | ✅ |
-| Auto env loading | ✅ via bini-env | ✅ via bini-env |
-| ETag / 304 support | ❌ | ✅ |
-| Production use | ❌ not recommended | ✅ |
-| Body timeout | ❌ | ✅ 30s |
-| Body size limit | ❌ | ✅ 10 MB |
-| Handler timeout | ❌ | ✅ 30s |
-| Graceful shutdown | ❌ | ✅ |
-| Port auto-increment | ❌ | ✅ |
-| Zero dependencies | ✅ | ✅ |
-
-**Override port** via environment variable:
-
-```bash
-PORT=8080 npm start
-```
-
-If the port is busy, `bini-server` automatically increments and warns:
-```
-  ⚠  Port 3000 is in use, using port 3001 instead.
-```
-
-**Override default directories** via env vars:
-```bash
-BINI_API_DIR=src/api   # default: src/app/api
-BINI_DIST_DIR=build    # default: dist
-```
+Override the default directories if needed: `BINI_API_DIR` (default `src/app/api`), `BINI_DIST_DIR` (default `dist`).
 
 ---
 
 ## Static Export
 
-`bini-export` pre-renders every static route and strips all platform server files, leaving `dist/` ready for any static host.
+*Web target only.* `bini-export` pre-renders every static route to its own `index.html` and strips server-only files, producing a `dist/` that works on any static host.
 
 ```bash
-npm run export   # vite build --mode export
+npm run export             # vite build --mode export
 ```
 
-**Build log:**
-```
-  ß bini-export  static export mode
-
-  ß bini-export  pre-rendering 4 route(s)
-  ➜  /about → dist/about/index.html
-  ➜  /dashboard → dist/dashboard/index.html
-  ➜  /profile → dist/profile/index.html
-  ➜  404.html ← redirect template dist/404.html
-  ➜  removed netlify/edge-functions/api.ts
-
-  ß bini-export  export complete — 1 file(s) removed
-```
-
-Dynamic routes (e.g. `/blog/:slug`) are not pre-rendered — they are handled client-side via the `404.html` redirect fallback.
-
-### 404 Handling
-
-| Situation | What gets generated |
-|---|---|
-| `src/app/not-found.tsx` exists | `404.html` is a copy of `index.html` — the host boots the SPA and React Router renders your custom page |
-| No custom `not-found` | `404.html` uses a redirect script that saves the path to `sessionStorage` and redirects to `/`, where the SPA restores the URL via `history.replaceState` |
-
-### Works on Any Static Host
-
-| Host | Static routes | Dynamic routes |
-|---|---|---|
-| GitHub Pages | ✅ pre-rendered | ✅ via 404.html redirect |
-| Netlify static | ✅ pre-rendered | ✅ via 404.html redirect |
-| Vercel static | ✅ pre-rendered | ✅ via 404.html redirect |
-| Cloudflare Pages | ✅ pre-rendered | ✅ via 404.html redirect |
-| AWS S3 + CloudFront | ✅ pre-rendered | ✅ configure error page to 404.html |
-| Firebase Hosting | ✅ pre-rendered | ✅ via 404.html redirect |
-| Surge.sh | ✅ pre-rendered | ✅ via 404.html redirect |
+Dynamic routes aren't pre-rendered — they resolve client-side via a generated `404.html`: a copy of `index.html` if you have a custom `not-found.tsx`, otherwise a redirect script that preserves the path through `sessionStorage`. Works out of the box on GitHub Pages, Netlify, Vercel, Cloudflare Pages, S3 + CloudFront, Firebase Hosting, and Surge.
 
 ---
 
-## Dev Overlay
+## Platforms
 
-`bini-overlay` adds an animated Bini.js logo badge to the bottom-left corner during development. It has three states:
-
-| State | Behaviour |
-|---|---|
-| Loading | Logo draws itself with a stroke animation on every page load and HMR update |
-| Idle | Logo sits as a filled gradient icon |
-| Error | Badge morphs into a red `1 Issue` / `3 Issues` pill — click to open the error panel |
-
-**Error panel shows:**
-- Error type — Runtime Error / Parse Error / Build Error / Type Error / Unhandled Rejection
-- File link — detected file path shown as a clickable button that opens in your editor
-- Code frame — surrounding lines fetched from disk with Shiki syntax highlighting and the error line highlighted
-- Call stack — collapsible, with internal and `node_modules` frames filtered out
-- Copy button — copies the full error message, file, code context, and stack to clipboard
-- Navigation arrows — when multiple errors are queued
-
-The panel closes automatically when an error is fixed and HMR fires. **Never appears in production builds.**
+One codebase, six targets. `--platform` picks which one you scaffold; each gets exactly the dependencies, scripts, and config it needs — nothing more.
 
 ```bash
-# Disable without touching config
-DISABLE_BINI_OVERLAY=true npm run dev
+npx create-bini-app@latest my-app --platform macos
+npx create-bini-app@latest my-app --platform android --app-name "My App" --nosign
+```
+
+### Web
+
+**Overview** — the default target. A standard Vite + React SPA with file-based routing and a Hono API layer.
+
+**Features**
+- Zero-dependency production server (`bini-server`) and static export (`bini-export`)
+- Deploy to Netlify Edge, Vercel Edge, Cloudflare Workers, Node.js, or Deno
+
+**Commands**
+
+| Command | Description |
+|---|---|
+| `npm run dev` | Dev server with HMR |
+| `npm start` | Serve the production build |
+| `npm run export` | Static export |
+
+**Requirements** — Node.js `>= 20.19.0`. Nothing else.
+
+---
+
+### Windows
+
+**Overview** — a native desktop binary running inside WebView2.
+
+**Features**
+- Filesystem, clipboard, notifications, and dialogs via `@tauri-apps/api`, auto-wired by `bini-native`
+- Authenticode code signing, configurable at scaffold time or later
+
+**Commands**
+
+| Command | Description |
+|---|---|
+| `npm run tauri:dev` | Run in development mode |
+| `npm run tauri:build` | Build a distributable binary |
+| `npm run tauri:icon` | Regenerate icons from `public/logo.png` |
+
+**Requirements**
+- Microsoft C++ Build Tools ([download](https://visualstudio.microsoft.com/visual-cpp-build-tools/)) — install with "Desktop development with C++"
+- Microsoft Edge WebView2 Runtime ([download](https://developer.microsoft.com/en-us/microsoft-edge/webview2/))
+
+---
+
+### macOS
+
+**Overview** — a native desktop binary running inside WKWebView.
+
+**Features**
+- Same `@tauri-apps/api` access as Windows/Linux, auto-wired by `bini-native`
+- Ad-hoc signing for local runs, or Developer ID + notarization for distribution
+
+**Commands**
+
+| Command | Description |
+|---|---|
+| `npm run tauri:dev` | Run in development mode |
+| `npm run tauri:build` | Build a distributable binary |
+| `npm run tauri:icon` | Regenerate icons from `public/logo.png` |
+
+**Requirements**
+- Xcode Command Line Tools — `xcode-select --install`
+- [Homebrew](https://brew.sh), then `brew install gtk+3 webkit2gtk pkg-config`
+- Full Xcode (Mac App Store) if you also plan to build for iOS
+
+---
+
+### Linux
+
+**Overview** — a native desktop binary running inside WebKitGTK, distributed as an AppImage.
+
+**Features**
+- Same `@tauri-apps/api` access as Windows/macOS, auto-wired by `bini-native`
+- GPG-signed AppImage output, configurable at scaffold time or later
+
+**Commands**
+
+| Command | Description |
+|---|---|
+| `npm run tauri:dev` | Run in development mode |
+| `npm run tauri:build` | Build a distributable AppImage |
+| `npm run tauri:icon` | Regenerate icons from `public/logo.png` |
+
+**Requirements** — one of:
+
+```bash
+# Debian/Ubuntu
+sudo apt install -y libwebkit2gtk-4.0-dev build-essential libssl-dev \
+  libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev pkg-config
+
+# Fedora
+sudo dnf install webkit2gtk4.0-devel openssl-devel gtk3-devel \
+  libappindicator-gtk3-devel librsvg2-devel libxdo-devel pkg-config
+
+# Arch
+sudo pacman -S webkit2gtk base-devel openssl gtk3 libappindicator-gtk3 librsvg libxdo pkg-config
 ```
 
 ---
 
-## Linting & Formatting
+### Android
 
-Every scaffolded project comes pre-configured with **Oxlint** and **Oxfmt** — Rust-based tools that are 50–100× faster than ESLint and Prettier.
+**Overview** — a real native APK/AAB via Tauri's Android backend, not a WebView wrapper.
+
+**Features**
+- Camera, filesystem, notifications, and geolocation auto-wired by `bini-native`
+- Back button, status bar, and splash screen configurable in `src-tauri/gen/android`
+- Release signing (keystore + `keystore.properties`), configurable at scaffold time or later
+
+**Commands**
+
+| Command | Description |
+|---|---|
+| `npm run android` | Run on an emulator or connected device |
+| `npm run android:build` | Build a release APK/AAB |
+
+**Requirements**
+- Java JDK 17 (`JAVA_HOME` set) — [download](https://adoptium.net/temurin/releases/)
+- Android Studio, with SDK/Build Tools/NDK (`ANDROID_HOME` set) — [download](https://developer.android.com/studio)
+- Rust targets: `rustup target add aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android`
+
+---
+
+### iOS
+
+**Overview** — a real native app via Tauri's iOS backend, running inside WKWebView. macOS + Xcode required.
+
+**Features**
+- Same native plugin wiring story as Android
+- Xcode-managed automatic signing for local runs; manual certificate/profile signing for CI
+
+**Commands**
+
+| Command | Description |
+|---|---|
+| `npm run ios` | Run on the Simulator or a connected device |
+| `npm run ios:build` | Build the app |
+
+**Requirements**
+- Xcode (Mac App Store) + Command Line Tools — `xcode-select --install`
+- CocoaPods — `sudo gem install cocoapods`
+- Rust targets: `rustup target add aarch64-apple-ios x86_64-apple-ios aarch64-apple-ios-sim`
+
+**Notes** — iOS projects also get a bare `"tauri": "tauri"` script in `package.json`. Xcode's build phase calls it directly (`npm run tauri -- ios xcode-script ...`), bypassing the commands above — builds triggered from inside Xcode fail with `Missing script: "tauri"` without it. Don't rename or remove it.
+
+---
+
+## Developer Experience
+
+**Dev overlay.** An animated status badge in the corner reflects loading/idle/error state live. On error, it expands into a Shiki-highlighted code frame with a clickable file link and filtered call stack. Disable with `DISABLE_BINI_OVERLAY=true npm run dev`.
+
+**Auto-imports.** These are available in every file under `src/app/` with no import statement:
+
+| From | Symbols |
+|---|---|
+| `react` | `useState` `useEffect` `useRef` `useMemo` `useCallback` `useContext` `createContext` `useReducer` `useId` `useTransition` `useDeferredValue` |
+| `react-router-dom` | `Link` `NavLink` `useNavigate` `useParams` `useLocation` `useSearchParams` `Outlet` |
+| `bini-env` | `getEnv` `requireEnv` |
+
+A manual import of any of these is detected and injection is skipped — no duplicates.
+
+**Linting & formatting.** Oxlint and Oxfmt ship pre-configured (`.oxlintrc.json`, `.oxfmtrc.json`) — Rust-based, 50–100× faster than ESLint/Prettier, no setup required.
 
 ```bash
-npm run lint     # Oxlint — react plugin enabled
-npm run format   # Oxfmt  — Prettier-compatible formatter
-npm run check    # lint + format + type-check combined (great for CI)
+npm run lint     # Oxlint
+npm run format   # Oxfmt
+npm run check    # both + type-check — CI-ready
 ```
-
-Configuration files are auto-generated at scaffold time:
-
-```json
-// .oxlintrc.json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react"],
-  "env": { "browser": true, "es2022": true },
-  "ignorePatterns": ["dist", "node_modules"]
-}
-```
-
-```json
-// .oxfmtrc.json
-{
-  "semi": false,
-  "singleQuote": true,
-  "tabWidth": 2,
-  "printWidth": 100,
-  "trailingComma": "es5",
-  "sortImports": true,
-  "sortTailwindcssClasses": true
-}
-```
-
-You never need to restart the dev server when adding or removing routes — `bini-router` picks up new files, folders, and deletions automatically.
 
 ---
 
 ## Deployment
 
-### Netlify (default)
-
-Every Bini.js project is pre-configured for Netlify. Running `vite build` automatically generates `netlify/edge-functions/api.ts` — no extra setup needed.
+**Netlify** is the default target — `vite build` generates `netlify/edge-functions/api.ts` automatically.
 
 ```toml
 # netlify.toml
@@ -625,120 +481,61 @@ Every Bini.js project is pre-configured for Netlify. Running `vite build` automa
   publish = "dist"
 
 [[edge_functions]]
-  path     = "/api/*"
+  path = "/api/*"
   function = "api"
 
 [[redirects]]
-  from   = "/*"
-  to     = "/index.html"
+  from = "/*"
+  to = "/index.html"
   status = 200
 ```
 
-> Use `[[edge_functions]]` for the API — not `[[redirects]]`.
+> Edge Functions run on Deno, not Node — packages depending on Node built-ins (`fs`, `nodemailer`) won't work there.
 
-> ⚠️ Netlify Edge Functions run on the Deno runtime, not Node.js. Packages that depend on Node.js built-ins (e.g. `nodemailer`, `fs`, `path`) will not work. Use Web API alternatives instead.
+**Node.js** (Railway, Render, Fly.io, a VPS): `npm run build && npm start`. `bini-server` reads handlers directly from `src/app/api/`, so deploy the whole project — not just `dist/`. Use [pm2](https://pm2.keymetrics.io/) on a bare VPS.
 
-### Node.js servers (Railway, Render, Fly.io, VPS)
+**Other targets** — set `platform` once in `vite.config.ts`, and `vite build` generates the right entry file:
 
-```bash
-npm run build
-npm start
-```
-
-> ⚠️ `bini-server` runs your API handlers directly from `src/app/api/` — they are **not** compiled into `dist/`. Make sure your server has access to both `dist/` and `src/app/api/`. On Railway and Render this happens automatically. On a VPS, deploy your full project directory, not just `dist/`.
-
-Railway and Render inject `PORT` automatically. Use [pm2](https://pm2.keymetrics.io/) on a VPS:
-
-```bash
-npm install -g pm2
-pm2 start "npm start" --name my-app
-pm2 save && pm2 startup
-```
-
-### Cloudflare Workers
-
-```ts
-// vite.config.ts
-biniroute({ platform: 'cloudflare' })
-```
-
-```bash
-vite build && npx wrangler deploy
-```
-
-### Other Platforms
-
-`bini-router` supports `netlify` · `vercel` · `cloudflare` · `node` · `deno`. Set `platform` in `vite.config.ts` once — `vite build` generates the correct platform entry file automatically.
-
-| Platform | Output file |
+| Platform | Output |
 |---|---|
 | `netlify` | `netlify/edge-functions/api.ts` |
-| `vercel` | `api/index.ts` / `api/index.js` |
-| `cloudflare` | `worker.ts` / `worker.js` |
-| `node` | (none — handled by `bini-server`) |
-| `deno` | `server/index.ts` / `server/index.js` |
+| `vercel` | `api/index.ts` |
+| `cloudflare` | `worker.ts` |
+| `deno` | `server/index.ts` |
+| `node` | *(none — `bini-server` handles it)* |
 
-> ⚠️ **Vercel** reads `api/` before the build step runs. You must commit the generated file before deploying:
-> ```bash
-> git add api/index.ts && git commit -m "chore: update vercel api entry" && git push
-> ```
+> Vercel and Deno Deploy read their entry file **before** running your build — commit the generated file, don't rely on CI to produce it fresh.
 
-> ⚠️ **Deno Deploy** reads `server/` before the build step runs. You must commit the generated file before deploying:
-> ```bash
-> git add server/index.ts && git commit -m "chore: update deno server entry" && git push
-> ```
-> Deno Deploy does not run Node.js — use Web API or Deno-compatible alternatives in your API routes.
-
-> Add `vercel.json`:
-> ```json
-> {
->   "rewrites": [
->     { "source": "/api/(.*)", "destination": "/api/index.ts" },
->     { "source": "/(.*)",     "destination": "/index.html" }
->   ]
-> }
-> ```
-
-### GitHub Pages / Subpath Deployments
-
-`bini-router` sets `basename={import.meta.env.BASE_URL ?? '/'}` on `<BrowserRouter>` automatically.
-
-```ts
-// vite.config.ts
-export default defineConfig({
-  base   : '/my-repo/',
-  plugins: [react(), biniEnv(), biniroute()],
-})
-```
-
-Then run `npm run export` to generate a fully pre-rendered `dist/` ready for GitHub Pages.
+**GitHub Pages / subpaths** — set `base: '/my-repo/'` in `vite.config.ts`, then `npm run export` for a fully pre-rendered, subpath-aware `dist/`.
 
 ---
 
-## Powered By
+## Packages
 
-| Package | Version | Role |
-|---|---|---|
-| [`bini-router`](https://npmjs.com/package/bini-router) | `latest` | File-based routing, nested layouts, metadata, auto-imports, Hono API routes, HMR watcher, multi-platform deployment |
-| [`bini-server`](https://npmjs.com/package/bini-server) | `latest` | Zero-dependency production server — ETag, timeouts, graceful shutdown |
-| [`bini-overlay`](https://npmjs.com/package/bini-overlay) | `latest` | Dev animated logo badge + Shiki-highlighted error overlay |
-| [`bini-env`](https://npmjs.com/package/bini-env) | `latest` | Environment variable system + dev/preview startup banner |
-| [`bini-export`](https://npmjs.com/package/bini-export) | `latest` | Static SPA export — per-route pre-rendering, smart 404.html |
-| [`hono`](https://hono.dev) | `latest` | API route handler runtime |
-| [`vite`](https://vitejs.dev) | `latest` | Dev server and Rolldown-powered production bundler |
-| [`react`](https://react.dev) | `latest` | UI library |
-| [`react-router-dom`](https://reactrouter.com) | `latest` | Client-side routing |
-| [`oxlint`](https://oxc.rs) | `latest` | Rust-based linter — 50–100× faster than ESLint |
-| [`oxfmt`](https://oxc.rs) | `latest` | Rust-based formatter — Prettier-compatible |
+| Package | Role |
+|---|---|
+| [`bini-router`](https://npmjs.com/package/bini-router) | File-based routing, layouts, metadata, auto-imports, API routing, multi-platform deploy targets |
+| [`bini-native`](https://npmjs.com/package/bini-native) | Automatic Tauri plugin wiring for desktop and mobile |
+| [`@tauri-apps/cli`](https://v2.tauri.app) | Compiles the app to a native Windows/macOS/Linux/Android/iOS binary |
+| [`bini-server`](https://npmjs.com/package/bini-server) | Zero-dependency production server *(web only)* |
+| [`bini-export`](https://npmjs.com/package/bini-export) | Static SPA export *(web only)* |
+| [`bini-overlay`](https://npmjs.com/package/bini-overlay) | Dev error overlay |
+| [`bini-env`](https://npmjs.com/package/bini-env) | Environment variable loading |
+| [`hono`](https://hono.dev) | API route runtime |
+| [`vite`](https://vitejs.dev) | Dev server + Rolldown bundler |
+| [`react`](https://react.dev) / [`react-router-dom`](https://reactrouter.com) | UI + routing |
+| [`oxlint`](https://oxc.rs) / [`oxfmt`](https://oxc.rs) | Linting + formatting |
+
+All packages install at `latest`.
 
 ---
 
 ## Resources
 
-- **Website**: https://bini.js.org
-- **GitHub**: https://github.com/Binidu01/bini-cli
-- **npm**: https://www.npmjs.com/package/create-bini-app
-- **Issues**: https://github.com/Binidu01/bini-cli/issues
+- [bini.js.org](https://bini.js.org) — documentation
+- [GitHub](https://github.com/Binidu01/bini-cli) — source
+- [npm](https://www.npmjs.com/package/create-bini-app) — package
+- [Issues](https://github.com/Binidu01/bini-cli/issues) — bugs & feature requests
 
 ---
 

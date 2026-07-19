@@ -1,8 +1,8 @@
 {
   "name": "create-bini-app",
   "type": "module",
-  "version": "9.3.6",
-  "description": "The Zero-Config React Framework for the Modern Web",
+  "version": "10.0.0",
+  "description": "Build full-stack React apps for web, desktop, and mobile — from one codebase.",
   "keywords": [
     "bini",
     "bini.js",
@@ -10,40 +10,34 @@
     "create-bini-app",
     "react",
     "react framework",
+    "full-stack framework",
     "vite",
-    "vite 8",
     "rolldown",
     "typescript",
     "javascript",
-    "api routes",
     "file-based routing",
+    "api routes",
     "next.js alternative",
     "create-react-app alternative",
-    "pwa",
-    "progressive web app",
-    "hot module replacement",
-    "hmr",
-    "dev server",
-    "production server",
+    "react router",
     "tailwind css",
     "css modules",
-    "react router",
+    "tauri",
+    "desktop app",
+    "mobile app",
+    "cross-platform",
+    "native app",
+    "android",
+    "ios",
+    "windows",
+    "macos",
+    "linux",
+    "hono",
     "cli",
     "scaffolder",
     "project generator",
-    "react cli",
-    "vite cli",
-    "web framework",
-    "javascript framework",
-    "node.js framework",
     "oxlint",
-    "oxfmt",
-    "javascript tools",
-    "development tools",
-    "build tools",
-    "npm package",
-    "open source",
-    "mit license"
+    "oxfmt"
   ],
   "main": "dist/index.js",
   "bin": {
@@ -55,23 +49,18 @@
     "dist",
     "assets",
     "README.md",
-    "LICENSE",
-    "package.json"
+    "LICENSE"
   ],
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
-    "lint": "oxlint src --plugin typescript",
-    "format": "oxfmt src",
-    "check": "oxlint src --plugin typescript && oxfmt --check src",
     "test": "node dist/index.js --version",
     "prepublishOnly": "npm run typecheck && npm run build && node dist/index.js --version",
     "clean": "rm -rf dist"
   },
   "homepage": "https://bini.js.org",
-  "documentation": "https://bini.js.org/guide/",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Binidu01/bini-cli.git",
@@ -92,54 +81,20 @@
   },
   "devDependencies": {
     "@types/node": "^25.6.0",
-    "oxfmt": "latest",
-    "oxlint": "latest",
     "tsup": "^8.5.1",
     "tsx": "^4.21.0",
     "typescript": "^6.0.2"
   },
   "engines": {
-    "node": ">=20.19.0",
-    "npm": ">=9.0.0",
-    "pnpm": ">=8.0.0",
-    "yarn": ">=3.6.0",
-    "bun": ">=1.0.0"
+    "node": ">=20.19.0"
   },
   "publishConfig": {
     "access": "public",
     "registry": "https://registry.npmjs.org/",
     "tag": "latest"
   },
-  "funding": [
-    {
-      "type": "individual",
-      "url": "https://github.com/sponsors/Binidu01"
-    }
-  ],
-  "contributors": [
-    {
-      "name": "Binidu Ranasinghe",
-      "email": "rbinidu@gmail.com",
-      "url": "https://github.com/Binidu01"
-    }
-  ],
-  "maintainers": [
-    {
-      "name": "Binidu Ranasinghe",
-      "email": "rbinidu@gmail.com",
-      "url": "https://github.com/Binidu01"
-    }
-  ],
-  "os": [
-    "darwin",
-    "linux",
-    "win32"
-  ],
-  "cpu": [
-    "x64",
-    "arm64",
-    "ia32"
-  ],
-  "private": false,
-  "preferGlobal": true
+  "funding": {
+    "type": "individual",
+    "url": "https://github.com/sponsors/Binidu01"
+  }
 }
