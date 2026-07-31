@@ -1,7 +1,7 @@
 {
   "name": "create-bini-app",
   "type": "module",
-  "version": "10.0.1",
+  "version": "10.0.2",
   "description": "Build full-stack React apps for web, desktop, and mobile — from one codebase.",
   "keywords": [
     "bini",
