@@ -16,7 +16,7 @@ This guide covers how the project is organized, how to get a package running loc
 
 ## Code of Conduct
 
-Be respectful, be constructive, and assume good faith. We don't have a separate `CODE_OF_CONDUCT.md` yet — until we do, the short version is: don't be a jerk, and disagreements should be about the code, not the person.
+This project follows a [Code of Conduct](./CODE_OF_CONDUCT.md), adapted from the Contributor Covenant. By participating, you're expected to uphold it — the short version is: be respectful, be constructive, and disagreements should be about the code, not the person.
 
 ---
 
