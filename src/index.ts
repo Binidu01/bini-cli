@@ -56,7 +56,6 @@ interface PackageManagerEntry {
 interface PackageJsonScripts {
   dev: string;
   build: string;
-  export: string;
   start: string;
   preview: string;
   "type-check": string;
@@ -545,10 +544,10 @@ async function installDependencies(
   if (!shouldInstall) return false;
 
   const commands: Record<PackageManager, string> = {
-    npm: "npm install --no-audit --no-fund --loglevel=error",
-    yarn: "yarn install --silent --no-progress",
-    pnpm: "pnpm install --reporter=silent",
-    bun: "bun install --silent",
+    npm: "npm install --no-audit --no-fund --loglevel=error --ignore-scripts=false",
+    yarn: "yarn install --silent --no-progress --ignore-scripts=false",
+    pnpm: "pnpm install --reporter=silent --config.enable-pre-post-scripts=true",
+    bun: "bun install --silent --ignore-scripts=false",
   };
 
   log.step(`Installing dependencies with ${pm}...`);
@@ -705,7 +704,7 @@ import react from '@vitejs/plugin-react';
 import { biniroute } from 'bini-router';
 import { biniOverlay } from 'bini-overlay';
 import { biniEnv } from 'bini-env';
-import { biniExport } from 'bini-export';
+import { biniSSG } from 'bini-ssg';
 ${biniNativeImport}${tailwindImport}
 
 export default defineConfig(({ command, mode }) => {
@@ -737,7 +736,7 @@ export default defineConfig(({ command, mode }) => {
       biniroute(),
       biniOverlay(),
       biniEnv(),
-      biniExport(),${biniNativePlugin}
+      biniSSG(),${biniNativePlugin}
     ],
 
     server: {
@@ -789,7 +788,7 @@ export default defineConfig(({ command, mode }) => {
           entryFileNames: 'js/[name]-[hash].js',
           assetFileNames: (assetInfo) => {
             const name = assetInfo.names?.[0] ?? assetInfo.name ?? '';
-            const ext = name.split('.').pop() ?? '';
+            const ext = name.split('.').pop()?.toLowerCase() || '';
             if (/png|jpe?g|gif|svg|webp|avif/.test(ext)) {
               return 'assets/images/[name]-[hash][extname]';
             }
@@ -800,6 +799,24 @@ export default defineConfig(({ command, mode }) => {
             if (ext === 'json') return 'data/[name]-[hash][extname]';
             return 'assets/[name]-[hash][extname]';
           },
+        },
+        onwarn(warning, warn) {
+          const ignoreCodes = [
+            'MODULE_EXTERNALIZED',
+            'INEFFECTIVE_DYNAMIC_IMPORT',
+            'UNRESOLVED_IMPORT',
+          ];
+          const ignoreMessages = [
+            'stream',
+            'externalized',
+            'dynamic import will not move module',
+          ];
+          const code = warning.code || '';
+          const message = warning.message || '';
+          
+          if (ignoreCodes.includes(code)) return;
+          if (ignoreMessages.some(msg => message.includes(msg))) return;
+          warn(warning);
         },
       },
     },
@@ -2108,6 +2125,7 @@ function generatePackageJson(
     "bini-router": "latest",
     "bini-overlay": "latest",
     "bini-server": "latest",
+    "bini-ssg": "latest",
   };
 
   const devDependencies: Record<string, string> = {
@@ -2117,7 +2135,6 @@ function generatePackageJson(
     oxfmt: "latest",
     "bini-env": "latest",
     "bini-deploy": "latest",
-    "bini-export": "latest",
   };
 
   if (isTauri) {
@@ -2146,7 +2163,6 @@ function generatePackageJson(
   const scripts: PackageJsonScripts = {
     dev: isTauri ? "vite" : "vite --host --open",
     build: useTypeScript ? "tsc --noEmit && vite build" : "vite build",
-    export: "vite build --mode export",
     start: "bini-server",
     preview: "vite preview --host --open",
     deploy: "bini-deploy",
@@ -2171,7 +2187,6 @@ function generatePackageJson(
     scripts["ios:dev"] = "npx @tauri-apps/cli ios dev";
     scripts["ios:build"] = "npx @tauri-apps/cli ios build";
   }
-
 
   if (platform === "ios") {
     scripts["tauri"] = "npx @tauri-apps/cli";
@@ -2611,13 +2626,29 @@ async function generateAppFiles(
     : `{ children }`;
 
   const mainContent = `import React from 'react';
-import { createRoot } from 'react-dom/client';
+import { hydrateRoot } from 'react-dom/client';
 import App from './App';
 ${isTauri ? `import { openUrl } from '@tauri-apps/plugin-opener';
 import { Hono } from 'hono';` : ''}
 
-const container = document.getElementById('root');
-if (!container) throw new Error('Root container not found');
+// ─── Production-Ready Client Only Wrapper ──────────────────────────────────
+// Only suppresses hydration warnings during development.
+// In production, it renders normally.
+function ClientOnly({ children }${useTypeScript ? ': { children: React.ReactNode }' : ''}) {
+  const [hasMounted, setHasMounted] = React.useState(false);
+
+  React.useEffect(() => {
+    setHasMounted(true);
+  }, []);
+
+  // In production, always render children (no hydration mismatch)
+  // In development, wait for mount to avoid hydration issues
+  if (import.meta.env.DEV && !hasMounted) {
+    return null;
+  }
+
+  return children;
+}
 
 ${isTauri ? `
 const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
@@ -2670,7 +2701,93 @@ if (isTauri) {
 }
 ` : ''}
 
-createRoot(container).render(<App />);
+// ─── Production-Ready Hydration ─────────────────────────────────────────────
+if (typeof window !== 'undefined') {
+  const rootElement = document.getElementById('root');
+  if (rootElement) {
+    // In development, use ClientOnly wrapper to avoid hydration mismatches
+    // In production, hydrate normally
+    if (import.meta.env.DEV) {
+      hydrateRoot(rootElement,
+        <ClientOnly>
+          <App />
+        </ClientOnly>
+      );
+    } else {
+      hydrateRoot(rootElement, <App />);
+    }
+  }
+}
+
+export { App };
+
+/**
+ * SSG render — React Router v7
+ * Uses renderToPipeableStream directly (no fallback needed for React 19)
+ *
+ * \`url\` is expected to be the ROUTE path (e.g. "/", "/about", "/blog/hello"),
+ * the same shape a pre-render script naturally produces from the route
+ * manifest. This function normalizes it to include the router's \`basename\`
+ * (e.g. "/testing-static-servers/") before handing it to StaticRouter,
+ * since StaticRouter — like BrowserRouter — expects \`location\` to be the
+ * *full* path including the basename, and strips it internally to match
+ * routes. Without this, every pre-rendered page silently renders blank
+ * whenever \`base\` is set to a non-root value in vite.config.ts.
+ */
+export async function render(url${useTypeScript ? ': string' : ''})${useTypeScript ? ': Promise<string>' : ''} {
+  const ReactDOMServer = await import('react-dom/server');
+  const { createElement } = await import('react');
+  const { StaticRouter } = await import('react-router-dom');
+  const { AppRoutes, basename: rawBasename } = await import('./App');
+  const { Writable } = await import('stream');
+
+  // \`basename\` is exported from the generated App.tsx as a \`const\`, which
+  // TypeScript infers as a string LITERAL type (e.g. "/testing-static-servers/")
+  // rather than \`string\`. Widen it here so downstream comparisons/string ops
+  // don't trip TS2367 ("no overlap") — the value is a normal runtime string,
+  // the literal type is just an artifact of how it's generated.
+  const basename${useTypeScript ? ': string' : ''} = rawBasename;
+
+  // Normalize basename: strip trailing slash for concatenation, and treat
+  // "/" the same as "" (no prefix needed).
+  const normalizedBase = basename === '/' ? '' : basename.replace(/\\/$/, '');
+
+  // Ensure \`url\` starts with a leading slash before we reason about it.
+  const routePath = url.startsWith('/') ? url : \`/\${url}\`;
+
+  // If the caller already included the basename (e.g. they passed
+  // "/testing-static-servers/about"), don't double-prefix it.
+  const fullUrl = normalizedBase && !routePath.startsWith(normalizedBase)
+    ? \`\${normalizedBase}\${routePath}\`
+    : routePath;
+
+  return new Promise((resolve, reject) => {
+    let html = '';
+    const writable = new Writable({
+      write(chunk, _enc, callback) {
+        html += chunk.toString();
+        callback();
+      },
+    });
+
+    const { pipe } = ReactDOMServer.renderToPipeableStream(
+      createElement(
+        StaticRouter,
+        { location: fullUrl, basename },
+        createElement(AppRoutes)
+      ),
+      {
+        onAllReady() {
+          pipe(writable);
+          writable.on('finish', () => resolve(html));
+        },
+        onError: (err) => {
+          reject(err);
+        },
+      }
+    );
+  });
+}
 `;
 
   await Promise.all([
@@ -2772,10 +2889,6 @@ Powered by **Bini.js**, **Vite**, **Hono**, and **Tauri**.
   - 304 responses
   - Graceful shutdown
   - Automatic port fallback
-- Static SPA export (**bini-export**):
-  - Pre-renders static routes
-  - Generates optimized \`404.html\`
-  - Compatible with static hosting platforms
 - Deploy anywhere:
   - Netlify Edge Functions
   - Vercel Edge Runtime
@@ -2786,6 +2899,10 @@ Powered by **Bini.js**, **Vite**, **Hono**, and **Tauri**.
   - Shiki-powered error highlighting
   - Automatic import support
   - GitHub Codespaces compatibility
+- Static Site Generation (SSG) powered by **bini-ssg**:
+  - Pre-renders routes to static HTML at build time via the \`render()\` function exported from \`main.${useTypeScript ? "tsx" : "jsx"}\`
+  - Uses React 19's \`renderToPipeableStream\` under the hood — no extra fallback needed
+  - Client hydration handled automatically via \`hydrateRoot\`
 
 ## Commands
 
@@ -2794,11 +2911,10 @@ Powered by **Bini.js**, **Vite**, **Hono**, and **Tauri**.
 | \`${pm} run dev\` | Start the Vite development server with HMR |
 | \`${pm} run build\` | Type-check and build the production application |
 | \`${pm} start\` | Serve production output using bini-server |
-| \`${pm} run export\` | Export the application as a static SPA |
 | \`${pm} run preview\` | Preview the production build |
 | \`${pm} run deploy\` | Deploy the application to your chosen platform |
 
-\`start\` and \`export\` are available only for web-target projects.
+\`start\` is available only for web-target projects.
 
 Desktop and mobile targets ship as native applications instead.
 
@@ -3154,11 +3270,11 @@ The Bini.js ecosystem:
 - **Vite** — modern build pipeline with Rolldown-powered builds
 - **Hono** — lightweight API framework
 - **bini-router** — filesystem routing and API middleware
-- **bini-export** — static SPA export
 - **bini-server** — zero-dependency production server
 - **bini-native** — automatic Tauri integration
 - **bini-env** — environment configuration
 - **bini-overlay** — development tooling
+- **bini-ssg** — static site generation and route pre-rendering
 - **bini-deploy** — unified deployment for all platforms
 - **Oxlint** — fast Rust-based linting
 - **Oxfmt** — Prettier-compatible formatter
@@ -3194,7 +3310,7 @@ async function generateTsConfig(projectPath: string): Promise<void> {
         strict: true,
         paths: { "@/*": ["./src/*"] },
         forceConsistentCasingInFileNames: true,
-        types: ["vite/client"],
+        types: ["vite/client", "node"],
       },
       include: ["src"],
       exclude: ["node_modules", "dist"],
