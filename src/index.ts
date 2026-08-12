@@ -712,7 +712,6 @@ export default defineConfig(({ command, mode }) => {
   const isBuild = command === 'build';
   const port = parseInt(env['PORT'] ?? '3000', 10);
 
-  // Tauri detection via environment variable (set by cross-env in package.json)
   const isTauri = env['TAURI'] === 'true' || process.env.TAURI === 'true';
   const isCodespace = !!env['CODESPACE_NAME'];
 
@@ -2496,7 +2495,6 @@ export default function Home() {
 `;
   }
 
-  // None styling - using plain global CSS classes
   const interfaceBlockNone = useTypeScript
     ? `interface GradientTextProps {
   children: React.ReactNode;
@@ -2625,35 +2623,13 @@ async function generateAppFiles(
     ? `{ children }: { children: React.ReactNode }`
     : `{ children }`;
 
-  const mainContent = `import React from 'react';
-import { hydrateRoot } from 'react-dom/client';
-import App from './App';
-${isTauri ? `import { openUrl } from '@tauri-apps/plugin-opener';
-import { Hono } from 'hono';` : ''}
+  const tauriImports = isTauri ? `import { openUrl } from '@tauri-apps/plugin-opener';
+import { Hono } from 'hono';` : '';
 
-// ─── Production-Ready Client Only Wrapper ──────────────────────────────────
-// Only suppresses hydration warnings during development.
-// In production, it renders normally.
-function ClientOnly({ children }${useTypeScript ? ': { children: React.ReactNode }' : ''}) {
-  const [hasMounted, setHasMounted] = React.useState(false);
+  const tauriCode = isTauri ? `
+const isTauriEnv = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 
-  React.useEffect(() => {
-    setHasMounted(true);
-  }, []);
-
-  // In production, always render children (no hydration mismatch)
-  // In development, wait for mount to avoid hydration issues
-  if (import.meta.env.DEV && !hasMounted) {
-    return null;
-  }
-
-  return children;
-}
-
-${isTauri ? `
-const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
-
-if (isTauri) {
+if (isTauriEnv) {
   const apiApp = new Hono();
   const modules = import.meta.glob('./app/api/*.{ts,tsx,js,jsx}', { eager: true })${useTypeScript ? ` as Record<string, { default: Hono }>` : ''};
 
@@ -2673,7 +2649,7 @@ if (isTauri) {
   };
 }
 
-if (isTauri) {
+if (isTauriEnv) {
   document.addEventListener('click', async (e) => {
     const anchor = (e.target${useTypeScript ? ' as HTMLElement' : ''}).closest('a');
     if (!anchor) return;
@@ -2699,16 +2675,38 @@ if (isTauri) {
     }
   }, true);
 }
-` : ''}
+` : '';
 
-// ─── Production-Ready Hydration ─────────────────────────────────────────────
+  const mainContent = `import React from 'react';
+import { createRoot, hydrateRoot } from 'react-dom/client';
+import App from './App';
+${tauriImports}
+
+function ClientOnly({ children }: { children: React.ReactNode }) {
+  const [hasMounted, setHasMounted] = React.useState(false);
+
+  React.useEffect(() => {
+    setHasMounted(true);
+  }, []);
+
+  if (import.meta.env.DEV && !hasMounted) {
+    return null;
+  }
+
+  return children;
+}
+${tauriCode}
 if (typeof window !== 'undefined') {
   const rootElement = document.getElementById('root');
   if (rootElement) {
-    // In development, use ClientOnly wrapper to avoid hydration mismatches
-    // In production, hydrate normally
-    if (import.meta.env.DEV) {
-      hydrateRoot(rootElement,
+    const isShell =
+      (window as unknown as { __BINI_SHELL__?: boolean }).__BINI_SHELL__ === true;
+
+    if (isShell) {
+      createRoot(rootElement).render(<App />);
+    } else if (import.meta.env.DEV) {
+      hydrateRoot(
+        rootElement,
         <ClientOnly>
           <App />
         </ClientOnly>
@@ -2721,42 +2719,19 @@ if (typeof window !== 'undefined') {
 
 export { App };
 
-/**
- * SSG render — React Router v7
- * Uses renderToPipeableStream directly (no fallback needed for React 19)
- *
- * \`url\` is expected to be the ROUTE path (e.g. "/", "/about", "/blog/hello"),
- * the same shape a pre-render script naturally produces from the route
- * manifest. This function normalizes it to include the router's \`basename\`
- * (e.g. "/testing-static-servers/") before handing it to StaticRouter,
- * since StaticRouter — like BrowserRouter — expects \`location\` to be the
- * *full* path including the basename, and strips it internally to match
- * routes. Without this, every pre-rendered page silently renders blank
- * whenever \`base\` is set to a non-root value in vite.config.ts.
- */
-export async function render(url${useTypeScript ? ': string' : ''})${useTypeScript ? ': Promise<string>' : ''} {
+export async function render(url: string): Promise<string> {
   const ReactDOMServer = await import('react-dom/server');
   const { createElement } = await import('react');
   const { StaticRouter } = await import('react-router-dom');
   const { AppRoutes, basename: rawBasename } = await import('./App');
   const { Writable } = await import('stream');
 
-  // \`basename\` is exported from the generated App.tsx as a \`const\`, which
-  // TypeScript infers as a string LITERAL type (e.g. "/testing-static-servers/")
-  // rather than \`string\`. Widen it here so downstream comparisons/string ops
-  // don't trip TS2367 ("no overlap") — the value is a normal runtime string,
-  // the literal type is just an artifact of how it's generated.
-  const basename${useTypeScript ? ': string' : ''} = rawBasename;
+  const basename: string = rawBasename;
 
-  // Normalize basename: strip trailing slash for concatenation, and treat
-  // "/" the same as "" (no prefix needed).
   const normalizedBase = basename === '/' ? '' : basename.replace(/\\/$/, '');
 
-  // Ensure \`url\` starts with a leading slash before we reason about it.
   const routePath = url.startsWith('/') ? url : \`/\${url}\`;
 
-  // If the caller already included the basename (e.g. they passed
-  // "/testing-static-servers/about"), don't double-prefix it.
   const fullUrl = normalizedBase && !routePath.startsWith(normalizedBase)
     ? \`\${normalizedBase}\${routePath}\`
     : routePath;
