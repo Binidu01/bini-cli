@@ -2148,7 +2148,7 @@ function generatePackageJson(
       "@types/react": "latest",
       "@types/react-dom": "latest",
       "@types/node": "latest",
-      typescript: "^6.0.0",
+      typescript: "latest",
     });
   }
 
@@ -3283,12 +3283,18 @@ async function generateTsConfig(projectPath: string): Promise<void> {
         noEmit: true,
         jsx: "react-jsx",
         strict: true,
-        paths: { "@/*": ["./src/*"] },
+        paths: {
+          "@/*": ["./src/*"]
+        },
         forceConsistentCasingInFileNames: true,
-        types: ["vite/client", "node"],
+        typeRoots: [
+          "./node_modules/@types",
+          "./node_modules"
+        ],
+        types: ["vite/client", "node"]
       },
       include: ["src"],
-      exclude: ["node_modules", "dist"],
+      exclude: ["node_modules", "dist"]
     }, null, 2)
   );
 }
