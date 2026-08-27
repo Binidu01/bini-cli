@@ -11,7 +11,7 @@
       XXXXXXXXX  XXXXXXXXXXXYz             
       XXXXXXXXX  XXXXXXXXXXXXXXXXY         
       XXXXXXXXX      YXXXXXXXXXXXXX        
-      XXXXXXXXX          YXXXXXXXXX        
+      XXXXXXXXX          YXXXXXXXXXXX      
       XXXXXXXXX           XXXXXXXXXz       
       XXXXXXXXX  Xn     YXXXXXXXXXX        
       XXXXXXXXX  XXXXXXXXXXXXXXXXXX        
@@ -19,7 +19,7 @@
       XXXXXXXXX  XXXXXXXXXXXXX             
 ```
 
-**Build full-stack React apps for web, desktop, and mobile — from one codebase.**
+**Build full-stack React apps for web, desktop, and mobile from one codebase.**
 
 [![npm version](https://img.shields.io/npm/v/create-bini-app?color=00CFFF&label=npm&style=for-the-badge)](https://www.npmjs.com/package/create-bini-app)
 [![total downloads](https://img.shields.io/npm/dt/create-bini-app?color=764ba2&style=for-the-badge&label=downloads)](https://www.npmjs.com/package/create-bini-app)
@@ -28,7 +28,7 @@
 
 [![vite](https://img.shields.io/badge/vite-^8.0.8-646CFF?style=for-the-badge&logo=vite&logoColor=white)](https://vitejs.dev)
 [![react](https://img.shields.io/badge/react-^19.2.5-61DAFB?style=for-the-badge&logo=react&logoColor=black)](https://react.dev)
-[![typescript](https://img.shields.io/badge/typescript-^6.0.2-3178C6?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org)
+[![typescript](https://img.shields.io/badge/typescript-^7.0.2-3178C6?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org)
 [![hono](https://img.shields.io/badge/hono-^4.12.12-E36002?style=for-the-badge&logo=hono&logoColor=white)](https://hono.dev)
 [![tailwindcss](https://img.shields.io/badge/tailwindcss-^4.2.2-06B6D4?style=for-the-badge&logo=tailwindcss&logoColor=white)](https://tailwindcss.com)
 [![react-router](https://img.shields.io/badge/react--router-^7.14.0-CA4245?style=for-the-badge&logo=reactrouter&logoColor=white)](https://reactrouter.com)
@@ -535,8 +535,6 @@ npx bini-deploy --platform web --hosting vercel --repo https://github.com/you/ap
 | `deno` | `server/index.ts` |
 | `node` | *(none — `bini-server` reads `src/app/api/` directly)* |
 
-> Vercel and Deno Deploy read their entry file **before** running your build — `bini-deploy` commits the generated file for you, so it's there before CI runs.
-
 **Netlify example**, generated automatically by `bini-deploy` when you choose it:
 
 ```toml
@@ -577,10 +575,9 @@ npx bini-deploy --platform web --hosting vercel --repo https://github.com/you/ap
 | [`bini-env`](https://npmjs.com/package/bini-env) | Environment variable loading |
 | [`hono`](https://hono.dev) | API route runtime |
 | [`vite`](https://vitejs.dev) | Dev server + Rolldown bundler |
+| [`typescript`](https://www.typescriptlang.org) | Type checking |
 | [`react`](https://react.dev) / [`react-router-dom`](https://reactrouter.com) | UI + routing |
 | [`oxlint`](https://oxc.rs) / [`oxfmt`](https://oxc.rs) | Linting + formatting |
-
-Most packages install at `latest`; `typescript` is pinned to `^6.0.0` (TypeScript 7 shipped without a public compiler API, which breaks several build tools in this stack).
 
 ---
 
