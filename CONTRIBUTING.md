@@ -2,10 +2,10 @@
 
 <p>
   <a href="https://github.com/Binidu01/bini-cli/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-00cfff?labelColor=040a16" alt="MIT license" /></a>
-  <a href="https://github.com/Binidu01/bini-cli/issues"><img src="https://img.shields.io/github/issues/Binidu01/create-bini-app?color=0077ff&labelColor=040a16" alt="Open issues" /></a>
+  <a href="https://github.com/Binidu01/bini-cli/issues"><img src="https://img.shields.io/github/issues/Binidu01/bini-cli?color=0077ff&labelColor=040a16" alt="Open issues" /></a>
   <a href="https://github.com/Binidu01/bini-cli/pulls"><img src="https://img.shields.io/badge/PRs-welcome-34d399?labelColor=040a16" alt="PRs welcome" /></a>
-  <a href="https://github.com/Binidu01/bini-cli/discussions"><img src="https://img.shields.io/github/discussions/Binidu01/create-bini-app?color=00cfff&labelColor=040a16" alt="Discussions" /></a>
-  <a href="https://github.com/Binidu01/bini-cli/graphs/contributors"><img src="https://img.shields.io/github/contributors/Binidu01/create-bini-app?color=0077ff&labelColor=040a16" alt="Contributors" /></a>
+  <a href="https://github.com/Binidu01/bini-cli/discussions"><img src="https://img.shields.io/github/discussions/Binidu01/bini-cli?color=00cfff&labelColor=040a16" alt="Discussions" /></a>
+  <a href="https://github.com/Binidu01/bini-cli/graphs/contributors"><img src="https://img.shields.io/github/contributors/Binidu01/bini-cli?color=0077ff&labelColor=040a16" alt="Contributors" /></a>
 </p>
 
 Thanks for taking the time to contribute! Bini.js is a small ecosystem of focused packages, and contributions of any size — a typo fix, a bug report, a new feature — are welcome.
