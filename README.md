@@ -88,6 +88,8 @@ Most React starters give you a bundler and call it a day. Bini.js gives you a fr
 - Animated dev overlay with Shiki-highlighted error panels and clickable stack frames
 - TypeScript or JavaScript, Tailwind CSS v4, CSS Modules, or no styling - your choice at scaffold time
 - Oxlint + Oxfmt - 50-100x faster than ESLint and Prettier, pre-configured out of the box
+- GitHub Codespaces support in the generated `vite.config` (binds to `0.0.0.0`, uses polling, and routes HMR over port 443)
+- `@/` import alias pointing at `src/`
 - Built-in maintenance commands: `doctor`, `clean`, and `upgrade`
 
 **Deployment**
@@ -101,7 +103,7 @@ Most React starters give you a bundler and call it a day. Bini.js gives you a fr
 
 | | |
 |---|---|
-| Node.js | `>= 20.19.0` (required by Vite 8) |
+| Node.js | `>= 20.19.0` (required by Vite 8; the CLI checks this on startup) |
 
 ---
 
@@ -115,35 +117,53 @@ npx create-bini-app@latest my-app --typescript --tailwind --platform web,desktop
 
 | Command | Description |
 |---|---|
-| `create-bini-app [name]` | Create a new project |
+| `create-bini-app [name]` | Create a new project. Run with no arguments **inside** an existing Bini project, it offers to add a platform instead |
 | `create-bini-app add <targets>` | Add desktop and/or mobile targets to an existing project |
 | `create-bini-app remove <targets>` | Remove desktop and/or mobile targets from the project |
 | `create-bini-app sign [targets]` | Set up or redo code signing |
+| `create-bini-app --app-name [name]` | Inside a project: change the native app name. Prompts when no value is given |
+| `create-bini-app --org [domain]` | Inside a project: change the bundle ID prefix. Prompts when no value is given |
 | `create-bini-app doctor` | Check your machine for Tauri (runs `tauri info`) |
-| `create-bini-app clean [--all]` | Delete build output and caches |
+| `create-bini-app clean` | Delete build output (Vite and Tauri), keeps `node_modules` |
 | `create-bini-app upgrade` | Update dependencies to the latest versions |
 
-Project names use lowercase letters, numbers, and hyphens only (max 50 characters). The command names above are reserved.
+`add`, `remove`, `sign`, `doctor`, `clean`, and `upgrade` must be run inside a Bini.js project. The CLI looks for a `package.json` with `bini-router` in the current folder or up to five parent folders. `--platform <targets>` is accepted as an alias for listing targets after `add`, `remove`, and `sign`.
+
+Project names may contain lowercase letters, numbers, hyphens, and dots (max 50 characters). They cannot start with `.` or `-`, cannot be `npm` or `node`, and cannot be a Windows reserved name such as `CON`, `NUL`, or `COM1`. The command names above are reserved.
 
 | Flag | Description |
 |---|---|
-| `--typescript` / `--javascript` | Language (create) |
-| `--tailwind` / `--css-modules` / `--none` | Styling (create) |
+| `--typescript` | Use TypeScript (create) |
+| `--javascript` / `--no-typescript` | Use JavaScript (create) |
+| `--tailwind` / `--css-modules` / `--none` | Styling (create). Only one may be used |
 | `--platform <targets>` | `web` (default) · `desktop` · `android` · `ios`. Comma-separated to pick several, e.g. `web,desktop,android`. `desktop` covers Windows, macOS, and Linux |
-| `--app-name <name>` | Initial site title (default: the project name in title case). It lives in `src/app/layout.tsx`, and the Tauri app name and window title are read from there |
-| `--org <domain>` | Bundle ID prefix as a reverse domain, e.g. `com.acme` (default `com.bini`). The identifier becomes `<org>.<project>` |
-| `--sign` / `--nosign` | Auto-confirm (you are still prompted for details) or skip code-signing setup. With `--sign` on an already configured target, only the signing step runs |
-| `--npm` / `--pnpm` / `--yarn` / `--bun` | Force a package manager instead of auto-detecting |
+| `--app-name [name]` | App name (default: the project name in title case). It becomes the initial site `title` in `src/app/layout.tsx` and, for native targets, the Tauri `productName` and window title. **With no value, you are prompted for it.** Inside an existing project it renames the native app (see [Changing the app name or bundle ID](#changing-the-app-name-or-bundle-id)) |
+| `--org [domain]` | Bundle ID prefix as a reverse domain, e.g. `com.acme` (default `com.bini`). Lowercase letters and numbers in dot-separated parts. **With no value, you are prompted for it.** Inside an existing project it changes the bundle identifier |
+| `--sign` / `--nosign` | Auto-confirm (you are still prompted for details) or skip code-signing setup. With `--sign` on an already configured target, only the signing step runs. The two cannot be combined, and `--nosign` is rejected by the `sign` command |
+| `--npm` / `--pnpm` / `--yarn` / `--bun` | Force a package manager instead of auto-detecting. Only one may be used |
 | `--no-install` | Skip installing dependencies (they install automatically by default) |
 | `--no-git` | Skip `git init` (create) |
 | `--force` | Overwrite an existing directory (create) |
-| `--yes`, `-y` | Skip the confirmation prompt (remove) |
-| `--all` | Also clear the Rust build cache `src-tauri/target` (clean) |
+| `--yes`, `-y` | Skip the confirmation prompt (remove, and bundle ID changes) |
 | `--version`, `-v` / `--help`, `-h` | Print version / show help |
 
-The package manager is picked in this order: your flag, the project's lockfile, the tool that launched the CLI (`npx`, `pnpm dlx`, `bunx`), then whichever of bun, pnpm, yarn, npm is installed.
+`--typescript`/`--javascript`/`--tailwind`/`--css-modules`/`--none` are ignored (with a warning) in `add` mode, since an existing project keeps its settings.
 
-In non-interactive environments (CI, no TTY), prompts are skipped and defaults apply: TypeScript, Tailwind, `web` platform, and no code signing. Flags always override the defaults.
+### Interactive prompts
+
+When run in a terminal, and when the matching flag is not given, create mode asks for: the project name, TypeScript or JavaScript, the styling solution, the platforms to include, and (only when a desktop or mobile target is picked) the organization used for the bundle identifier. iOS is shown as disabled on Windows and Linux.
+
+`--app-name` and `--org` can also be given **without a value** to force their prompt. For example `create-bini-app my-app --platform android --app-name` asks for the app name while creating the project, and `add android --org` asks for the organization while adding. A bare flag is one that comes last, or is followed by another flag or a command name (`--app-name add android` works; `--app-name my-app` treats `my-app` as the value). Without a terminal, a bare flag falls back to the default with a warning.
+
+In non-interactive environments (CI, no TTY), prompts are skipped and defaults apply: TypeScript, Tailwind, `web` platform, `com.bini` as the organization, and no code signing. Flags always override the defaults. A project name is required in non-interactive mode.
+
+### Package manager detection
+
+The package manager is picked in this order: your flag, the project's lockfile (`bun.lock`, `bun.lockb`, `yarn.lock`, `pnpm-lock.yaml`, `package-lock.json`), the tool that launched the CLI (`npx`, `pnpm dlx`, `bunx`), then whichever of bun, yarn, pnpm, npm is installed, in that order.
+
+### Exit codes
+
+Commands exit with `0` on success and `1` on a fatal error. Exit code `2` means the command finished but something needs your attention: a manual follow-up (for example a toolchain that must be fixed before `tauri android init` can run), signing that is still missing, or a failed update step. Cancelling with Ctrl+C exits with `130`.
 
 ### Adding a platform later
 
@@ -155,11 +175,15 @@ npx create-bini-app@latest add desktop android     # several at once (comma-sepa
 npx create-bini-app@latest add android --sign      # set up code signing right away
 ```
 
-The first native target adds `src-tauri/`, the native scripts, and the `@tauri-apps/api`, `@tauri-apps/cli`, `cross-env`, and `bini-native` packages. Existing scripts and versions in your `package.json` are never overwritten. All desktop operating systems share one `src-tauri/`, so adding `desktop` again only offers code signing. Re-running a command is safe: anything already configured is skipped.
+The first native target adds `src-tauri/`, the native scripts, and the `@tauri-apps/api`, `@tauri-apps/cli`, `cross-env`, and `bini-native` packages. Existing scripts and versions in your `package.json` are never overwritten. Dependencies are installed afterwards unless you pass `--no-install`. All desktop operating systems share one `src-tauri/`, so adding `desktop` again only offers code signing. Re-running a command is safe: anything already configured is skipped.
 
-Run `add` with no targets inside a project to pick from a list. iOS is only offered on macOS; on Windows and Linux, `add ios` prints how to build it with `npm run deploy` instead.
+Run `add` with no targets inside a project to pick from a list. Already added platforms are shown as checked and disabled. iOS is only offered on macOS; on Windows and Linux, `add ios` prints how to build it with `npm run deploy` instead. The app name comes from `--app-name` (or its prompt), or the project name in title case if you don't pass it. `src/app/layout.tsx` is not read. If a native target already exists, `--app-name` and `--org` are not applied by `add`; use the commands in [Changing the app name or bundle ID](#changing-the-app-name-or-bundle-id) instead.
+
+When it finishes, `add` prints a summary of what was added or skipped, the signing status per target, any manual follow-ups, and the commands that apply.
 
 Commit before you run it so you can review the diff with `git diff`; the CLI warns if your working tree is dirty.
+
+Your project's `README.md` is written once, when the project is created, and it documents every platform. `add` and `remove` never edit it.
 
 ### Removing a platform
 
@@ -168,15 +192,30 @@ npx create-bini-app@latest remove android
 npx create-bini-app@latest remove desktop android ios --yes   # remove everything native
 ```
 
-`remove` lists what it will delete and asks for confirmation (skip with `--yes`). Android and iOS delete their generated folders (`src-tauri/gen/android`, `src-tauri/gen/apple`). `desktop` shares `src-tauri/` with the mobile targets, so it can only be removed together with all of them, and then all of `src-tauri/` is deleted, including any Rust code you added. The scripts this CLI generated are removed only if you haven't changed them. `keystore.jks` and `.env.signing` are left in place. `web` cannot be removed.
+`remove` lists what it will delete and asks for confirmation (skip with `--yes`; without a terminal, `--yes` is required). Android and iOS delete their generated folders (`src-tauri/gen/android`, `src-tauri/gen/apple`), and the scripts for that platform are removed from `package.json`. `desktop` shares `src-tauri/` with the mobile targets, so it can only be removed together with all of them. Removing everything deletes all of `src-tauri/` (including any Rust code you added), plus the native scripts and the Tauri packages (`@tauri-apps/api`, `@tauri-apps/cli`, `cross-env`, `bini-native`) from `package.json`. Scripts are removed only if you haven't changed them. `keystore.jks` and `.env.signing` are left in place. `web` cannot be removed.
+
+### Changing the app name or bundle ID
+
+The native app name and bundle identifier are set once, when Tauri is first set up, and live in `src-tauri/tauri.conf.json`. The `title` in `src/app/layout.tsx` is web-only and never changes them. To change them later, run from inside the project (with no subcommand and no `--platform`):
+
+```bash
+npx create-bini-app@latest --app-name                       # prompt for a new app name
+npx create-bini-app@latest --org                            # prompt for a new bundle ID prefix
+npx create-bini-app@latest --app-name "My App" --org com.acme   # apply directly, no prompts
+```
+
+- **`--app-name`** updates `productName` and the first window's `title`. For Android it also updates `app_name` in `strings.xml` when it can be found. The prompt's default is the current name.
+- **`--org`** rebuilds the identifier as `<org>.<project>` (project name reduced to lowercase letters and numbers, for example `com.acme.myapp`). The prompt's default is the org parsed from the current identifier. The CLI warns that stores treat a new identifier as a different app and asks for confirmation (skip with `--yes`).
+- The generated `src-tauri/gen/android` and `src-tauri/gen/apple` projects keep their old values (the iOS display name, and the bundle identifier on both). The CLI lists these as follow-ups; remove and re-add the platform to regenerate it (commit first), or edit it by hand.
+- Prompts need an interactive terminal; in CI pass a value instead. The command does nothing if the project has no desktop or mobile target, and exits with code `2` when follow-ups remain.
 
 ### Maintenance commands
 
-These also exist as scripts in every project (`npm run clean`, `npm run upgrade`), and `sign` and `doctor` as well once a native target is added. With npm, pass flags after `--`, for example `npm run clean -- --all`.
+These also exist as scripts in every project (`npm run clean`, `npm run upgrade`), and `sign` and `doctor` as well once a native target is added.
 
-- **`clean`** deletes `dist/`, `dist-ssr/`, the Vite cache, and the generated Android and iOS build folders. The Rust build cache (`src-tauri/target`, often several GB) is kept unless you pass `--all`, which runs `cargo clean`; the next native build is then slow.
-- **`upgrade`** moves every registry dependency in `package.json` to its latest version with your package manager (`file:`, `workspace:`, git, and URL versions are left alone), then runs `cargo update` if `src-tauri/` exists. It does not ask for confirmation, so commit first.
-- **`doctor`** runs `tauri info` to check Rust, the platform toolchains, and versions.
+- **`clean`** deletes `dist/`, `dist-ssr/`, and the generated Android and iOS build folders (`src-tauri/gen/android/app/build`, `src-tauri/gen/android/build`, `src-tauri/gen/android/.gradle`, `src-tauri/gen/apple/build`, `src-tauri/gen/apple/Externals`). If `src-tauri/target` exists, it also clears the Rust build cache with `cargo clean` (or deletes the folder if `cargo` is unavailable), so the next native build is slow. `node_modules` is kept.
+- **`upgrade`** moves every registry dependency in `package.json` to its latest version with your package manager (`file:`, `link:`, `workspace:`, `portal:`, `patch:`, git, URL, and `npm:` specs are left alone), then runs `cargo update` if `src-tauri/` exists. It does not ask for confirmation, so commit first; the CLI warns if your working tree is dirty.
+- **`doctor`** runs `tauri info` to check Rust, the platform toolchains, and versions. In a project without a native target it just tells you how to add one.
 
 ---
 
@@ -209,11 +248,12 @@ my-app/
 ├── .oxlintrc.json
 ├── .oxfmtrc.json
 ├── .gitignore
+├── README.md                       ← Project README covering every platform
 ├── vite.config.ts
 └── package.json
 ```
 
-`not-found.tsx`, `loading.tsx`, and `error.tsx` aren't scaffolded by default, but bini-router picks them up anywhere in `src/app/` if you add them - see [Routing](#routing). JavaScript projects use `.jsx`/`.js` and have no `tsconfig.json`. With CSS Modules, the starter page also gets `src/app/page.module.css`.
+`not-found.tsx`, `loading.tsx`, and `error.tsx` aren't scaffolded by default, but bini-router picks them up anywhere in `src/app/` if you add them - see [Routing](#routing). JavaScript projects use `.jsx`/`.js` and have no `tsconfig.json`. With CSS Modules, the starter page also gets `src/app/page.module.css`. With no styling (`--none`), the starter page styles live in `src/app/globals.css`. If an image in `public/` is missing from the CLI package, it is skipped with a warning.
 
 ---
 
@@ -221,16 +261,16 @@ my-app/
 
 | Command | Description |
 |---|---|
-| `dev` | Start the Vite dev server with HMR |
+| `dev` | Start the Vite dev server with HMR and open the browser (`vite --host --open`) |
 | `build` | Type-check (TypeScript), build the client and SSR bundles, then pre-render every route to static HTML |
 | `start` | Serve the production build via `bini-server` |
 | `preview` | Preview the production build |
-| `type-check` | `tsc --noEmit` |
-| `lint` / `format` / `check` | Oxlint / Oxfmt / both + type-check |
+| `type-check` | `tsc --noEmit` (JavaScript projects print a notice instead) |
+| `lint` / `format` / `check` | Oxlint / Oxfmt / both + type-check (`check` skips `tsc` in JavaScript projects) |
 | `clean` | Delete build output and caches (see [Maintenance commands](#maintenance-commands)) |
 | `upgrade` | Update every dependency to its latest version |
 | `deploy` | Run `bini-deploy` - generate hosting config (web) and push to GitHub |
-| `tauri:dev` / `tauri:build` *(desktop)* | Run or build the desktop app |
+| `tauri:dev` / `tauri:build` / `tauri:icon` *(desktop)* | Run the desktop app, build it, or regenerate all icons from `public/logo.png` |
 | `android` / `android:build` *(Android)* | Run or build the Android app |
 | `ios` / `ios:build` *(iOS, macOS only)* | Run or build the iOS app |
 | `sign` / `doctor` *(any native target)* | Set up code signing / check your machine for Tauri |
@@ -282,7 +322,7 @@ export default function DashboardLayout() {
 }
 ```
 
-Export `metadata` from any layout to control `<title>`, Open Graph, Twitter cards, and icons. Root metadata is injected into `index.html` at build time; nested metadata updates `document.title` at runtime. It never ships to the client bundle. The scaffolded root layout sets `title` and `applicationName` to your app name, and the desktop and mobile app name is read from that title.
+Export `metadata` from any layout to control `<title>`, Open Graph, Twitter cards, and icons. Root metadata is injected into `index.html` at build time; nested metadata updates `document.title` at runtime. It never ships to the client bundle. The scaffolded root layout sets `title` (plus the Open Graph and Twitter site names) to your app name. This is web-only: the desktop and mobile app name lives in `src-tauri/tauri.conf.json`. The scaffolded layout also adds a JSON-LD `WebSite` script.
 
 ```tsx
 export const metadata = {
@@ -319,7 +359,7 @@ export default function DashboardError({ error, reset }: { error: Error; reset: 
 
 ## API Routes
 
-Files in `src/app/api/` become endpoints. Export a plain function or a Hono app - both work identically in dev and in production. The scaffold includes `src/app/api/hello.ts` as a starting point.
+Files in `src/app/api/` become endpoints. Export a plain function or a Hono app - both work identically in dev and in production. The scaffold includes `src/app/api/hello.ts` (a Hono app that answers any method at `/api/hello` with a message, timestamp, and the request method) as a starting point.
 
 ```ts
 // src/app/api/hello.ts - plain handler
@@ -359,6 +399,8 @@ import.meta.env.BINI_PUBLIC_API_URL             // client code
 const user = requireEnv('SMTP_USER');           // API routes - throws if missing, auto-imported
 ```
 
+The generated `vite.config` also reads `PORT` (default `3000`) for the dev and preview server port. Tauri's `devUrl` is fixed to `http://localhost:3000`, and native scripts fail instead of switching to another port, so leave `PORT` unset for desktop and mobile development.
+
 > ⚠️ Never put secrets in `BINI_*` or `VITE_*` variables - both prefixes are exposed to the browser bundle.
 
 ---
@@ -386,6 +428,8 @@ tsc --noEmit && vite build && vite build --ssr src/main.tsx
 
 The first `vite build` produces the client bundle, and the second builds the SSR bundle (`src/main.jsx` for JavaScript projects, and no `tsc` step). The `bini-ssg` plugin then pre-renders every route, **static and dynamic alike**, using the `render()` function exported from `src/main.tsx`. That function calls React 19's `renderToPipeableStream` directly against `AppRoutes` (from the generated `src/App.tsx`) with a `StaticRouter`, so the output is real server-rendered markup, not a client-only shell. The client then hydrates it with `hydrateRoot` on load - no extra fallback wiring or client-side redirect scripts required. There's no separate export command.
 
+Build output goes to `dist/`, organized into `js/`, `css/`, `data/`, `assets/images/`, and `assets/fonts/`.
+
 Desktop and mobile builds run the same script first (it is Tauri's `beforeBuildCommand`), so the packaged app ships the same pre-rendered HTML as the web.
 
 ---
@@ -400,7 +444,9 @@ npx create-bini-app@latest my-app --platform web,android --app-name "My App" --n
 npx create-bini-app@latest add desktop            # later, inside the project
 ```
 
-Every Tauri script sets `TAURI=true`. That makes the dev server bind to `TAURI_DEV_HOST` (or `0.0.0.0`) on port 3000, matching Tauri's `devUrl`, and it fails instead of switching to another port. `bini-native` is loaded by `vite.config` only when `TAURI=true`; it serves `/api/*` in-process, opens external links in the system browser, and wires Cargo, capabilities, and manifests for the web APIs you use. Run `npm run doctor` to check your machine, and see the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/).
+When you add a native target, the CLI runs `tauri init` (frontend dist `../dist`, dev URL `http://localhost:3000`, before-dev command `dev:native`, before-build command `build`), then sets the product name, window title, and bundle identifier in `src-tauri/tauri.conf.json`. The identifier is `<org>.<project>` with the project name reduced to lowercase letters and numbers, for example `my-app` with `--org com.acme` becomes `com.acme.myapp` (a name starting with a digit gets an `app` prefix). Replace it with your own reverse-DNS id before publishing to an app store; `create-bini-app --org` does this for you. Icons are then generated from `public/logo.png`; if that file is missing, Tauri's default icons are kept.
+
+Every Tauri script sets `TAURI=true`. That makes the dev server bind to `TAURI_DEV_HOST` (or `0.0.0.0`) on port 3000, matching Tauri's `devUrl`, and it fails instead of switching to another port. `bini-native` is loaded by `vite.config` only when `TAURI=true` (and not for the SSR build); it serves `/api/*` in-process, opens external links in the system browser, and wires Cargo, capabilities, and manifests for the web APIs you use. Run `npm run doctor` to check your machine, and see the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/).
 
 ### Web
 
@@ -417,6 +463,7 @@ Every Tauri script sets `TAURI=true`. That makes the dev server bind to `TAURI_D
 | `npm run dev` | Dev server with HMR |
 | `npm start` | Serve the production build |
 | `npm run build` | Type-check, build, and pre-render every route (static & dynamic) via SSG |
+| `npm run preview` | Preview the production build |
 | `npm run deploy` | Generate hosting config for your chosen platform and push to GitHub |
 
 **Requirements** - Node.js `>= 20.19.0`. Nothing else.
@@ -437,7 +484,7 @@ Every Tauri script sets `TAURI=true`. That makes the dev server bind to `TAURI_D
 |---|---|
 | `npm run tauri:dev` | Run in development mode |
 | `npm run tauri:build` | Build a distributable for the OS you are on |
-| `npm run tauri -- icon public/logo.png` | Regenerate icons from `public/logo.png` |
+| `npm run tauri:icon` | Regenerate icons from `public/logo.png` |
 | `npm run deploy` | Push the project to GitHub via `bini-deploy` |
 
 `deploy` does not build, sign, or package the app - run `tauri:build` first (and your notarization step on macOS), then `deploy` to push the source to GitHub.
@@ -495,7 +542,7 @@ sudo pacman -S --needed webkit2gtk-4.1 base-devel curl wget file openssl \
 | `npm run android:build` | Build a release APK/AAB |
 | `npm run deploy` | Push the project to GitHub via `bini-deploy` |
 
-`deploy` does not build a signed APK or submit to the Play Store - run `android:build` first, then `deploy` to push to GitHub. Store submission is manual. Commit the generated `src-tauri/gen/android` folder; only `keystore.properties`, `.gradle/`, and build output are git-ignored.
+`deploy` does not build a signed APK or submit to the Play Store - run `android:build` first, then `deploy` to push to GitHub. Store submission is manual. Commit the generated `src-tauri/gen/android` folder; only `keystore.properties`, `local.properties`, `.gradle/`, and build output are git-ignored.
 
 **Requirements**
 - [Rust](https://www.rust-lang.org/tools/install) (stable toolchain via `rustup`) - Tauri compiles a native Rust binary under the hood
@@ -544,20 +591,20 @@ npx create-bini-app@latest sign              # everything that applies on this m
 npx create-bini-app@latest sign android      # one target
 ```
 
-`sign` only prompts for what applies here: desktop signs for the OS you run it on, Android is included once it has been added, and iOS appears only on macOS. It needs an interactive terminal. `--nosign` skips signing at scaffold time with no prompts.
+`sign` only prompts for what applies here: desktop signs for the OS you run it on, Android is included once it has been added, and iOS appears only on macOS. It needs an interactive terminal and cannot be combined with `--nosign`. At scaffold time, signing is skipped with no prompts when you pass `--nosign` or when the terminal is non-interactive. Targets that are not yet signed make the command exit with code `2`.
 
 | Target | What is set up | Where it lives |
 |---|---|---|
-| Windows | A free self-signed certificate (created with PowerShell) or the thumbprint of one you already have | `certificateThumbprint` in `src-tauri/tauri.conf.json` (no secret to protect) |
-| macOS | Ad-hoc signing for local testing, or an Apple Developer signing identity with optional notarization (API key or Apple ID) | `signingIdentity` in `src-tauri/tauri.conf.json`; notarization credentials in `.env.signing` |
-| Linux | A GPG key for the AppImage, generated for you or one you already have | `.env.signing` |
-| Android | A `keystore.jks` in the project root and a `keystore.properties` file | `src-tauri/gen/android/keystore.properties` |
-| iOS | Automatic Xcode signing (nothing to configure), or a manual certificate + provisioning profile for CI | `.env.signing` |
+| Windows | A free self-signed certificate (created with PowerShell, valid 3 years) or the thumbprint of one you already have. SHA-256 digest and a DigiCert timestamp URL are configured too | `certificateThumbprint`, `digestAlgorithm`, and `timestampUrl` in `src-tauri/tauri.conf.json` (no secret to protect) |
+| macOS | Ad-hoc signing (`-`) for local testing, or an Apple Developer signing identity with optional notarization (App Store Connect API key, or Apple ID + app-specific password) | `signingIdentity` in `src-tauri/tauri.conf.json`; notarization credentials in `.env.signing` |
+| Linux | A GPG key (RSA 4096, valid 3 years) for the AppImage, generated for you or one you already have. Requires `gpg` or `gpg2` | `SIGN`, `SIGN_KEY`, and `APPIMAGETOOL_SIGN_PASSPHRASE` in `.env.signing` |
+| Android | A `keystore.jks` in the project root (generated with `keytool`, which ships with the JDK) and a `keystore.properties` file. The Gradle `signingConfigs` block is patched into `app/build.gradle.kts` for you | `src-tauri/gen/android/keystore.properties` |
+| iOS | Automatic Xcode signing (nothing to configure), or a manual certificate (`.p12`) + provisioning profile (`.mobileprovision`) for CI, stored base64-encoded | `.env.signing` |
 
 Secrets live in git-ignored files:
 
-- `.env.signing` - load it before building with `set -a; source .env.signing; set +a`. Each platform only updates its own keys, so platforms can be set up at different times.
-- `keystore.jks` and `src-tauri/gen/android/keystore.properties` - the Gradle signing config is committed and only activates when `keystore.properties` exists, so fresh clones and debug builds keep working. Back up `keystore.jks` and its password: every Play Store update must be signed with the same key.
+- `.env.signing` - load it before building with `set -a; source .env.signing; set +a`. Each platform only updates its own keys, so platforms can be set up at different times. The file is created with owner-only permissions.
+- `keystore.jks` and `src-tauri/gen/android/keystore.properties` - the CLI adds `keystore.properties`, `*.jks`, and `*.keystore` to `.gitignore` when you set up Android signing. The Gradle signing config is committed and only activates when `keystore.properties` exists, so fresh clones and debug builds keep working. Back up `keystore.jks` and its password: every Play Store update must be signed with the same key.
 
 Desktop signing covers only the OS you ran `sign` on. Sign the other systems in CI on their own runners. A self-signed Windows certificate still shows a SmartScreen warning to other people; use a certificate from a trusted authority for public releases.
 

@@ -5,28 +5,21 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
-/* ================================================================== */
-/* Types                                                                */
-/* ================================================================== */
-
 type StylingOption = "Tailwind" | "CSS Modules" | "None";
 type PackageManager = "bun" | "pnpm" | "yarn" | "npm";
 type FileExtension = "tsx" | "jsx";
 type ScriptExtension = "ts" | "js";
-/** "desktop" is one Tauri project that builds for Windows, macOS and Linux. */
 type TauriPlatform = "desktop" | "android" | "ios";
 type TargetPlatform = "web" | TauriPlatform;
-/** Desktop signing is per OS, so signing is keyed by OS rather than by platform. */
 type SigningTarget = "windows" | "linux" | "macos" | "android" | "ios";
 type UserOS = "windows" | "macos" | "linux";
 type Outcome = "added" | "skipped" | "partial" | "failed";
 type InitResult = "ok" | "manual" | "failed";
 type MobileResult = "ok" | "skipped" | "manual" | "failed";
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type ActionKind = "init" | "lite" | "signOnly" | "skip";
 type AnyJson = Record<string, any>;
 
 interface CliFlags {
-  /** Create: overwrite the directory. */
   force: boolean;
   typescript: boolean | undefined;
   tailwind: boolean;
@@ -35,34 +28,23 @@ interface CliFlags {
   noInstall: boolean;
   platforms: TargetPlatform[];
   appName: string | undefined;
-  /** Reverse-domain prefix for the bundle identifier, e.g. com.acme. */
   org: string | undefined;
+  promptAppName: boolean;
+  promptOrg: boolean;
   sign: boolean | undefined;
-  /** --yes: skip the confirmation prompt (remove). */
   yes: boolean;
-  /** --no-git: skip `git init` on create. */
   noGit: boolean;
-  /** --all: clean also clears the Rust build cache (src-tauri/target). */
-  all: boolean;
   packageManager: PackageManager | undefined;
 }
 
 interface ProjectAnswers {
   typescript: boolean;
   styling: StylingOption;
-  /** Web was selected (or nothing else is left to build). */
   web: boolean;
-  /** Desktop / mobile targets picked for a new project. */
   platforms: TauriPlatform[];
   appName: string;
-  /** Bundle identifier prefix (only used when native platforms are selected). */
   org: string;
-  /** iOS was requested on a machine that is not a Mac, so it was left out. */
   iosSkipped: boolean;
-}
-
-interface PackageJsonScripts {
-  [key: string]: string | undefined;
 }
 
 interface NativePackagePatch {
@@ -74,8 +56,6 @@ interface NativePackagePatch {
 interface DetectedProject {
   root: string;
   name: string;
-  typescript: boolean;
-  mainExt: FileExtension;
   pm: PackageManager;
   hasNative: boolean;
   nativeReady: boolean;
@@ -98,27 +78,24 @@ interface InitTauriOptions {
   pm: PackageManager;
   projectName: string;
   appName: string;
-  /** Bundle identifier prefix, e.g. com.acme (identifier becomes com.acme.<project>). */
   org: string;
-  /** true when @tauri-apps/cli is in the project's node_modules */
   localCli: boolean;
 }
 
-/* ================================================================== */
-/* Constants + logging                                                  */
-/* ================================================================== */
+interface CommandGroup {
+  title: string;
+  commands: [script: string, description: string][];
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ASSETS_DIR = path.join(__dirname, "..", "assets");
 
-/** Read and parse a JSON file synchronously (function declaration: usable before its position in the file). */
 function readJsonSync<T = AnyJson>(file: string): T {
   return JSON.parse(fs.readFileSync(file, "utf-8")) as T;
 }
 
 const BINIJS_VERSION = readJsonSync<{ version: string }>(path.join(__dirname, "..", "package.json")).version;
 
-/** Colours follow the usual conventions: off with NO_COLOR or when piped, forced with FORCE_COLOR. */
 const colorEnabled =
   !process.env.NO_COLOR &&
   ((process.env.FORCE_COLOR !== undefined && process.env.FORCE_COLOR !== "0") || Boolean(process.stdout.isTTY));
@@ -162,7 +139,6 @@ const REQUIRED_NODE = "20.19.0";
 const MAX_PROJECT_WALK = 5;
 const WINDOWS_RESERVED_NAMES = /^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/i;
 const INVALID_NAME_PATTERN = /^(\.|\.\.|-|npm$|node$)|[^a-z0-9\-.]/;
-/** Subcommand names cannot be used as a project name. */
 const SUBCOMMANDS = new Set(["add", "sign", "remove", "doctor", "clean", "upgrade"]);
 const DEFAULT_ORG = "com.bini";
 const TAURI_PREREQUISITES_URL = "https://v2.tauri.app/start/prerequisites/";
@@ -188,11 +164,6 @@ const log = {
   plain: (m: string) => console.log(m),
 };
 
-/* ================================================================== */
-/* Process lifecycle                                                    */
-/* ================================================================== */
-
-/** Manual follow-ups collected during a run; a non-empty list means exit code 2 in add mode. */
 const followUps: string[] = [];
 
 function exit(code = 1): never {
@@ -207,13 +178,8 @@ function isInteractive(): boolean {
   return Boolean(process.stdin.isTTY && process.stdout.isTTY);
 }
 
-/** Ctrl-C inside an inquirer prompt rejects with ExitPromptError: treat it as a clean cancel. */
-function isPromptCancel(err: unknown): boolean {
-  return err instanceof Error && err.name === "ExitPromptError";
-}
-
 function fatal(err: unknown, label: string): never {
-  if (isPromptCancel(err)) {
+  if (err instanceof Error && err.name === "ExitPromptError") {
     log.plain("");
     log.warn("Operation cancelled.");
     exit(130);
@@ -227,9 +193,7 @@ process.on("SIGINT", () => {
   log.warn("Operation cancelled.");
   exit(130);
 });
-process.on("SIGTERM", () => {
-  exit(143);
-});
+process.on("SIGTERM", () => exit(143));
 process.on("uncaughtException", (e) => fatal(e, "Uncaught exception"));
 process.on("unhandledRejection", (r) => fatal(r, "Unhandled rejection"));
 
@@ -245,18 +209,12 @@ function checkNodeVersion(): void {
   }
 }
 
-/* ================================================================== */
-/* Prompts (@inquirer/prompts is loaded lazily)                         */
-/* ================================================================== */
+function warmPrompts(): void {
+  for (const load of [import("@inquirer/input"), import("@inquirer/select"), import("@inquirer/checkbox")]) {
+    load.catch(() => {});
+  }
+}
 
-type Prompts = typeof import("@inquirer/prompts");
-let promptsPromise: Promise<Prompts> | null = null;
-const loadPrompts = (): Promise<Prompts> => (promptsPromise ??= import("@inquirer/prompts"));
-
-/**
- * One look for every prompt: no help line, round bullets, a cyan pointer and quiet disabled rows.
- * Icons carry their own colour codes, so cyan is re-applied after every reset inside a highlighted row.
- */
 const promptTheme = {
   prefix: { idle: `${c.cyan}?${c.reset}`, done: `${c.green}\u2714${c.reset}` },
   helpMode: "never",
@@ -273,35 +231,34 @@ const promptTheme = {
 const plainTheme = { prefix: promptTheme.prefix } as never;
 
 async function select<T>(o: { message: string; choices: { name: string; value: T }[]; default?: T }): Promise<T> {
-  const p = await loadPrompts();
-  return p.select<T>({ ...o, loop: false, theme: promptTheme as never });
+  const { default: prompt } = await import("@inquirer/select");
+  return prompt<T>({ ...o, loop: false, theme: promptTheme as never });
 }
 
 async function input(o: { message: string; default?: string; validate?: (v: string) => true | string }): Promise<string> {
-  const p = await loadPrompts();
-  return p.input({ ...o, theme: plainTheme });
+  const { default: prompt } = await import("@inquirer/input");
+  return prompt({ ...o, theme: plainTheme });
 }
 
 async function password(o: { message: string; mask?: string | boolean; validate?: (v: string) => true | string }): Promise<string> {
-  const p = await loadPrompts();
-  return p.password({ ...o, theme: plainTheme });
+  const { default: prompt } = await import("@inquirer/password");
+  return prompt({ ...o, theme: plainTheme });
 }
 
-/** Locked options become dimmed separator rows: visible, aligned, skipped by the arrow keys. */
 async function checkbox<T>(o: {
   message: string;
   choices: { name: string; value: T; checked?: boolean; disabled?: boolean | string }[];
   required?: boolean;
 }): Promise<T[]> {
-  const p = await loadPrompts();
+  const { default: prompt, Separator } = await import("@inquirer/checkbox");
   const choices = o.choices.map((ch) =>
     ch.disabled
-      ? new p.Separator(
+      ? new Separator(
           `${c.dim}${ch.checked ? "\u25C9" : "\u25CB"} ${ch.name}${typeof ch.disabled === "string" ? ` ${ch.disabled}` : ""}${c.reset}`
         )
       : ch
   );
-  return p.checkbox<T>({ ...o, choices: choices as never, loop: false, theme: promptTheme as never });
+  return prompt<T>({ ...o, choices: choices as never, loop: false, theme: promptTheme as never });
 }
 
 const confirm = (o: { message: string; default?: boolean }): Promise<boolean> =>
@@ -313,10 +270,6 @@ const confirm = (o: { message: string; default?: boolean }): Promise<boolean> =>
     ],
     default: o.default !== false,
   });
-
-/* ================================================================== */
-/* Generic helpers                                                      */
-/* ================================================================== */
 
 function toTitleCase(slug: string): string {
   const words = slug.split(/[-_.\s]+/).filter(Boolean);
@@ -344,19 +297,14 @@ const PROJECT_NAME_RULE =
 
 const ORG_RULE = "Use a reverse domain: lowercase letters and numbers in dot-separated parts, e.g. com.acme";
 
-/** Reverse-DNS prefix with at least two parts. No hyphens, so it is also a valid Android package. */
 const validateOrg = (org: string): boolean => org.length <= 80 && /^[a-z][a-z0-9]*(\.[a-z][a-z0-9]*)+$/.test(org);
 
-/** Single-quoted JS string literal (for generated source files). */
 const jsString = (value: string): string => `'${value.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`;
 
 const normalizeAppName = (value: string): string => value.replace(/\s+/g, " ").trim();
 
-/** Shown instead of any iOS setup when the machine is not a Mac. */
 const iosNeedsMacMessage = (deployCommand: string): string =>
   `iOS requires macOS. Run \`${deployCommand}\` and choose iOS: it sets up the GitHub Action and pushes to GitHub.`;
-
-/* ---- file system ---- */
 
 async function writeFile(filePath: string, content: string | Buffer, mode = 0o644): Promise<void> {
   await fsPromises.mkdir(path.dirname(filePath), { recursive: true });
@@ -382,11 +330,8 @@ function safeRm(targetPath: string, allowedBase = process.cwd()): void {
   fs.rmSync(resolved, { recursive: true, force: true });
 }
 
-/* ---- processes ---- */
-
 const commandExistsCache = new Map<string, boolean>();
 
-/** Spawns `which` / `where` directly (no shell) and caches the answer. */
 function commandExists(command: string): boolean {
   const cached = commandExistsCache.get(command);
   if (cached !== undefined) return cached;
@@ -398,10 +343,6 @@ function commandExists(command: string): boolean {
 
 const quoteWinArg = (a: string): string => (/[\s&|<>^()%"]/.test(a) ? `"${a.replace(/"/g, '\\"')}"` : a);
 
-/**
- * Run a binary with an argument array (no interpolation of untrusted values).
- * On Windows `.cmd` shims (npm, pnpm, yarn, npx) need a shell, so args are quoted explicitly.
- */
 function runBin(bin: string, args: string[], cwd: string, timeout = 120_000): boolean {
   const options = {
     cwd,
@@ -422,11 +363,9 @@ const displayCmd = (bin: string, args: string[]): string =>
 
 const pmRun = (pm: PackageManager, script: string): string => `${pm} run ${script}`;
 
-/** Invoke the project's local `tauri` script (same for every package manager). */
 const pmTauri = (pm: PackageManager, args: string[]): { bin: string; args: string[] } =>
   pm === "npm" ? { bin: "npm", args: ["run", "tauri", "--", ...args] } : { bin: pm, args: ["run", "tauri", ...args] };
 
-/** With the CLI installed locally use the project script, otherwise a one-off runner (no node_modules changes). */
 function tauriCmd(pm: PackageManager, args: string[], localCli: boolean): { bin: string; args: string[] } {
   if (localCli) return pmTauri(pm, args);
   if (pm === "pnpm") return { bin: "pnpm", args: ["dlx", "@tauri-apps/cli", ...args] };
@@ -434,21 +373,18 @@ function tauriCmd(pm: PackageManager, args: string[], localCli: boolean): { bin:
   return { bin: "npx", args: ["--yes", "@tauri-apps/cli", ...args] };
 }
 
-/** Toolchain checks are the Tauri CLI's job (`tauri info`), so we only point at it. */
 function printToolchainHint(pm: PackageManager): void {
   log.info(`Check your toolchain with ${c.cyan}${pmRun(pm, "doctor")}${c.reset}`);
   log.plain(`     ${c.dim}Prerequisites: ${TAURI_PREREQUISITES_URL}${c.reset}`);
 }
 
-/* ---- package manager detection ---- */
-
-const PM_PRIORITY: PackageManager[] = ["bun", "pnpm", "yarn", "npm"];
+const PM_PRIORITY: PackageManager[] = ["bun", "yarn", "pnpm", "npm"];
 
 const LOCK_FILES: [file: string, pm: PackageManager][] = [
   ["bun.lock", "bun"],
   ["bun.lockb", "bun"],
-  ["pnpm-lock.yaml", "pnpm"],
   ["yarn.lock", "yarn"],
+  ["pnpm-lock.yaml", "pnpm"],
   ["package-lock.json", "npm"],
 ];
 
@@ -459,7 +395,6 @@ const INSTALL_ARGS: Record<PackageManager, string[]> = {
   bun: ["install", "--silent"],
 };
 
-/** Order: explicit flag, lockfile (add mode), npm_config_user_agent (npx / pnpm dlx / bunx), installed binaries. */
 function resolvePackageManager(
   requested: PackageManager | undefined,
   projectRoot?: string
@@ -500,15 +435,6 @@ function installDependencies(projectPath: string, pm: PackageManager, showCd = t
   return false;
 }
 
-/* ================================================================== */
-/* Command catalog: what each platform can run                          */
-/* ================================================================== */
-
-interface CommandGroup {
-  title: string;
-  commands: [script: string, description: string][];
-}
-
 const COMMAND_CATALOG: Record<TargetPlatform, CommandGroup> = {
   web: {
     title: "Web",
@@ -524,6 +450,7 @@ const COMMAND_CATALOG: Record<TargetPlatform, CommandGroup> = {
     commands: [
       ["tauri:dev", "Launch the desktop app"],
       ["tauri:build", "Build a distributable"],
+      ["tauri:icon", "Generate app icons from public/logo.png"],
     ],
   },
   android: {
@@ -542,13 +469,11 @@ const COMMAND_CATALOG: Record<TargetPlatform, CommandGroup> = {
   },
 };
 
-/** Only relevant once a desktop / mobile platform is part of the project. */
 const SIGN_GROUP: CommandGroup = {
   title: "Signing",
   commands: [["sign", "Set up or redo code signing"]],
 };
 
-/** Platform-independent: shown once, whatever platforms were picked. */
 const DEPLOY_GROUP: CommandGroup = {
   title: "Deploy",
   commands: [["deploy", "Deploy to github"]],
@@ -557,12 +482,11 @@ const DEPLOY_GROUP: CommandGroup = {
 const MAINTENANCE_GROUP: CommandGroup = {
   title: "Maintenance",
   commands: [
-    ["clean", "Delete build output and caches"],
+    ["clean", "Delete build output (Vite and Tauri)"],
     ["upgrade", "Update dependencies to the latest versions"],
   ],
 };
 
-/** Print one titled block per selected platform, in a fixed order, then Signing (native only), Maintenance and Deploy. */
 function printCommands(pm: PackageManager, selected: TargetPlatform[]): void {
   const platformGroups = TARGET_PLATFORMS.filter((p) => selected.includes(p)).map((p) => COMMAND_CATALOG[p]);
   if (platformGroups.length === 0) return;
@@ -585,10 +509,6 @@ function printCommands(pm: PackageManager, selected: TargetPlatform[]): void {
   }
 }
 
-/* ================================================================== */
-/* Argument parsing (node:util parseArgs)                               */
-/* ================================================================== */
-
 const CLI_OPTIONS = {
   platform: { type: "string" },
   "app-name": { type: "string" },
@@ -603,10 +523,8 @@ const CLI_OPTIONS = {
   "no-install": { type: "boolean" },
   "no-git": { type: "boolean" },
   yes: { type: "boolean", short: "y" },
-  all: { type: "boolean" },
   sign: { type: "boolean" },
   nosign: { type: "boolean" },
-  // Package manager flags: the flag name is the package manager name.
   npm: { type: "boolean" },
   pnpm: { type: "boolean" },
   yarn: { type: "boolean" },
@@ -620,8 +538,10 @@ ${c.bold}${c.cyan}Usage:${c.reset}
   create-bini-app add <targets> [options]         Add platform(s) inside an existing Bini project
   create-bini-app sign [targets]                  Set up or redo code signing (this OS, Android, iOS on macOS)
   create-bini-app remove <targets> [options]      Remove platform(s) from the project (desktop, android, ios)
+  create-bini-app --app-name [name]               Inside a project: change the native app name (prompts without a value)
+  create-bini-app --org [domain]                  Inside a project: change the bundle ID prefix (prompts without a value)
   create-bini-app doctor                          Check your machine for Tauri (runs \`tauri info\`)
-  create-bini-app clean [--all]                   Delete build output and caches
+  create-bini-app clean                           Delete build output (Vite + Tauri), keeps node_modules
   create-bini-app upgrade                         Update dependencies to the latest versions
   create-bini-app --platform <targets>            Same as above (alias)
 
@@ -636,13 +556,16 @@ ${c.bold}${c.cyan}Options:${c.reset}
   --force             Create: overwrite an existing directory
   --no-install        Skip installing project dependencies (installed automatically by default)
   --no-git            Skip git init on create
-  --yes, -y           Skip the confirmation prompt (remove)
-  --all               Clean: also clear the Rust build cache (src-tauri/target)
+  --yes, -y           Skip the confirmation prompt (remove, bundle ID change)
   --platform <target> ${TARGET_PLATFORMS.join(", ")}
                       (comma-separated to pick several: web,desktop,android)
-  --app-name <name>   Initial site title (default: from the project name). It lives in
-                      src/app/layout.tsx, and the Tauri app name is read from there
-  --org <domain>      Bundle ID prefix as a reverse domain, e.g. com.acme (default: com.bini)
+  --app-name [name]   App name (default: from the project name). It is the initial site title
+                      and the Tauri app name and window title. With no value, you are
+                      prompted for it. Inside an existing project it renames the native app
+                      (src-tauri/tauri.conf.json); src/app/layout.tsx is not touched.
+  --org [domain]      Bundle ID prefix as a reverse domain, e.g. com.acme (default: com.bini).
+                      With no value, you are prompted for it. Inside an existing project it
+                      changes the bundle identifier (src-tauri/tauri.conf.json).
   --sign              Auto-confirm code signing setup (still prompts for details).
                       On an already configured platform, runs the signing step only.
   --nosign            Skip code signing setup entirely, no prompts
@@ -652,8 +575,12 @@ ${c.bold}${c.cyan}Examples:${c.reset}
   ${c.dim}create-bini-app my-app${c.reset}
   ${c.dim}create-bini-app my-app --typescript --tailwind --platform web${c.reset}
   ${c.dim}create-bini-app my-app --platform android --app-name "My App"${c.reset}
+  ${c.dim}create-bini-app my-app --platform android --app-name   # prompt for the app name${c.reset}
   ${c.dim}create-bini-app add android                  # inside an existing project${c.reset}
   ${c.dim}create-bini-app add desktop,android --nosign${c.reset}
+  ${c.dim}create-bini-app --app-name                   # inside a project: prompt for a new native app name${c.reset}
+  ${c.dim}create-bini-app --org                        # inside a project: prompt for a new bundle ID prefix${c.reset}
+  ${c.dim}create-bini-app --app-name "My App" --org com.acme   # change both without prompts${c.reset}
   ${c.dim}create-bini-app sign                         # redo signing for everything that applies here${c.reset}
   ${c.dim}create-bini-app sign android                 # redo signing for one target${c.reset}
   ${c.dim}create-bini-app my-app --platform android --org com.acme${c.reset}
@@ -664,7 +591,6 @@ ${c.bold}${c.cyan}Examples:${c.reset}
 `);
 }
 
-/** Parse "a,b,c" into validated, de-duplicated platforms. Exits on invalid values. */
 function parsePlatformList(raw: string | undefined, source: string): TargetPlatform[] {
   if (raw === undefined) return [];
   const result: TargetPlatform[] = [];
@@ -692,18 +618,45 @@ function parseCli(args: string[]) {
   }
 }
 
-function parseArguments(): { positionals: string[]; flags: CliFlags } {
-  const args = process.argv.slice(2);
+/**
+ * `--app-name` and `--org` may be used without a value to ask for a prompt.
+ * A bare flag is one that is last, or followed by another flag or a command name.
+ * (`--app-name=` and `--app-name ""` are still treated as an empty value and rejected.)
+ */
+function extractPromptFlags(args: string[]): { args: string[]; promptAppName: boolean; promptOrg: boolean } {
+  const rest: string[] = [];
+  let promptAppName = false;
+  let promptOrg = false;
 
-  if (args.includes("--version") || args.includes("-v")) {
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === "--app-name" || arg === "--org") {
+      const next = args[i + 1];
+      if (next === undefined || next.startsWith("-") || SUBCOMMANDS.has(next)) {
+        if (arg === "--app-name") promptAppName = true;
+        else promptOrg = true;
+        continue;
+      }
+    }
+    rest.push(arg);
+  }
+
+  return { args: rest, promptAppName, promptOrg };
+}
+
+function parseArguments(): { positionals: string[]; flags: CliFlags } {
+  const rawArgs = process.argv.slice(2);
+
+  if (rawArgs.includes("--version") || rawArgs.includes("-v")) {
     log.plain(`${c.cyan}Bini.js CLI${c.reset} v${BINIJS_VERSION}`);
     exit(0);
   }
-  if (args.includes("--help") || args.includes("-h")) {
+  if (rawArgs.includes("--help") || rawArgs.includes("-h")) {
     printHelp();
     exit(0);
   }
 
+  const { args, promptAppName, promptOrg } = extractPromptFlags(rawArgs);
   const { values, positionals } = parseCli(args);
 
   for (const name of ["platform", "app-name", "org"] as const) {
@@ -714,7 +667,6 @@ function parseArguments(): { positionals: string[]; flags: CliFlags } {
     }
   }
 
-  // Subcommands take any number of platform positionals; create mode takes exactly one name.
   if (!SUBCOMMANDS.has(positionals[0] ?? "") && positionals.length > 1) {
     log.error(`Unexpected extra argument(s): ${positionals.slice(1).join(" ")}`);
     exit(1);
@@ -761,20 +713,16 @@ function parseArguments(): { positionals: string[]; flags: CliFlags } {
       platforms: parsePlatformList(values.platform, "--platform"),
       appName: values["app-name"],
       org,
+      promptAppName,
+      promptOrg,
       sign: sign ? true : noSign ? false : undefined,
       yes: Boolean(values.yes),
       noGit: Boolean(values["no-git"]),
-      all: Boolean(values.all),
       packageManager: pmFlags[0],
     },
   };
 }
 
-/* ================================================================== */
-/* Question flow (create mode)                                          */
-/* ================================================================== */
-
-/** Web starts checked. iOS is only selectable on macOS (Xcode is required). */
 function platformChoices(userOS: UserOS) {
   return TARGET_PLATFORMS.map((p) => {
     if (p === "web") return { name: PLATFORM_LABELS.web, value: p, checked: true };
@@ -783,39 +731,50 @@ function platformChoices(userOS: UserOS) {
   });
 }
 
-/** Initial site title: --app-name, otherwise the project name in title case. Never prompted. */
-function resolveAppName(flags: CliFlags, projectName: string): string {
-  return (flags.appName && normalizeAppName(flags.appName)) || toTitleCase(projectName);
+/**
+ * Resolves the app name.
+ * - `--app-name "X"`  -> X
+ * - `--app-name`      -> prompt (default: the value given, else `current`, else the title-cased project name)
+ * - neither           -> `current`, else the title-cased project name
+ */
+async function askAppName(flags: CliFlags, projectName: string, current?: string): Promise<string> {
+  const fallback = current ?? toTitleCase(projectName);
+  const given = flags.appName ? normalizeAppName(flags.appName) : "";
+
+  if (!flags.promptAppName) return given || fallback;
+
+  if (!isInteractive()) {
+    log.warn(`--app-name needs a terminal to prompt, using "${given || fallback}".`);
+    return given || fallback;
+  }
+
+  const value = await input({
+    message: "App name?",
+    default: given || fallback,
+    validate: (v) => (normalizeAppName(v).length > 0 ? true : "Name required."),
+  });
+  return normalizeAppName(value);
 }
 
 /**
- * The site title lives in the root layout (src/app/layout.tsx or .jsx) and is the single source of
- * truth for the app name: the Tauri product name and window title are read from it.
+ * Resolves the bundle ID prefix.
+ * - `--org com.acme`  -> com.acme (no prompt)
+ * - `--org`           -> prompt (default: the value given, else `current`, else com.bini)
+ * - neither           -> prompt when interactive, else `current` / com.bini
  */
-function readLayoutTitle(root: string): string | null {
-  for (const ext of ["tsx", "jsx"]) {
-    try {
-      const src = fs.readFileSync(path.join(root, "src", "app", `layout.${ext}`), "utf-8");
-      const match = /^[ \t]*title\s*:\s*(?:'((?:[^'\\\n]|\\.)*)'|"((?:[^"\\\n]|\\.)*)")/m.exec(src);
-      const raw = match?.[1] ?? match?.[2];
-      if (raw !== undefined) {
-        const title = normalizeAppName(raw.replace(/\\(.)/g, "$1"));
-        if (title) return title;
-      }
-    } catch {
-      /* no layout file with this extension */
-    }
-  }
-  return null;
-}
+async function askOrg(flags: CliFlags, current?: string): Promise<string> {
+  const fallback = current ?? DEFAULT_ORG;
+  const interactive = isInteractive();
 
-/** Bundle identifier prefix: the final identifier is `<org>.<project>`. */
-async function askOrg(flags: CliFlags): Promise<string> {
-  if (flags.org) return flags.org;
-  if (!isInteractive()) return DEFAULT_ORG;
+  if (flags.promptOrg && !interactive) {
+    log.warn(`--org needs a terminal to prompt, using "${flags.org ?? fallback}".`);
+  }
+  if (flags.org && !flags.promptOrg) return flags.org;
+  if (!interactive) return flags.org ?? fallback;
+
   const org = await input({
     message: "Organization (bundle ID prefix)?",
-    default: DEFAULT_ORG,
+    default: flags.org ?? fallback,
     validate: (v) => (validateOrg(v.trim()) ? true : ORG_RULE),
   });
   return org.trim();
@@ -854,26 +813,25 @@ async function askQuestions(flags: CliFlags, projectName: string, userOS: UserOS
   }
 
   let platforms = picked.filter((p): p is TauriPlatform => p !== "web");
-  // Not a Mac: iOS is left out. The explanation is printed at the end.
   const iosSkipped = platforms.includes("ios") && userOS !== "macos";
   if (iosSkipped) platforms = platforms.filter((p) => p !== "ios");
 
-  // Web is shown when selected, or when nothing else is left to build.
   const web = picked.includes("web") || platforms.length === 0;
-  // The app name becomes the site title in src/app/layout.tsx (edit it there any time).
-  const appName = resolveAppName(flags, projectName);
-  const org = platforms.length > 0 ? await askOrg(flags) : (flags.org ?? DEFAULT_ORG);
+  const appName = await askAppName(flags, projectName);
+
+  let org: string;
+  if (platforms.length > 0) {
+    org = await askOrg(flags);
+  } else {
+    if (flags.promptOrg) log.info("--org only applies to desktop and mobile targets, skipping the prompt.");
+    org = flags.org ?? DEFAULT_ORG;
+  }
 
   return { typescript, styling, web, platforms, appName, org, iosSkipped };
 }
 
-/* ================================================================== */
-/* Assets                                                               */
-/* ================================================================== */
-
 async function copyAssetFiles(publicPath: string): Promise<void> {
   const files = ["favicon.ico", "apple-touch-icon.png", "og-image.png", "logo.png", "bini.svg"];
-  // copyFile does not create missing folders, so public/ must exist first.
   await fsPromises.mkdir(publicPath, { recursive: true });
   await Promise.all(
     files.map(async (file) => {
@@ -904,10 +862,6 @@ async function generateWebManifest(projectPath: string, appName: string): Promis
   await writeFile(path.join(projectPath, "public", "site.webmanifest"), JSON.stringify(manifest, null, 2));
 }
 
-/* ================================================================== */
-/* Vite config (universal: one file for every target)                   */
-/* ================================================================== */
-
 async function generateViteConfig(projectPath: string, ext: ScriptExtension, styling: StylingOption): Promise<void> {
   const imports = [
     `import { defineConfig, loadEnv } from 'vite';`,
@@ -928,7 +882,6 @@ export default defineConfig(async ({ mode, isSsrBuild }) => {
   const port = parseInt(env['PORT'] ?? '3000', 10);
 
   const isTauri = env['TAURI'] === 'true' || process.env.TAURI === 'true';
-  // Set by the Tauri CLI for \`android dev\` / \`ios dev\` (the LAN IP of this machine).
   const tauriDevHost = process.env.TAURI_DEV_HOST;
   const isCodespace = !!env['CODESPACE_NAME'];
 
@@ -940,10 +893,6 @@ export default defineConfig(async ({ mode, isSsrBuild }) => {
       ? { clientPort: 443, overlay: false }
       : { overlay: false, host: 'localhost', protocol: 'ws' };
 
-  // bini-native only loads inside Tauri, so web projects never need it installed.
-  // It is skipped for the SSR pass: the prerender build only needs to render pages, the
-  // native wiring (Rust plugins, capabilities, manifests) comes from the client build.
-  // The specifier is a variable so Vite's config bundler doesn't try to resolve it for web builds.
   const nativePkg = 'bini-native';
   const native = isTauri && !isSsrBuild ? (await import(/* @vite-ignore */ nativePkg)).biniNative() : null;
 
@@ -971,7 +920,6 @@ export default defineConfig(async ({ mode, isSsrBuild }) => {
           ...(isTauri ? ['**/src-tauri/**'] : []),
         ],
       },
-      // Tauri's devUrl is fixed (http://localhost:3000): never let Vite hop to another port.
       strictPort: isTauri,
     },
 
@@ -984,7 +932,6 @@ export default defineConfig(async ({ mode, isSsrBuild }) => {
 
     build: {
       outDir: 'dist',
-      // Modern browsers support modulepreload natively; drop the polyfill.
       modulePreload: { polyfill: false },
       chunkSizeWarningLimit: 1000,
       rolldownOptions: {
@@ -1045,13 +992,18 @@ export default defineConfig(async ({ mode, isSsrBuild }) => {
   await writeFile(path.join(projectPath, `vite.config.${ext}`), content);
 }
 
-/* ================================================================== */
-/* Tauri config patching + signing helpers                              */
-/* ================================================================== */
-
 function generateBundleIdentifier(org: string, projectName: string): string {
   const sanitized = projectName.toLowerCase().replace(/[^a-z0-9]+/g, "") || "app";
   return `${org}.${/^[0-9]/.test(sanitized) ? `app${sanitized}` : sanitized}`;
+}
+
+/** Recovers the org from an identifier like `com.acme.myapp`. Returns undefined if it does not look like `<org>.<name>`. */
+function orgFromIdentifier(identifier: string | undefined): string | undefined {
+  if (!identifier) return undefined;
+  const parts = identifier.split(".");
+  if (parts.length < 3) return undefined;
+  const org = parts.slice(0, -1).join(".");
+  return validateOrg(org) ? org : undefined;
 }
 
 function readTauriConfSync(tauriDir: string): AnyJson | null {
@@ -1062,7 +1014,6 @@ function readTauriConfSync(tauriDir: string): AnyJson | null {
   }
 }
 
-/** Read, mutate, validate, write atomically. Leaves the file untouched on any failure. */
 async function patchTauriConf(tauriDir: string, mutate: (conf: AnyJson) => void): Promise<boolean> {
   const confPath = path.join(tauriDir, "tauri.conf.json");
   if (!fs.existsSync(confPath)) {
@@ -1082,26 +1033,24 @@ async function patchTauriConf(tauriDir: string, mutate: (conf: AnyJson) => void)
   }
 }
 
-/** Single-quote a value for POSIX `source`. */
 const shellQuote = (value: string): string => `'${value.replace(/'/g, `'\\''`)}'`;
 
-/** Escape a value for a Java .properties file (\ : = # ! and spaces). */
 const escapeProperty = (value: string): string => value.replace(/[\r\n]/g, "").replace(/[\\:=#! ]/g, "\\$&");
 
 const SIGNING_ENV_HEADER = [
-  "Code signing secrets, never commit this file.",
-  "Load before building with: set -a; source .env.signing; set +a",
+  "# Code signing secrets, never commit this file.",
+  "# Load before building with: set -a; source .env.signing; set +a",
+  "",
 ];
-const SIGNING_GITIGNORE = ["# Code signing secrets (never commit)", ".env.signing"];
+const SIGNING_GITIGNORE = [".env.signing"];
 
-/** Merge into `.env.signing`: update only the keys being set, keep every other line, mode 600. */
 async function writeKeyValueFile(filePath: string, vars: Record<string, string>): Promise<void> {
   let existing = "";
-  try { existing = await fsPromises.readFile(filePath, "utf-8"); } catch { /* new file */ }
+  try { existing = await fsPromises.readFile(filePath, "utf-8"); } catch {}
 
   const lines = existing ? existing.replace(/\r\n/g, "\n").split("\n") : [];
   if (lines.at(-1) === "") lines.pop();
-  if (lines.length === 0) lines.push(...SIGNING_ENV_HEADER.map((h) => `# ${h}`), "");
+  if (lines.length === 0) lines.push(...SIGNING_ENV_HEADER);
 
   const pending = new Map(Object.entries(vars));
   const merged = lines.map((line) => {
@@ -1121,19 +1070,14 @@ async function writeKeyValueFile(filePath: string, vars: Record<string, string>)
 async function appendGitignoreEntries(projectPath: string, entries: string[]): Promise<void> {
   const gitignorePath = path.join(projectPath, ".gitignore");
   let existing = "";
-  try { existing = await fsPromises.readFile(gitignorePath, "utf-8"); } catch { /* new file */ }
+  try { existing = await fsPromises.readFile(gitignorePath, "utf-8"); } catch {}
 
   const have = new Set(existing.split("\n").map((l) => l.trim()));
   const missing = entries.filter((e) => !have.has(e));
-  if (missing.every((e) => e.startsWith("#"))) return;
+  if (missing.length === 0) return;
   const prefix = existing.length > 0 && !existing.endsWith("\n") ? "\n" : "";
-  await fsPromises.appendFile(gitignorePath, `${prefix}\n${missing.join("\n")}\n`);
+  await fsPromises.appendFile(gitignorePath, `${prefix}${missing.join("\n")}\n`);
 }
-
-/* ================================================================== */
-/* Code signing                                                         */
-/* Tauri has no setup wizard for this, it only reads the config we write */
-/* ================================================================== */
 
 async function patchAndroidGradleSigning(androidGenDir: string): Promise<void> {
   const gradlePath = path.join(androidGenDir, "app", "build.gradle.kts");
@@ -1156,7 +1100,6 @@ async function patchAndroidGradleSigning(androidGenDir: string): Promise<void> {
     const imports = ["import java.io.FileInputStream", "import java.util.Properties"].filter((i) => !content.includes(i));
     if (imports.length) content = `${imports.join("\n")}\n${content}`;
 
-    // Signing only activates when keystore.properties exists, so debug builds and fresh clones keep working.
     const signingConfigBlock = `    signingConfigs {
         create("release") {
             val keystorePropertiesFile = rootProject.file("keystore.properties")
@@ -1196,9 +1139,6 @@ const minLength = (n: number, label: string) => (v: string) =>
 const required = (v: string) => (v.trim().length > 0 ? true : "Required.");
 const fileMustExist = (v: string) => (fs.existsSync(v) ? true : "File not found.");
 
-/* Each setup*Signing assumes the user already said yes (see setupCodeSigning).
-   They return true when signing ends up configured. */
-
 async function setupAndroidSigning(ctx: SigningContext): Promise<boolean> {
   const { projectPath, tauriDir, pm } = ctx;
   const androidGenDir = path.join(tauriDir, "gen", "android");
@@ -1207,12 +1147,7 @@ async function setupAndroidSigning(ctx: SigningContext): Promise<boolean> {
     return false;
   }
 
-  const gitignoreEntries = [
-    "# Android signing (never commit)",
-    "src-tauri/gen/android/keystore.properties",
-    "*.jks",
-    "*.keystore",
-  ];
+  const gitignoreEntries = ["src-tauri/gen/android/keystore.properties", "*.jks", "*.keystore"];
 
   const propsPath = path.join(androidGenDir, "keystore.properties");
   if (fs.existsSync(propsPath)) {
@@ -1232,7 +1167,6 @@ async function setupAndroidSigning(ctx: SigningContext): Promise<boolean> {
     log.warn("keytool not found on PATH (ships with the JDK). Add it to PATH or use Android Studio's copy.");
   }
 
-  // The keystore always lives in the project root as keystore.jks (git-ignored).
   const storeFile = path.join(projectPath, "keystore.jks");
   let keyAlias = "upload";
   let storePassword: string;
@@ -1246,12 +1180,11 @@ async function setupAndroidSigning(ctx: SigningContext): Promise<boolean> {
     keyPassword = kp.length > 0 ? kp : storePassword;
   } else {
     storePassword = await password({ message: "Set a keystore password (min 6 chars):", mask: "*", validate: minLength(6, "Password") });
-    keyPassword = storePassword; // PKCS12 keystores use one password for store and key.
+    keyPassword = storePassword;
 
     log.step("Generating keystore.jks in the project root...");
     const dname = `CN=${path.basename(projectPath)}, OU=Dev, O=Bini, L=Unknown, S=Unknown, C=US`;
     try {
-      // Passwords go through the environment, never the command line / process list.
       execFileSync(
         "keytool",
         [
@@ -1298,13 +1231,8 @@ async function setupAndroidSigning(ctx: SigningContext): Promise<boolean> {
   return true;
 }
 
-/** Strip characters that would break an X.500 subject name. */
 const sanitizeCertName = (name: string): string => name.replace(/[",=+<>#;\\]/g, "").trim() || "Bini App";
 
-/**
- * Create a self-signed code signing certificate in the CurrentUser store (no admin rights needed)
- * and return its thumbprint. The name goes through an environment variable, never into the script text.
- */
 function generateSelfSignedCertificate(publisher: string): string | null {
   const script =
     '$c = New-SelfSignedCertificate -Type CodeSigningCert -Subject ("CN=" + $env:BINI_CERT_CN) ' +
@@ -1485,7 +1413,6 @@ async function setupLinuxSigning(ctx: SigningContext): Promise<boolean> {
     passphrase = await password({ message: "Set a key passphrase (min 6 chars):", mask: "*", validate: minLength(6, "Passphrase") });
 
     log.step("Generating GPG key (RSA 4096, valid for 3 years)...");
-    // The passphrase is sent on stdin (--passphrase-fd 0), never on the command line.
     const result = spawnSync(
       gpg,
       ["--batch", "--pinentry-mode", "loopback", "--passphrase-fd", "0", "--quick-generate-key", `${name} <${email}>`, "rsa4096", "sign", "3y"],
@@ -1496,7 +1423,6 @@ async function setupLinuxSigning(ctx: SigningContext): Promise<boolean> {
       log.info('Generate one manually with `gpg --full-generate-key`, then re-run with --sign and pick "Use a key I already have".');
       return false;
     }
-    // gpg reports the new key's fingerprint in the revocation certificate path.
     let fingerprint = /([0-9A-F]{40})\.rev/i.exec(result.stderr ?? "")?.[1];
     if (!fingerprint) {
       const listing = spawnSync(gpg, ["--list-secret-keys", "--with-colons", email], { encoding: "utf8", windowsHide: true });
@@ -1573,14 +1499,9 @@ const SIGNING_LABEL: Record<SigningTarget, string> = {
 
 const signingHint = (platform: TauriPlatform): string => `Set it up later with: create-bini-app sign ${platform}`;
 
-/** Desktop signing is per OS; it is set up for the OS this command runs on. */
 const signingTargetFor = (platform: TauriPlatform, userOS: UserOS): SigningTarget =>
   platform === "desktop" ? userOS : platform;
 
-/**
- * Offer signing for one platform (desktop: for the current OS). Returns true when signing ends up
- * configured. --nosign / non-interactive: skip with a one-line hint.
- */
 async function setupCodeSigning(ctx: SigningContext): Promise<boolean> {
   const { platform, signFlag, userOS } = ctx;
   const target = signingTargetFor(platform, userOS);
@@ -1614,14 +1535,6 @@ async function setupCodeSigning(ctx: SigningContext): Promise<boolean> {
   }
 }
 
-/* ================================================================== */
-/* Tauri setup                                                          */
-/* ================================================================== */
-
-/**
- * `tauri init` only when src-tauri/tauri.conf.json is missing. Name / title / identifier are patched
- * on first init only. Icons come from public/logo.png on first init, through `tauri icon`.
- */
 async function initTauri(o: InitTauriOptions): Promise<InitResult> {
   const { projectPath, pm, projectName, appName, org, localCli } = o;
   const tauriDir = path.join(projectPath, "src-tauri");
@@ -1631,8 +1544,6 @@ async function initTauri(o: InitTauriOptions): Promise<InitResult> {
     return "ok";
   }
 
-  // Safe placeholders for the CLI; the real display name is patched in afterwards.
-  // beforeBuildCommand runs the normal `build` script, so the bundled dist/ ships prerendered HTML.
   const initArgs = [
     "init", "--ci",
     "--app-name", projectName,
@@ -1647,7 +1558,6 @@ async function initTauri(o: InitTauriOptions): Promise<InitResult> {
   log.step("Initializing Tauri...");
   log.command(displayCmd(cmd.bin, cmd.args));
   if (!runBin(cmd.bin, cmd.args, projectPath, 120_000)) {
-    // What to tell the user to run by hand: always the project-script form.
     const manual = pmTauri(pm, initArgs);
     log.warn("Tauri init failed. After installing dependencies, run manually:");
     log.plain(`  ${c.yellow}${displayCmd(manual.bin, manual.args)}${c.reset}`);
@@ -1666,6 +1576,7 @@ async function initTauri(o: InitTauriOptions): Promise<InitResult> {
   if (patched) {
     log.success(`App name set to "${appName}", bundle identifier ${c.cyan}${identifier}${c.reset}`);
     log.info("Replace the identifier with your own reverse-DNS id before publishing to an app store.");
+    log.info(`Change them later with: ${c.cyan}create-bini-app --app-name${c.reset} / ${c.cyan}create-bini-app --org${c.reset}`);
   }
 
   if (!fs.existsSync(path.join(projectPath, "public", "logo.png"))) {
@@ -1679,9 +1590,8 @@ async function initTauri(o: InitTauriOptions): Promise<InitResult> {
   if (runBin(iconCmd.bin, iconCmd.args, projectPath, 60_000)) {
     log.success("Tauri icons generated");
   } else {
-    const manual = pmTauri(pm, iconArgs);
     log.warn("Could not generate icons automatically.");
-    addFollowUp(`Run: ${displayCmd(manual.bin, manual.args)}`);
+    addFollowUp(`Run: ${pmRun(pm, "tauri:icon")}`);
   }
 
   return "ok";
@@ -1744,7 +1654,6 @@ async function initMobile(
   return "ok";
 }
 
-/** Create mode: initTauri once, then initMobile + signing for each selected target. */
 async function setupTauri(
   o: InitTauriOptions & { platforms: TauriPlatform[]; userOS: UserOS; signFlag: boolean | undefined }
 ): Promise<void> {
@@ -1768,17 +1677,12 @@ async function setupTauri(
   log.success(`Tauri setup complete for ${platforms.join(", ")}`);
 }
 
-/* ================================================================== */
-/* Generated CSS                                                        */
-/* ================================================================== */
-
 const CSS_RESET = `* { box-sizing: border-box; }
 html { font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; -webkit-font-smoothing: antialiased; }
 body { line-height: 1.5; min-height: 100vh; margin: 0; }
 #root { min-height: 100vh; }
 `;
 
-/** Plain-CSS version of the starter page (used for "CSS Modules" and "None"). */
 const PAGE_CSS = `.home {
   display: flex;
   min-height: 100vh;
@@ -1878,14 +1782,6 @@ function generateGlobalStyles(styling: StylingOption): string {
   return `${CSS_RESET}\n${PAGE_CSS}`;
 }
 
-/* ================================================================== */
-/* package.json: base + native patch                                    */
-/* ================================================================== */
-
-/**
- * The one production build: type-check, client bundle, SSR bundle. `bini-ssg` prerenders every route
- * from the SSR bundle's `render()` export. Web and Tauri both run this script.
- */
 const buildCommand = (useTypeScript: boolean, mainExt: FileExtension): string =>
   `${useTypeScript ? "tsc --noEmit && " : ""}vite build && vite build --ssr src/main.${mainExt}`;
 
@@ -1922,7 +1818,7 @@ function basePackageJson(projectName: string, useTypeScript: boolean, mainExt: F
     Object.assign(devDependencies, { tailwindcss: "latest", "@tailwindcss/vite": "latest" });
   }
 
-  const scripts: PackageJsonScripts = {
+  const scripts: Record<string, string> = {
     dev: "vite --host --open",
     build: buildCommand(useTypeScript, mainExt),
     start: "bini-server",
@@ -1939,26 +1835,18 @@ function basePackageJson(projectName: string, useTypeScript: boolean, mainExt: F
   return { name: projectName, type: "module", version: "1.0.0", scripts, dependencies, devDependencies };
 }
 
-/**
- * What a native target adds on top of the base package.json. Only scripts that need something the
- * Tauri CLI doesn't do on its own are here: `TAURI=true` for the Vite config, and `sign`. Everything
- * else (icons, device lists, toolchain checks) is a plain `tauri <command>` through the `tauri` script.
- */
 function nativePackagePatch(): NativePackagePatch {
   return {
     dependencies: { "@tauri-apps/api": "latest" },
     devDependencies: { "@tauri-apps/cli": "latest", "cross-env": "latest", "bini-native": "latest" },
     scripts: {
-      // Tauri's beforeDevCommand: plain `vite` so launching the desktop app never opens a browser tab.
       "dev:native": "vite",
       tauri: "tauri",
       "tauri:dev": "cross-env TAURI=true tauri dev",
       "tauri:build": "cross-env TAURI=true tauri build",
-      // Re-run the code signing prompts (this OS for desktop, Android, and iOS on macOS).
+      "tauri:icon": "tauri icon public/logo.png",
       sign: "npx create-bini-app sign",
-      // Runs `tauri info` to check this machine for the selected platforms.
       doctor: "npx create-bini-app doctor",
-      // TAURI=true is required on mobile too: it makes Vite bind to the LAN host / TAURI_DEV_HOST.
       android: "cross-env TAURI=true tauri android dev",
       "android:build": "cross-env TAURI=true tauri android build",
       ios: "cross-env TAURI=true tauri ios dev",
@@ -1967,10 +1855,6 @@ function nativePackagePatch(): NativePackagePatch {
   };
 }
 
-/**
- * Merge the native patch into a package.json object. Only adds what is missing and never overwrites a
- * user's version or script. Shared by create (in memory) and add (on disk). Returns true when changed.
- */
 function mergeNativePatch(pkg: AnyJson, patch: NativePackagePatch): boolean {
   let changed = false;
   for (const section of ["dependencies", "devDependencies", "scripts"] as const) {
@@ -1985,7 +1869,6 @@ function mergeNativePatch(pkg: AnyJson, patch: NativePackagePatch): boolean {
   return changed;
 }
 
-/** Add mode: patch the existing package.json (validate, atomic write). */
 async function applyNativePatch(root: string): Promise<boolean> {
   const pkgPath = path.join(root, "package.json");
   let pkg: AnyJson;
@@ -2009,10 +1892,6 @@ async function applyNativePatch(root: string): Promise<boolean> {
     return false;
   }
 }
-
-/* ================================================================== */
-/* Starter page (3 styling variants, JS + TS safe)                      */
-/* ================================================================== */
 
 type PageKey =
   | "root" | "main" | "logo" | "text" | "title" | "code"
@@ -2062,7 +1941,6 @@ const MODULE_CLASS_EXPR: Record<PageKey, string> = {
   secondary: "{`${styles.homeBtn} ${styles.homeBtnSecondary}`}",
 };
 
-/** The starter page has no TypeScript-only syntax, so the same JSX is valid in .tsx and .jsx. */
 function buildPageContent(fileExt: FileExtension, styling: StylingOption): string {
   const cn = (key: PageKey): string =>
     styling === "Tailwind"
@@ -2132,10 +2010,6 @@ function buildPageContent(fileExt: FileExtension, styling: StylingOption): strin
 `;
 }
 
-/* ================================================================== */
-/* App files (main entry, layout, page, API): identical for all targets */
-/* ================================================================== */
-
 async function generateAppFiles(
   projectPath: string,
   mainExt: FileExtension,
@@ -2145,12 +2019,10 @@ async function generateAppFiles(
 ): Promise<void> {
   const appPath = path.join(projectPath, "src/app");
 
-  // Every TypeScript-only construct goes through ts(); JS output gets the fallback.
   const ts = (tsCode: string, jsCode = ""): string => (useTypeScript ? tsCode : jsCode);
 
   const childrenProp = ts(`{ children }: { children: React.ReactNode }`, `{ children }`);
 
-  // No Tauri code here: bini-native serves /api and opens external links itself, in memory.
   const mainContent = `import React from 'react';
 import { createRoot, hydrateRoot } from 'react-dom/client';
 import App from './App';
@@ -2158,7 +2030,6 @@ import App from './App';
 const noopSubscribe = () => () => {};
 
 function ClientOnly(${childrenProp}) {
-  // false during server render + hydration, true afterwards (no effect / setState needed).
   const hasMounted = React.useSyncExternalStore(
     noopSubscribe,
     () => true,
@@ -2243,12 +2114,12 @@ export async function render(url${ts(": string")})${ts(": Promise<string>")} {
 }
 `;
 
+  // The title is web-only: the native app name lives in src-tauri/tauri.conf.json.
   const siteName = jsString(appName);
   const layoutContent = `import React from 'react';
 import './globals.css';
 
 export const metadata = {
-  applicationName: ${siteName},
   title      : ${siteName},
   description: 'Modern React application built with Bini.js',
   keywords   : ['Bini.js', 'React', 'Vite'],
@@ -2319,165 +2190,102 @@ export default app
 `
   );
 
-/* ================================================================== */
-/* README                                                               */
-/* Each fact lives in exactly one place:                                */
-/*   intro: the stack and Node version                                  */
-/*   Commands table: what every script does (build, doctor, sign,       */
-/*     deploy targets, clean --all, upgrade)                            */
-/*   Features: what each package provides                               */
-/*   Tauri section: how native builds work                              */
-/*   Code signing: where secrets live and how `sign` scopes itself      */
-/* ================================================================== */
-
-/** The README documents only the platforms that were selected for this project. */
-function generateReadme(
-  projectName: string,
-  useTypeScript: boolean,
-  pm: PackageManager,
-  web: boolean,
-  platforms: TauriPlatform[]
-): string {
+function generateReadme(projectName: string, useTypeScript: boolean, pm: PackageManager): string {
   const mainExt = useTypeScript ? "tsx" : "jsx";
-  const has = (p: TauriPlatform): boolean => platforms.includes(p);
-  const native = platforms.length > 0;
   const run = (script: string): string => `${pm} run ${script}`;
   const tauriRun = (args: string): string => (pm === "npm" ? `${pm} run tauri -- ${args}` : `${pm} run tauri ${args}`);
-  const fence = (body: string): string => "```bash\n" + body + "\n```";
   const bullets = (items: string[]): string => items.map((i) => `- ${i}`).join("\n");
   const table = (rows: [string, string][]): string =>
     ["| Command | Description |", "|---|---|", ...rows.map(([cmd, desc]) => `| \`${cmd}\` | ${desc} |`)].join("\n");
 
-  const names = [web && "Web", has("desktop") && "Desktop", has("android") && "Android", has("ios") && "iOS"].filter(
-    (n): n is string => typeof n === "string"
-  );
-  const listed = names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}` : names[0];
-
-  /* ---- Commands: the single place every script is described ---- */
-  const rows: [string, string][] = [];
-  if (web) {
-    rows.push(
-      [run("dev"), "Start the Vite development server with HMR"],
-      [run("build"), `${useTypeScript ? "Type-check, build" : "Build"} the client and SSR bundle, then prerender every route`],
-      [run("start"), "Serve the production build with bini-server"],
-      [run("preview"), "Preview the production build"]
-    );
-  }
-  if (has("desktop")) {
-    rows.push([run("tauri:dev"), "Desktop app in development mode"], [run("tauri:build"), "Build a distributable desktop app"]);
-  }
-  if (has("android")) {
-    rows.push([run("android"), "Run on an emulator or device"], [run("android:build"), "Build an APK / AAB"]);
-  }
-  if (has("ios")) {
-    rows.push([run("ios"), "Run on a simulator or device (macOS only)"], [run("ios:build"), "Build the iOS app (macOS only)"]);
-  }
-  if (native) {
-    rows.push(
-      [run("sign"), "Set up or redo code signing"],
-      [run("doctor"), "Check your machine for Tauri (runs `tauri info`)"],
-      [tauriRun("<args>"), "Pass-through to the Tauri CLI"]
-    );
-  }
-  rows.push([run("clean"), "Delete build output and caches"]);
-  if (native) {
-    rows.push([
-      `${run("clean")}${pm === "npm" ? " --" : ""} --all`,
-      "Also clear the Rust build cache (`src-tauri/target`), the next native build is slow",
-    ]);
-  }
-  rows.push(
+  const rows: [string, string][] = [
+    [run("dev"), "Start the Vite development server with HMR"],
+    [run("build"), `${useTypeScript ? "Type-check, build" : "Build"} the client and SSR bundle, then prerender every route`],
+    [run("start"), "Serve the production build with bini-server"],
+    [run("preview"), "Preview the production build"],
+    [run("tauri:dev"), "Desktop app in development mode"],
+    [run("tauri:build"), "Build a distributable desktop app"],
+    [run("tauri:icon"), "Generate all app icons from `public/logo.png`"],
+    [run("android"), "Run the Android app on an emulator or device"],
+    [run("android:build"), "Build an APK / AAB"],
+    [run("ios"), "Run the iOS app on a simulator or device (macOS only)"],
+    [run("ios:build"), "Build the iOS app (macOS only)"],
+    [run("sign"), "Set up or redo code signing"],
+    [run("doctor"), "Check your machine for Tauri (runs `tauri info`)"],
+    [tauriRun("<args>"), "Pass-through to the Tauri CLI"],
+    [run("clean"), "Delete build output (`dist/`, and the Tauri/Rust build output when present). `node_modules` is kept"],
     [run("upgrade"), "Update every dependency to its latest version (and `cargo update` for Rust)"],
-    [run("deploy"), "Deploy with bini-deploy (Netlify, Vercel, Cloudflare Workers, Node.js, Deno or GitHub)"]
-  );
+    [run("deploy"), "Deploy with bini-deploy (Netlify, Vercel, Cloudflare Workers, Node.js, Deno or GitHub)"],
+  ];
 
-  const sections: string[] = [];
+  const sections: string[] = [
+    `# ${projectName}\n\nA **Bini.js** application built with **Vite** and **Hono**. It runs on the web, and on desktop (Windows, macOS, Linux), Android and iOS through **Tauri**.\n\nRequires Node.js >= ${REQUIRED_NODE}.`,
 
-  /* ---- Intro: the stack is named here and nowhere else ---- */
-  sections.push(
-    `# ${projectName}\n\nA **Bini.js** application for **${listed}**, built with ${native ? "**Vite**, **Hono** and **Tauri**" : "**Vite** and **Hono**"}.\n\nRequires Node.js >= ${REQUIRED_NODE}.`
-  );
+    [
+      "## Commands",
+      table(rows),
+      "The desktop, Android and iOS commands only work once that target is in the project: pick it when creating the project, or add it later (see [Adding and removing platforms](#adding-and-removing-platforms)).",
+    ].join("\n\n"),
 
-  sections.push(["## Commands", table(rows)].join("\n\n"));
+    [
+      "## Features",
+      bullets([
+        "File-based routing, nested layouts, per-route metadata and code splitting (**bini-router**).",
+        "API routes in `src/app/api/` (Vite middleware in dev, **bini-server** in production, edge runtimes when deployed).",
+        `Static site generation (**bini-ssg**) from the \`render()\` export of \`src/main.${mainExt}\`.`,
+        "Dev overlay with Shiki-powered error highlighting (**bini-overlay**) and GitHub Codespaces support.",
+        "Environment variables (**bini-env**).",
+        "Linting with **Oxlint** and formatting with **Oxfmt**" + (useTypeScript ? ", type-checked with **TypeScript**." : "."),
+      ]),
+    ].join("\n\n"),
 
-  /* ---- Features: what each package provides, no command or deploy repeats ---- */
-  if (web) {
-    sections.push(
-      [
-        "## Features",
-        bullets([
-          "File-based routing, nested layouts, per-route metadata and code splitting (**bini-router**).",
-          "API routes in `src/app/api/` (Vite middleware in dev, **bini-server** in production, edge runtimes when deployed).",
-          `Static site generation (**bini-ssg**) from the \`render()\` export of \`src/main.${mainExt}\`.`,
-          "Dev overlay with Shiki-powered error highlighting (**bini-overlay**) and GitHub Codespaces support.",
-          "Environment variables (**bini-env**).",
-          "Linting with **Oxlint** and formatting with **Oxfmt**" + (useTypeScript ? ", type-checked with **TypeScript**." : "."),
-        ]),
-      ].join("\n\n")
-    );
-  }
-
-  /* ---- Native: how it works, not what the scripts are called ---- */
-  if (native) {
-    const targetNotes = [
-      has("desktop") &&
-        `Desktop bundles are not cross-compiled: build on the OS you target. Regenerate icons with \`${tauriRun("icon public/logo.png")}\`.`,
-      has("android") &&
+    [
+      "## Desktop and mobile (Tauri v2)",
+      `Native targets add \`src-tauri/\`, \`bini-native\` and the scripts above. Every Tauri script sets \`TAURI=true\`, so the dev server binds to \`TAURI_DEV_HOST\` / \`0.0.0.0\` on port 3000 (Tauri's \`devUrl\`) and no browser tab opens. ` +
+        `Release builds run \`${run("build")}\` first, so the packaged app ships the same prerendered HTML as the web.`,
+      `\`bini-native\` is loaded by \`vite.config\` only when \`TAURI=true\`. It serves \`/api/*\` in-process, opens external links in the system browser and wires Cargo, capabilities and manifests for the web APIs you use.`,
+      `Prerequisites: ${TAURI_PREREQUISITES_URL}`,
+      bullets([
+        `Desktop bundles are not cross-compiled: build on the OS you target. Regenerate icons from \`public/logo.png\` with \`${run("tauri:icon")}\`.`,
         "Android: commit the generated `src-tauri/gen/android`. Only `keystore.properties`, `.gradle/` and build output are git-ignored.",
-      has("ios") && "iOS: needs macOS with Xcode.",
-    ].filter((s): s is string => typeof s === "string");
+        "iOS: needs macOS with Xcode.",
+      ]),
+    ].join("\n\n"),
 
-    sections.push(
-      [
-        "## Desktop and mobile (Tauri v2)",
-        `Native targets add \`src-tauri/\`, \`bini-native\` and the scripts above. Every Tauri script sets \`TAURI=true\`, so the dev server binds to \`TAURI_DEV_HOST\` / \`0.0.0.0\` on port 3000 (Tauri's \`devUrl\`) and no browser tab opens. ` +
-          `Release builds run \`${run("build")}\` first, so the packaged app ships the same prerendered HTML as the web.`,
-        `\`bini-native\` is loaded by \`vite.config\` only when \`TAURI=true\`. It serves \`/api/*\` in-process, opens external links in the system browser and wires Cargo, capabilities and manifests for the web APIs you use.`,
-        `Prerequisites: ${TAURI_PREREQUISITES_URL}`,
-        bullets(targetNotes),
-      ].join("\n\n")
-    );
+    [
+      "## App name and bundle ID",
+      "The native app name and bundle identifier are set once, when Tauri is first set up, and live in `src-tauri/tauri.conf.json` (`productName`, the window `title` and `identifier`). " +
+        "The `title` in `src/app/layout.tsx` only affects the web page, so editing it does not rename the desktop or mobile app.",
+      "To change them, run these from inside the project. Without a value you get a prompt, with a value it is applied directly:",
+      "```bash\nnpx create-bini-app --app-name                     # prompt for a new app name\nnpx create-bini-app --org                          # prompt for a new bundle ID prefix\nnpx create-bini-app --app-name \"My App\" --org com.acme\n```",
+      bullets([
+        "`--app-name` updates `productName` and the first window title, and the Android app name when it can be found.",
+        "`--org` rebuilds the identifier as `<org>.<project>`, with the project name reduced to lowercase letters and numbers (for example `com.acme.myapp`), and asks you to confirm before changing it. App stores treat a new identifier as a different app.",
+        "The generated `src-tauri/gen/android` and `src-tauri/gen/apple` projects keep the old values. Commit first, then remove and re-add the platform to regenerate it, or edit it by hand.",
+      ]),
+    ].join("\n\n"),
 
-    const secretFiles = [
-      (has("desktop") || has("ios")) &&
-        `${has("desktop") && has("ios") ? "Desktop and iOS" : has("desktop") ? "Desktop" : "iOS"}: \`.env.signing\` (load with \`set -a; source .env.signing; set +a\`).`,
-      has("android") &&
+    [
+      "## Code signing",
+      `Secrets live in git-ignored files:\n\n${bullets([
+        "Desktop and iOS: `.env.signing` (load with `set -a; source .env.signing; set +a`).",
         "Android: `keystore.jks` in the project root and `src-tauri/gen/android/keystore.properties`. The Gradle config only signs when that file exists, so debug builds and fresh clones keep working. Back up `keystore.jks` and its password.",
-    ].filter((s): s is string => typeof s === "string");
+      ])}`,
+      `\`${run("sign")}\` prompts only for what applies here: desktop signs for the OS you run it on, Android is included once it was added, and iOS appears only on macOS. ` +
+        "Pass a target to redo just one, e.g. `npx create-bini-app sign android`.",
+    ].join("\n\n"),
 
-    sections.push(
-      [
-        "## Code signing",
-        `Secrets live in git-ignored files:\n\n${bullets(secretFiles)}`,
-        `\`${run("sign")}\` prompts only for what applies here: desktop signs for the OS you run it on${has("android") ? ", Android is included because it was added" : ""}${has("ios") ? ", iOS appears only on macOS" : ""}. ` +
-          `Pass a target to redo just one, e.g. \`npx create-bini-app sign ${has("android") ? "android" : "desktop"}\`.`,
-      ].join("\n\n")
-    );
-  }
+    [
+      "## Adding and removing platforms",
+      `Run from inside the project. \`vite.config\`, \`src/main.${mainExt}\` and \`src/app/*\` are never touched, and re-running skips anything already configured.`,
+      "```bash\nnpx create-bini-app add desktop,android,ios\nnpx create-bini-app remove <desktop|android|ios>\n```",
+    ].join("\n\n"),
 
-  /* ---- Adding and removing platforms ---- */
-  const remaining = NATIVE_PLATFORMS.filter((p) => !has(p));
-  const platformLines: string[] = [];
-  if (remaining.length > 0) platformLines.push(`npx create-bini-app add ${remaining.join(",")}`);
-  if (native) platformLines.push(`npx create-bini-app remove <${platforms.join("|")}>`);
-  if (platformLines.length > 0) {
-    sections.push(
-      [
-        "## Adding and removing platforms",
-        `Run from inside the project. \`vite.config\`, \`src/main.${mainExt}\` and \`src/app/*\` are never touched, and re-running skips anything already configured.`,
-        fence(platformLines.join("\n")),
-      ].join("\n\n")
-    );
-  }
-
-  sections.push(`Docs: https://bini.js.org\n\nBuilt with **Bini.js v${BINIJS_VERSION}**`);
+    `Docs: https://bini.js.org\n\nBuilt with **Bini.js v${BINIJS_VERSION}**`,
+  ];
 
   return sections.join("\n\n---\n\n") + "\n";
 }
-
-/* ================================================================== */
-/* tsconfig / lint / gitignore                                          */
-/* ================================================================== */
 
 const generateTsConfig = (projectPath: string): Promise<void> =>
   writeFile(
@@ -2499,7 +2307,6 @@ const generateTsConfig = (projectPath: string): Promise<void> =>
           strict: true,
           paths: { "@/*": ["./src/*"] },
           forceConsistentCasingInFileNames: true,
-          // Types are configured here (NOT in vite.config).
           types: ["vite/client", "node"],
         },
         include: ["src"],
@@ -2525,7 +2332,6 @@ async function generateLintAndFormatConfigs(projectPath: string): Promise<void> 
         2
       )
     ),
-    // The Oxfmt config file name must be exactly `.oxfmtrc.json`.
     writeFile(
       path.join(projectPath, ".oxfmtrc.json"),
       JSON.stringify(
@@ -2545,58 +2351,40 @@ async function generateLintAndFormatConfigs(projectPath: string): Promise<void> 
   ]);
 }
 
-/**
- * Lock files are intentionally NOT ignored: commit them for reproducible installs.
- * src-tauri/gen/ and src-tauri/icons/ are committed; only secrets and build output are ignored.
- * Bundles (exe, dmg, apk, ...) land under src-tauri/target or gen/**\/build, which are already ignored.
- */
-const GITIGNORE = `# Dependencies
-node_modules/
+const GITIGNORE = `node_modules/
 .pnpm-store/
 
-# Build outputs
 dist/
 dist-ssr/
 *.local
 *.tsbuildinfo
 
-# Environment variables
 .env
 .env.local
 .env.*.local
 .env.signing
 
-# Tauri build artifacts
 src-tauri/target/
 src-tauri/gen/**/build/
 src-tauri/gen/android/.gradle/
 src-tauri/gen/android/local.properties
 src-tauri/gen/apple/Externals/
 
-# Editor and OS
 .vscode/
 .idea/
 .DS_Store
 Thumbs.db
 
-# Logs
 *.log
 `;
 
-/* ================================================================== */
-/* Project detection (add mode)                                         */
-/* ================================================================== */
-
-/** Walk upward from `startDir` (max 5 levels) to the first package.json that depends on bini-router. */
 function findProjectRoot(startDir: string): string | null {
   let dir = path.resolve(startDir);
   for (let i = 0; i <= MAX_PROJECT_WALK; i++) {
     try {
       const pkg = readJsonSync(path.join(dir, "package.json"));
       if (pkg.dependencies?.["bini-router"] || pkg.devDependencies?.["bini-router"]) return dir;
-    } catch {
-      /* missing or unreadable package.json: keep walking */
-    }
+    } catch {}
     const parent = path.dirname(dir);
     if (parent === dir) break;
     dir = parent;
@@ -2604,7 +2392,6 @@ function findProjectRoot(startDir: string): string | null {
   return null;
 }
 
-/** Same as findProjectRoot for the current directory, but exits with the standard message when nothing is found. */
 function requireProjectRoot(): string {
   const root = findProjectRoot(process.cwd());
   if (!root) {
@@ -2614,7 +2401,6 @@ function requireProjectRoot(): string {
   return root;
 }
 
-/** Disk is the source of truth; there is no state file. */
 function detectProject(root: string, pmFlag: PackageManager | undefined): DetectedProject {
   const pkg = readJsonSync(path.join(root, "package.json"));
   const deps: Record<string, string> = { ...(pkg.dependencies ?? {}), ...(pkg.devDependencies ?? {}) };
@@ -2622,20 +2408,11 @@ function detectProject(root: string, pmFlag: PackageManager | undefined): Detect
   const tauriDir = path.join(root, "src-tauri");
   const conf = readTauriConfSync(tauriDir);
   let envSigning = "";
-  try { envSigning = fs.readFileSync(path.join(root, ".env.signing"), "utf-8"); } catch { /* none yet */ }
-
-  const typescript = fs.existsSync(path.join(root, "tsconfig.json"));
-  const mainExt: FileExtension = fs.existsSync(path.join(root, "src", "main.tsx"))
-    ? "tsx"
-    : fs.existsSync(path.join(root, "src", "main.jsx"))
-      ? "jsx"
-      : typescript ? "tsx" : "jsx";
+  try { envSigning = fs.readFileSync(path.join(root, ".env.signing"), "utf-8"); } catch {}
 
   return {
     root,
     name: typeof pkg.name === "string" && pkg.name ? pkg.name : path.basename(root),
-    typescript,
-    mainExt,
     pm: resolvePackageManager(pmFlag, root).pm,
     hasNative: conf !== null,
     nativeReady: Boolean(deps["bini-native"] && deps["@tauri-apps/cli"]),
@@ -2651,12 +2428,6 @@ function detectProject(root: string, pmFlag: PackageManager | undefined): Detect
   };
 }
 
-/* ================================================================== */
-/* Add mode                                                             */
-/* ================================================================== */
-
-type ActionKind = "init" | "lite" | "signOnly" | "skip";
-
 function warnIfGitDirty(root: string): void {
   try {
     const out = execFileSync("git", ["status", "--porcelain"], {
@@ -2669,12 +2440,9 @@ function warnIfGitDirty(root: string): void {
     if (out.trim().length > 0) {
       log.warn("Your git working tree has uncommitted changes. Commit first so you can review the diff.");
     }
-  } catch {
-    /* not a git repo / git missing: nothing to warn about */
-  }
+  } catch {}
 }
 
-/** Web and every target the project already has are shown checked and locked. iOS is disabled off macOS. */
 function pickerChoices(project: DetectedProject, userOS: UserOS) {
   const present: Record<TauriPlatform, boolean> = {
     desktop: project.hasNative,
@@ -2700,10 +2468,9 @@ function printSigningStatus(platforms: TauriPlatform[], signing: Record<SigningT
   }
 }
 
-/**
- * Inside an existing Bini project, add one or more targets.
- * Returns the process exit code (0 ok / no-op, 2 manual follow-up needed).
- */
+const nameOrOrgRequested = (flags: CliFlags): boolean =>
+  flags.promptAppName || flags.promptOrg || flags.appName !== undefined || flags.org !== undefined;
+
 async function addPlatforms(requested: TargetPlatform[], flags: CliFlags, userOS: UserOS, implicit: boolean): Promise<number> {
   const root = requireProjectRoot();
 
@@ -2718,7 +2485,13 @@ async function addPlatforms(requested: TargetPlatform[], flags: CliFlags, userOS
   ].filter((v): v is string => typeof v === "string");
   if (ignored.length > 0) log.warn(`Ignored in add mode: ${ignored.join(", ")}`);
 
-  /* ---- which platforms ---- */
+  if (project.hasNative && nameOrOrgRequested(flags)) {
+    log.info(
+      "--app-name and --org only apply when Tauri is first set up. " +
+      "To change them now, run: create-bini-app --app-name / create-bini-app --org"
+    );
+  }
+
   let platforms = requested;
   if (platforms.length === 0) {
     if (!isInteractive()) {
@@ -2748,7 +2521,6 @@ async function addPlatforms(requested: TargetPlatform[], flags: CliFlags, userOS
   if (showWeb) log.skip("web: always part of the project.");
   let nativePlatforms = platforms.filter((p): p is TauriPlatform => p !== "web");
 
-  // iOS can't be set up on Windows / Linux: say how to get it built, touch nothing else.
   if (userOS !== "macos" && nativePlatforms.includes("ios")) {
     log.warn(iosNeedsMacMessage(pmRun(project.pm, "deploy")));
     nativePlatforms = nativePlatforms.filter((p) => p !== "ios");
@@ -2759,13 +2531,13 @@ async function addPlatforms(requested: TargetPlatform[], flags: CliFlags, userOS
     return 0;
   }
 
-  /* ---- plan ---- */
+  const shown: TargetPlatform[] = [...(showWeb ? (["web"] as const) : []), ...nativePlatforms];
+
   const actions: { platform: TauriPlatform; kind: ActionKind }[] = nativePlatforms.map((platform) => {
     if (platform !== "desktop") {
       const configured = platform === "android" ? project.hasAndroid : project.hasIos;
       return { platform, kind: !configured ? "init" : flags.sign === true ? "signOnly" : "skip" };
     }
-    // "desktop" is one src-tauri/ for every OS: once it exists, adding it again only offers signing.
     if (!project.hasNative) return { platform, kind: "init" };
     return { platform, kind: !project.signing[userOS] || flags.sign === true ? "lite" : "skip" };
   });
@@ -2780,16 +2552,13 @@ async function addPlatforms(requested: TargetPlatform[], flags: CliFlags, userOS
   if (active.length === 0) {
     log.info("Nothing to do.");
     printSigningStatus(nativePlatforms, project.signing, userOS);
-    printCommands(project.pm, [...(showWeb ? (["web"] as const) : []), ...nativePlatforms]);
+    printCommands(project.pm, shown);
     return 0;
   }
 
   warnIfGitDirty(root);
 
-  /* ---- package.json, install ---- */
   const pkgChanged = project.nativeReady ? false : await applyNativePatch(root);
-  // Dependencies install automatically unless --no-install. With --no-install the Tauri CLI
-  // steps run through a one-off runner instead.
   const tauriCliPath = path.join(root, "node_modules", "@tauri-apps", "cli");
   const needsCli = active.some((a) => a.kind === "init");
   if (!flags.noInstall && (pkgChanged || (needsCli && !fs.existsSync(tauriCliPath)))) {
@@ -2797,14 +2566,13 @@ async function addPlatforms(requested: TargetPlatform[], flags: CliFlags, userOS
   }
   const localCli = fs.existsSync(tauriCliPath);
 
-  /* ---- first native target ---- */
   let nativeResult: InitResult = "ok";
-  if (!project.hasNative && active.some((a) => a.kind === "init")) {
+  if (!project.hasNative && needsCli) {
     nativeResult = await initTauri({
       projectPath: root,
       pm: project.pm,
       projectName: project.name,
-      appName: readLayoutTitle(root) ?? resolveAppName(flags, project.name),
+      appName: await askAppName(flags, project.name),
       org: await askOrg(flags),
       localCli,
     });
@@ -2813,7 +2581,6 @@ async function addPlatforms(requested: TargetPlatform[], flags: CliFlags, userOS
   const tauriDir = path.join(root, "src-tauri");
   const signedNow = new Set<TauriPlatform>();
 
-  /* ---- per platform ---- */
   for (const { platform: p, kind } of active) {
     log.step(`${kind === "signOnly" ? "Signing for" : "Adding"} ${p}`);
 
@@ -2849,7 +2616,6 @@ async function addPlatforms(requested: TargetPlatform[], flags: CliFlags, userOS
     });
   }
 
-  /* ---- summary ---- */
   log.step("Summary");
   const outcomeColor = (o: Outcome) => (o === "added" ? c.green : o === "failed" ? c.red : c.yellow);
   for (const e of summary) {
@@ -2866,23 +2632,12 @@ async function addPlatforms(requested: TargetPlatform[], flags: CliFlags, userOS
     followUps.forEach((f, i) => log.plain(`  ${i + 1}. ${f}`));
   }
 
-  printCommands(project.pm, [...(showWeb ? (["web"] as const) : []), ...nativePlatforms]);
+  printCommands(project.pm, shown);
 
   log.plain(`\n${c.green}Done.${c.reset}`);
   return followUps.length > 0 ? 2 : 0;
 }
 
-/* ================================================================== */
-/* Sign mode: (re)run code signing for an existing project              */
-/* ================================================================== */
-
-/**
- * Prompts are limited to what applies to this machine and this project:
- *   - desktop signs for the OS you are on (macOS, Windows or Linux), if desktop was added
- *   - Android is included only if it was added
- *   - iOS is included only on macOS, and only if it was added
- * Returns the process exit code (0 ok, 2 when something still needs attention).
- */
 async function signProject(requested: TargetPlatform[], flags: CliFlags, userOS: UserOS): Promise<number> {
   const root = requireProjectRoot();
   if (flags.sign === false) {
@@ -2927,7 +2682,6 @@ async function signProject(requested: TargetPlatform[], flags: CliFlags, userOS:
   const tauriDir = path.join(root, "src-tauri");
   const done = new Set<TauriPlatform>();
   for (const platform of targets) {
-    // signFlag: true skips the "set up now?" question, since running `sign` is already the answer.
     if (await setupCodeSigning({ projectPath: root, tauriDir, platform, userOS, signFlag: true, pm: project.pm })) {
       done.add(platform);
     }
@@ -2943,21 +2697,13 @@ async function signProject(requested: TargetPlatform[], flags: CliFlags, userOS:
   return pending.length > 0 ? 2 : 0;
 }
 
-/* ================================================================== */
-/* Remove mode                                                          */
-/* ================================================================== */
-
 const NATIVE_SCRIPTS: Record<TauriPlatform, string[]> = {
-  desktop: ["tauri:dev", "tauri:build"],
+  desktop: ["tauri:dev", "tauri:build", "tauri:icon"],
   android: ["android", "android:build"],
   ios: ["ios", "ios:build"],
 };
 const SHARED_NATIVE_SCRIPTS = ["dev:native", "tauri", "sign", "doctor"];
 
-/**
- * Remove the scripts this CLI generated (only when their value is unchanged, so customised scripts are
- * kept) and, when no native target is left, the packages it added.
- */
 async function removeNativeFromPackageJson(root: string, scriptKeys: string[], removeDeps: boolean): Promise<boolean> {
   const pkgPath = path.join(root, "package.json");
   try {
@@ -2994,16 +2740,9 @@ async function removeNativeFromPackageJson(root: string, scriptKeys: string[], r
 function removeDirIfEmpty(dir: string): void {
   try {
     if (fs.readdirSync(dir).length === 0) fs.rmdirSync(dir);
-  } catch {
-    /* missing or not empty: leave it */
-  }
+  } catch {}
 }
 
-/**
- * Remove platform(s) from an existing project. Mobile targets delete their generated folder.
- * Desktop shares src-tauri/ with mobile, so it can only go together with every mobile target
- * and then removes all of src-tauri/. Returns the process exit code.
- */
 async function removePlatforms(requested: TargetPlatform[], flags: CliFlags): Promise<number> {
   const root = requireProjectRoot();
 
@@ -3044,7 +2783,6 @@ async function removePlatforms(requested: TargetPlatform[], flags: CliFlags): Pr
     return 0;
   }
 
-  // Desktop shares src-tauri/ with the mobile targets.
   const mobileLeft = (project.hasAndroid && !targets.includes("android")) || (project.hasIos && !targets.includes("ios"));
   if (targets.includes("desktop") && mobileLeft) {
     log.warn("desktop shares src-tauri/ with the mobile targets, so it can only be removed together with them.");
@@ -3111,11 +2849,130 @@ async function removePlatforms(requested: TargetPlatform[], flags: CliFlags): Pr
   return 0;
 }
 
-/* ================================================================== */
-/* Doctor: a thin wrapper, the Tauri CLI does the actual checking       */
-/* ================================================================== */
+const escapeAndroidString = (value: string): string =>
+  value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/(['"\\])/g, "\\$1");
 
-/** Run `tauri info` (Rust, MSVC, WebView2, Xcode, Android SDK/NDK, versions). Returns the exit code. */
+/** Best effort: updates `app_name` in the generated Android project. Returns false if it could not be found. */
+async function patchAndroidAppName(root: string, name: string): Promise<boolean> {
+  const file = path.join(root, "src-tauri", "gen", "android", "app", "src", "main", "res", "values", "strings.xml");
+  try {
+    const src = await fsPromises.readFile(file, "utf-8");
+    const pattern = /(<string\s+name="app_name"[^>]*>)[^<]*(<\/string>)/;
+    if (!pattern.test(src)) return false;
+    const next = src.replace(pattern, (_m, open: string, close: string) => `${open}${escapeAndroidString(name)}${close}`);
+    await writeFile(file, next);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * `create-bini-app --app-name` / `--org` inside an existing project.
+ * Updates the native app name and/or bundle identifier in src-tauri/tauri.conf.json.
+ * Without a value the flag opens a prompt, with a value it is applied directly.
+ * src/app/layout.tsx is never touched: its title is web-only.
+ */
+async function renameProject(flags: CliFlags): Promise<number> {
+  const root = requireProjectRoot();
+
+  if ((flags.promptAppName || flags.promptOrg) && !isInteractive()) {
+    log.error('Prompting needs an interactive terminal. Pass a value instead, e.g. --app-name "My App" or --org com.acme.');
+    exit(1);
+  }
+
+  const project = detectProject(root, flags.packageManager);
+  log.info(`Project ${c.cyan}${project.name}${c.reset} at ${c.dim}${root}${c.reset}`);
+
+  if (!project.hasNative) {
+    log.info("This project has no desktop or mobile platform yet, so there is no native app name or bundle ID to change.");
+    log.info("Add one with: create-bini-app add <target>");
+    return 0;
+  }
+
+  const tauriDir = path.join(root, "src-tauri");
+  const tauriConf = readTauriConfSync(tauriDir);
+  if (!tauriConf) {
+    log.error("Could not read src-tauri/tauri.conf.json.");
+    return 1;
+  }
+
+  const currentName =
+    typeof tauriConf.productName === "string" && tauriConf.productName ? tauriConf.productName : toTitleCase(project.name);
+  const currentIdentifier = typeof tauriConf.identifier === "string" ? tauriConf.identifier : undefined;
+  const hasMobile = project.hasAndroid || project.hasIos;
+
+  const wantsName = flags.promptAppName || flags.appName !== undefined;
+  const wantsOrg = flags.promptOrg || flags.org !== undefined;
+
+  const newName = wantsName ? await askAppName(flags, project.name, currentName) : undefined;
+  const newIdentifier = wantsOrg
+    ? generateBundleIdentifier(await askOrg(flags, orgFromIdentifier(currentIdentifier)), project.name)
+    : undefined;
+
+  const nameChanged = newName !== undefined && newName !== currentName;
+  const idChanged = newIdentifier !== undefined && newIdentifier !== currentIdentifier;
+
+  if (!nameChanged && !idChanged) {
+    log.info("Nothing to change.");
+    return 0;
+  }
+
+  warnIfGitDirty(root);
+
+  if (idChanged) {
+    log.warn(
+      `The bundle identifier will change from "${currentIdentifier ?? "(none)"}" to "${newIdentifier}". ` +
+      "App stores treat a new identifier as a different app."
+    );
+    if (!flags.yes) {
+      if (!(await confirm({ message: "Change the bundle identifier?", default: !hasMobile }))) {
+        log.info("Cancelled. Nothing was changed.");
+        return 0;
+      }
+    }
+  }
+
+  const ok = await patchTauriConf(tauriDir, (conf) => {
+    if (nameChanged && newName) {
+      conf.productName = newName;
+      const win = conf.app?.windows?.[0];
+      if (win) win.title = newName;
+    }
+    if (idChanged && newIdentifier) conf.identifier = newIdentifier;
+  });
+  if (!ok) return 1;
+
+  if (nameChanged) log.success(`App name set to "${newName}" in tauri.conf.json`);
+  if (idChanged) log.success(`Bundle identifier set to ${c.cyan}${newIdentifier}${c.reset}`);
+
+  if (nameChanged && newName && project.hasAndroid) {
+    if (await patchAndroidAppName(root, newName)) {
+      log.success("Updated the Android app name (strings.xml)");
+    } else {
+      addFollowUp("Update app_name in src-tauri/gen/android/app/src/main/res/values/strings.xml, or remove and re-add Android.");
+    }
+  }
+  if (nameChanged && project.hasIos) {
+    addFollowUp("The generated iOS project keeps the old display name. Rename it in Xcode, or remove and re-add iOS (commit first).");
+  }
+  if (idChanged && hasMobile) {
+    addFollowUp("The generated Android/iOS projects still use the old bundle identifier. Remove and re-add them to apply the new one (commit first).");
+  }
+
+  if (followUps.length > 0) {
+    log.plain(`\n${c.bold}${c.yellow}Manual follow-ups:${c.reset}`);
+    followUps.forEach((f, i) => log.plain(`  ${i + 1}. ${f}`));
+  }
+
+  log.plain(`\n${c.green}Done.${c.reset}`);
+  return followUps.length > 0 ? 2 : 0;
+}
+
 async function doctorProject(flags: CliFlags): Promise<number> {
   const root = requireProjectRoot();
 
@@ -3131,28 +2988,18 @@ async function doctorProject(flags: CliFlags): Promise<number> {
   return runBin(cmd.bin, cmd.args, root, 60_000) ? 0 : 2;
 }
 
-/* ================================================================== */
-/* Clean / upgrade                                                      */
-/* Neither exists in the Tauri CLI. They call the tools underneath it:  */
-/* cargo and the project's package manager.                              */
-/* ================================================================== */
-
-/**
- * Delete build output and caches. Everything removed is regenerated by the next build. The Rust build
- * cache (src-tauri/target, often several GB) is only cleared with --all, through `cargo clean`.
- */
-async function cleanProject(flags: CliFlags): Promise<number> {
+async function cleanProject(): Promise<number> {
   const root = requireProjectRoot();
 
   const tauriDir = path.join(root, "src-tauri");
   const candidates = [
     "dist",
     "dist-ssr",
-    path.join("node_modules", ".vite"),
     path.join("src-tauri", "gen", "android", "app", "build"),
     path.join("src-tauri", "gen", "android", "build"),
+    path.join("src-tauri", "gen", "android", ".gradle"),
     path.join("src-tauri", "gen", "apple", "build"),
-    ...(flags.all ? [path.join("src-tauri", "gen", "apple", "Externals")] : []),
+    path.join("src-tauri", "gen", "apple", "Externals"),
   ];
 
   let removed = 0;
@@ -3170,23 +3017,21 @@ async function cleanProject(flags: CliFlags): Promise<number> {
 
   const targetDir = path.join(tauriDir, "target");
   if (fs.existsSync(targetDir)) {
-    if (flags.all) {
-      log.step("Clearing the Rust build cache (cargo clean)...");
-      const manifest = path.join(tauriDir, "Cargo.toml");
-      let cleaned =
-        commandExists("cargo") && fs.existsSync(manifest) && runBin("cargo", ["clean", "--manifest-path", manifest], root, 600_000);
-      if (!cleaned) {
-        try {
-          safeRm(targetDir, root);
-          cleaned = true;
-        } catch (err) {
-          log.warn(`Could not remove src-tauri/target: ${(err as Error).message}`);
-        }
+    log.step("Clearing the Rust build cache (cargo clean)...");
+    const manifest = path.join(tauriDir, "Cargo.toml");
+    let cleaned =
+      commandExists("cargo") && fs.existsSync(manifest) && runBin("cargo", ["clean", "--manifest-path", manifest], root, 600_000);
+    if (!cleaned) {
+      try {
+        safeRm(targetDir, root);
+        cleaned = true;
+      } catch (err) {
+        log.warn(`Could not remove src-tauri/target: ${(err as Error).message}`);
       }
-      if (cleaned) {
-        removed++;
-        log.success("Cleared src-tauri/target");
-      }
+    }
+    if (cleaned) {
+      removed++;
+      log.success("Cleared src-tauri/target");
     }
   }
 
@@ -3195,7 +3040,6 @@ async function cleanProject(flags: CliFlags): Promise<number> {
   return 0;
 }
 
-/** Versions that do not come from the registry are never touched. */
 const NON_REGISTRY_SPEC = /^(file:|link:|workspace:|portal:|patch:|git\+|git:|github:|https?:|npm:)/;
 
 function upgradeArgs(pm: PackageManager, names: string[], dev: boolean): string[] {
@@ -3211,10 +3055,6 @@ function upgradeArgs(pm: PackageManager, names: string[], dev: boolean): string[
   }
 }
 
-/**
- * Update every direct dependency to its latest version with the project's package manager, then refresh
- * the Rust side with `cargo update` when src-tauri exists. Returns the process exit code.
- */
 async function upgradeProject(flags: CliFlags): Promise<number> {
   const root = requireProjectRoot();
 
@@ -3227,11 +3067,10 @@ async function upgradeProject(flags: CliFlags): Promise<number> {
 
   const runtime = pick("dependencies");
   const dev = pick("devDependencies");
-  const total = runtime.length + dev.length;
   const manifest = path.join(root, "src-tauri", "Cargo.toml");
   const hasRust = fs.existsSync(manifest);
 
-  if (total === 0 && !hasRust) {
+  if (runtime.length + dev.length === 0 && !hasRust) {
     log.info("No registry dependencies to update.");
     return 0;
   }
@@ -3275,11 +3114,6 @@ async function upgradeProject(flags: CliFlags): Promise<number> {
   return ok ? 0 : 2;
 }
 
-/* ================================================================== */
-/* Project generation (create mode)                                     */
-/* ================================================================== */
-
-/** `git init` unless git is missing or the folder is already inside a repository (e.g. a monorepo). */
 function initGit(projectPath: string): void {
   if (!commandExists("git")) {
     log.info("git not found, skipping git init.");
@@ -3316,7 +3150,6 @@ async function generateProject(projectName: string, answers: ProjectAnswers, fla
   const nativePlatforms = answers.platforms;
   const isTauri = nativePlatforms.length > 0;
 
-  // Decide the package manager up front so Tauri steps can run after install.
   const { pm, failed: pmFailed } = resolvePackageManager(flags.packageManager);
   if (!pmFailed) {
     log.info(`Package manager: ${c.cyan}${pm}${c.reset}${flags.packageManager ? ` (forced via --${pm})` : ""}`);
@@ -3324,7 +3157,6 @@ async function generateProject(projectName: string, answers: ProjectAnswers, fla
 
   log.info("Scaffolding project files");
 
-  // Same result as `add` on an existing project: base + the shared native patch.
   const pkg = basePackageJson(projectName, useTypeScript, mainExt, styling);
   if (isTauri) mergeNativePatch(pkg, nativePackagePatch());
 
@@ -3362,11 +3194,9 @@ async function generateProject(projectName: string, answers: ProjectAnswers, fla
     ` project with ${c.green}${styling}${c.reset} styling`
   );
 
-  // 1) install first ...
   const installed = !pmFailed && !flags.noInstall && installDependencies(projectPath, pm);
   const localCli = fs.existsSync(path.join(projectPath, "node_modules", "@tauri-apps", "cli"));
 
-  // 2) ... then Tauri (needs the local CLI). Without install it prints manual instructions.
   if (isTauri) {
     await setupTauri({
       projectPath,
@@ -3374,14 +3204,14 @@ async function generateProject(projectName: string, answers: ProjectAnswers, fla
       userOS,
       pm,
       projectName,
-      appName: readLayoutTitle(projectPath) ?? answers.appName,
+      appName: answers.appName,
       org: answers.org,
       signFlag: flags.sign,
       localCli,
     });
   }
 
-  await writeFile(path.join(projectPath, "README.md"), generateReadme(projectName, useTypeScript, pm, answers.web, nativePlatforms));
+  await writeFile(path.join(projectPath, "README.md"), generateReadme(projectName, useTypeScript, pm));
   if (!flags.noGit) initGit(projectPath);
 
   log.plain(
@@ -3394,10 +3224,12 @@ async function generateProject(projectName: string, answers: ProjectAnswers, fla
   log.plain(`\n  ${c.green}cd ${projectName}${c.reset}`);
   if (!installed && !pmFailed) log.plain(`  ${c.green}${pm} install${c.reset}`);
 
-  // Commands grouped by the platforms that were actually selected.
   printCommands(pm, [...(answers.web ? (["web"] as const) : []), ...nativePlatforms]);
 
   log.plain(`\n${c.dim}Add more platforms later from inside the project: create-bini-app add <target>${c.reset}`);
+  if (isTauri) {
+    log.plain(`${c.dim}Change the app name or bundle ID later: create-bini-app --app-name / create-bini-app --org${c.reset}`);
+  }
 
   if (answers.iosSkipped) {
     log.warn("iOS requires macOS, so the project was created without it.");
@@ -3409,55 +3241,47 @@ async function generateProject(projectName: string, answers: ProjectAnswers, fla
   log.plain(`\n${c.green}Happy coding!${c.reset}`);
 }
 
-/* ================================================================== */
-/* main                                                                 */
-/* ================================================================== */
-
 async function main(): Promise<void> {
   checkNodeVersion();
+  if (isInteractive()) warmPrompts();
 
   const { positionals, flags } = parseArguments();
   const userOS = detectUserOS();
   const first = positionals[0];
   const insideProject = !first && findProjectRoot(process.cwd()) !== null;
 
-  // The logo is only for creating a project; adding a platform stays quiet.
   if (!SUBCOMMANDS.has(first ?? "") && !insideProject) log.plain(LOGO);
   log.info(`Detected OS: ${userOS}`);
 
-  // `doctor` / `clean` / `upgrade` take no platform arguments.
   if (first === "doctor" || first === "clean" || first === "upgrade") {
     if (positionals.length > 1) {
       log.error(`Unexpected extra argument(s): ${positionals.slice(1).join(" ")}`);
       exit(1);
     }
-    exit(first === "doctor" ? await doctorProject(flags) : first === "clean" ? await cleanProject(flags) : await upgradeProject(flags));
+    exit(first === "doctor" ? await doctorProject(flags) : first === "clean" ? await cleanProject() : await upgradeProject(flags));
   }
 
-  // `remove <targets>` -> delete platforms from the project.
-  if (first === "remove") {
+  if (first === "remove" || first === "sign" || first === "add") {
     const extra = parsePlatformList(positionals.slice(1).join(",") || undefined, "platform");
-    exit(await removePlatforms([...new Set<TargetPlatform>([...extra, ...flags.platforms])], flags));
+    const targets = [...new Set<TargetPlatform>([...extra, ...flags.platforms])];
+    exit(
+      first === "remove"
+        ? await removePlatforms(targets, flags)
+        : first === "sign"
+          ? await signProject(targets, flags, userOS)
+          : await addPlatforms(targets, flags, userOS, false)
+    );
   }
 
-  // `sign [targets]` -> redo code signing; remaining positionals narrow it to specific platforms.
-  if (first === "sign") {
-    const extra = parsePlatformList(positionals.slice(1).join(",") || undefined, "platform");
-    exit(await signProject([...new Set<TargetPlatform>([...extra, ...flags.platforms])], flags, userOS));
+  // Inside a project, `--app-name` / `--org` (with or without a value) change the native app instead of adding a platform.
+  if (insideProject && nameOrOrgRequested(flags) && flags.platforms.length === 0) {
+    exit(await renameProject(flags));
   }
 
-  // `add <targets>` -> add mode; remaining positionals are platforms.
-  if (first === "add") {
-    const extra = parsePlatformList(positionals.slice(1).join(",") || undefined, "platform");
-    exit(await addPlatforms([...new Set<TargetPlatform>([...extra, ...flags.platforms])], flags, userOS, false));
-  }
-
-  // No name, inside a Bini project -> add mode.
   if (insideProject) {
     exit(await addPlatforms(flags.platforms, flags, userOS, flags.platforms.length === 0));
   }
 
-  // Create mode.
   let projectName = first;
   if (!projectName) {
     if (!isInteractive()) {
