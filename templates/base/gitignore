@@ -13,6 +13,9 @@ dist-ssr/
 # Code signing material: never commit
 .env.signing
 .bini-signing/
+tauri.windows.conf.json
+tauri.macos.conf.json
+tauri.ios.conf.json
 *.jks
 *.keystore
 *.p12

@@ -774,9 +774,10 @@ ${c.heading("Signing:")}
                           macOS uses --adhoc for local testing or a real Developer ID .p12 for CI.
   windows, macos and linux by name only work with --ci-only. Use desktop for this machine.
 
-  Local Windows/macOS signing settings are written to src-tauri/tauri.windows.conf.json and
-  src-tauri/tauri.macos.conf.json. Tauri merges them automatically on that OS, and they are git-ignored,
-  so your committed tauri.conf.json never points at a certificate that only exists on your machine.
+  Local Windows/macOS/iOS signing settings are written to src-tauri/tauri.windows.conf.json,
+  src-tauri/tauri.macos.conf.json and src-tauri/tauri.ios.conf.json. Tauri merges them automatically
+  on that platform, and they are git-ignored, so your committed tauri.conf.json never points at a
+  certificate or team that only exists on your machine.
 
   Without prompts for CI:
             sign windows --generate [--publisher Name] --ci-only
@@ -1186,14 +1187,9 @@ async function patchTauriConf(tauriDir: string, mutate: (conf: AnyJson) => void)
   }
 }
 
-const patchBundle = (tauriDir: string, key: "windows" | "macOS" | "iOS", patch: AnyJson): Promise<boolean> =>
-  patchTauriConf(tauriDir, (conf) => {
-    conf.bundle ??= {};
-    conf.bundle[key] = { ...(conf.bundle[key] ?? {}), ...patch };
-  });
 
-type LocalOverrideOS = "windows" | "macos";
-type LocalBundleKey = "windows" | "macOS";
+type LocalOverrideOS = "windows" | "macos" | "ios";
+type LocalBundleKey = "windows" | "macOS" | "iOS";
 
 const localConfFile = (tauriDir: string, target: LocalOverrideOS): string => path.join(tauriDir, `tauri.${target}.conf.json`);
 
@@ -1250,6 +1246,7 @@ const SIGNING_GITIGNORE = [
   ".bini-signing/",
   "tauri.windows.conf.json",
   "tauri.macos.conf.json",
+  "tauri.ios.conf.json",
   "*.jks",
   "*.keystore",
   "*.p12",
@@ -2495,8 +2492,10 @@ async function setupMacosSigning(ctx: SigningContext): Promise<boolean> {
 
 async function saveIosTeam(tauriDir: string, team: string): Promise<boolean> {
   if (!hasTauriConf(tauriDir)) return false;
-  const saved = await patchBundle(tauriDir, "iOS", { developmentTeam: team });
-  if (saved) log.success("Saved the Team ID in tauri.conf.json (bundle.iOS.developmentTeam): local iOS builds need no environment variables.");
+  const saved = await patchLocalBundle(tauriDir, "ios", "iOS", { developmentTeam: team });
+  if (saved) {
+    log.success("Saved the Team ID in src-tauri/tauri.ios.conf.json (git-ignored): local iOS builds need no environment variables, and CI does not try to sign.");
+  }
   return saved;
 }
 
@@ -2637,7 +2636,7 @@ async function setupIosSigning(ctx: SigningContext): Promise<boolean> {
       IOS_MOBILE_PROVISION: await fileBase64(provisionPath),
       APPLE_DEVELOPMENT_TEAM: team,
     });
-    if (!ctx.ciOnly && hasTauriConf(tauriDir)) await patchBundle(tauriDir, "iOS", { developmentTeam: team });
+    if (!ctx.ciOnly && hasTauriConf(tauriDir)) await saveIosTeam(tauriDir, team);
     log.info(`These credentials are used by GitHub Actions. Local \`${pmRun(pm, "ios:build")}\` runs use automatic signing: nothing to export.`);
     return true;
   } catch (err) {
@@ -3413,6 +3412,7 @@ function detectProject(root: string, pmFlag: PackageManager | undefined): Detect
 
   const winBundle = readBundleSetting(tauriDir, "windows", "windows");
   const macBundle = readBundleSetting(tauriDir, "macos", "macOS");
+  const iosBundle = readBundleSetting(tauriDir, "ios", "iOS");
 
   return {
     root,
@@ -3434,7 +3434,9 @@ function detectProject(root: string, pmFlag: PackageManager | undefined): Detect
         Boolean(macBundle.signingIdentity) ||
         /^APPLE_CERTIFICATE=/m.test(envSigning),
       linux: /^(GPG_PRIVATE_KEY|LINUX_PUBLISHER)=/m.test(envSigning),
-      ios: /^(IOS_CERTIFICATE|APPLE_API_KEY)=/m.test(envSigning) || Boolean(conf?.bundle?.iOS?.developmentTeam),
+      ios:
+        Boolean(iosBundle.developmentTeam) ||
+        /^(IOS_CERTIFICATE|APPLE_API_KEY)=/m.test(envSigning),
     },
   };
 }
@@ -4122,6 +4124,23 @@ function upgradeArgs(pm: PackageManager, names: string[], dev: boolean): string[
   }
 }
 
+async function migrateIosTeamToLocalOverride(root: string): Promise<void> {
+  const tauriDir = path.join(root, "src-tauri");
+  const conf = readTauriConfSync(tauriDir);
+  const team = conf?.bundle?.iOS?.developmentTeam as string | undefined;
+  if (!team) return;
+
+  const wrote = await patchLocalBundle(tauriDir, "ios", "iOS", { developmentTeam: team });
+  if (!wrote) return;
+  await patchTauriConf(tauriDir, (c) => {
+    if (c.bundle?.iOS) {
+      delete c.bundle.iOS.developmentTeam;
+      if (Object.keys(c.bundle.iOS).length === 0) delete c.bundle.iOS;
+    }
+  });
+  log.info("Moved bundle.iOS.developmentTeam from tauri.conf.json to tauri.ios.conf.json (git-ignored).");
+}
+
 async function refreshTemplateFiles(root: string, project: DetectedProject, pkg: AnyJson): Promise<boolean> {
   const deps: Record<string, string> = { ...(pkg.dependencies ?? {}), ...(pkg.devDependencies ?? {}) };
   const useTypeScript = Boolean(deps.typescript) || fs.existsSync(path.join(root, "tsconfig.json"));
@@ -4174,6 +4193,8 @@ async function upgradeProject(flags: CliFlags): Promise<number> {
   log.plain(`${c.dim("Every package above moves to its latest version, package.json records what it resolved to.")}\n`);
 
   warnIfGitDirty(root);
+
+  await migrateIosTeamToLocalOverride(root);
 
   let ok = true;
   for (const [names, isDev] of [[runtime, false], [dev, true]] as [string[], boolean][]) {
