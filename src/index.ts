@@ -3,7 +3,10 @@ import fsPromises from "node:fs/promises";
 import path from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { parseArgs } from "node:util";
+import os from "node:os";
+import { randomBytes } from "node:crypto";
+import { parseArgs, styleText } from "node:util";
+import * as clack from "@clack/prompts";
 
 type StylingOption = "Tailwind" | "CSS Modules" | "None";
 type PackageManager = "bun" | "pnpm" | "yarn" | "npm";
@@ -12,6 +15,8 @@ type ScriptExtension = "ts" | "js";
 type TauriPlatform = "desktop" | "android" | "ios";
 type TargetPlatform = "web" | TauriPlatform;
 type SigningTarget = "windows" | "linux" | "macos" | "android" | "ios";
+/** What `create-bini-app sign <target>` accepts. `desktop` means the OS you are running on. */
+type SignTarget = "desktop" | SigningTarget;
 type UserOS = "windows" | "macos" | "linux";
 type Outcome = "added" | "skipped" | "partial" | "failed";
 type InitResult = "ok" | "manual" | "failed";
@@ -35,6 +40,23 @@ interface CliFlags {
   yes: boolean;
   noGit: boolean;
   packageManager: PackageManager | undefined;
+  // sign-only options (non-interactive signing)
+  alias: string | undefined;
+  keyPassword: string | undefined;
+  profile: string | undefined;
+  team: string | undefined;
+  identity: string | undefined;
+  apiIssuer: string | undefined;
+  apiKey: string | undefined;
+  apiKeyFile: string | undefined;
+  appleId: string | undefined;
+  applePassword: string | undefined;
+  signCommand: string | undefined;
+  ciOnly: boolean;
+  generate: boolean;
+  publisher: string | undefined;
+  thumbprint: string | undefined;
+  adhoc: boolean;
 }
 
 interface ProjectAnswers {
@@ -71,6 +93,10 @@ interface SigningContext {
   userOS: UserOS;
   signFlag: boolean | undefined;
   pm: PackageManager;
+  /** Overrides the target derived from `platform` + `userOS` (e.g. `sign macos` on Windows). */
+  target?: SigningTarget;
+  /** Only save credentials for GitHub Actions: skip the local keychain/certificate store/Gradle setup. */
+  ciOnly?: boolean;
 }
 
 interface InitTauriOptions {
@@ -84,11 +110,70 @@ interface InitTauriOptions {
 
 interface CommandGroup {
   title: string;
+  /** When true, the first column is printed as written instead of `<pm> run <script>`. */
+  raw?: boolean;
   commands: [script: string, description: string][];
+}
+
+interface SignParsed {
+  targets: SignTarget[];
+  file: string | undefined;
+  password: string | undefined;
 }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ASSETS_DIR = path.join(__dirname, "..", "assets");
+const TEMPLATES_DIR = path.join(__dirname, "..", "templates");
+
+/** Simple {{PLACEHOLDER}} replacement */
+function render(content: string, vars: Record<string, string>): string {
+  return content.replace(/\{\{(\w+)\}\}/g, (_, key) =>
+    vars[key] !== undefined ? vars[key] : `{{${key}}}`
+  );
+}
+
+/**
+ * Copy one template file. Text files get placeholders applied; binary files (a NUL byte in the
+ * first 8 KB) are copied untouched, so they are never corrupted by a UTF-8 round trip.
+ * No extension allowlist: any text file is rendered, whatever its extension.
+ */
+async function copyTemplate(
+  relativePath: string,
+  destPath: string,
+  vars: Record<string, string> = {}
+): Promise<void> {
+  const buf = await fsPromises.readFile(path.join(TEMPLATES_DIR, relativePath));
+  const isText = !buf.subarray(0, 8192).includes(0);
+  await writeFile(destPath, isText ? render(buf.toString("utf8"), vars) : buf);
+}
+
+/**
+ * Copy a whole directory of templates (files in parallel). `exclude` skips entries by name at the top level only. Calls for base -> language -> styling
+ * stay sequential, so later layers still override earlier ones.
+ */
+async function copyTemplateDir(
+  relativeDir: string,
+  destDir: string,
+  vars: Record<string, string> = {},
+  exclude?: (topLevelName: string) => boolean
+): Promise<void> {
+  const srcDir = path.join(TEMPLATES_DIR, relativeDir);
+  if (!fs.existsSync(srcDir)) {
+    log.warn(`Template folder missing: ${relativeDir}`);
+    return;
+  }
+
+  const entries = await fsPromises.readdir(srcDir, { withFileTypes: true });
+  await Promise.all(
+    entries
+      .filter((entry) => !exclude?.(entry.name))
+      .map((entry) =>
+      entry.isDirectory()
+        ? copyTemplateDir(path.join(relativeDir, entry.name), path.join(destDir, entry.name), vars)
+        : copyTemplate(path.join(relativeDir, entry.name), path.join(destDir, entry.name), vars)
+    )
+  );
+}
 
 function readJsonSync<T = AnyJson>(file: string): T {
   return JSON.parse(fs.readFileSync(file, "utf-8")) as T;
@@ -96,25 +181,33 @@ function readJsonSync<T = AnyJson>(file: string): T {
 
 const BINIJS_VERSION = readJsonSync<{ version: string }>(path.join(__dirname, "..", "package.json")).version;
 
+// ─── Colors ──────────────────────────────────────────────────────────────────
+
+type Format = Parameters<typeof styleText>[0];
+
+/**
+ * Colors are on when FORCE_COLOR is set or stdout is a TTY, and never when NO_COLOR is set.
+ * Child processes (cargo, tauri, ...) only get FORCE_COLOR when we are printing colors ourselves.
+ * Gating every call on this (instead of trusting styleText) keeps piped output free of escape codes
+ * on Node 20.x, where styleText does not check the stream.
+ */
 const colorEnabled =
   !process.env.NO_COLOR &&
   ((process.env.FORCE_COLOR !== undefined && process.env.FORCE_COLOR !== "0") || Boolean(process.stdout.isTTY));
-const ansi = (code: number): string => (colorEnabled ? `\x1b[${code}m` : "");
 
+const paint = (f: Format, s: string): string => (colorEnabled ? styleText(f, s) : s);
+const fmt = (f: Format) => (s: string): string => paint(f, s);
 const c = {
-  reset: ansi(0),
-  bold: ansi(1),
-  dim: ansi(2),
-  cyan: ansi(36),
-  green: ansi(32),
-  yellow: ansi(33),
-  red: ansi(31),
-  blue: ansi(34),
-  magenta: ansi(35),
+  dim: fmt("dim"),
+  bold: fmt("bold"),
+  cyan: fmt("cyan"),
+  green: fmt("green"),
+  yellow: fmt("yellow"),
+  red: fmt("red"),
+  heading: fmt(["bold", "cyan"]),
 };
 
-const LOGO = `
-${c.cyan}${c.bold}
+const LOGO_ART = `
             XXXXXXXXXXXXXXXX
          XXXXXXXXXXXXXXXXXXXXXz
        YXXXXXXXXXXXXXXXXXXXXXXXX
@@ -131,9 +224,8 @@ ${c.cyan}${c.bold}
       XXXXXXXXX  XXXXXXXXXXXXXXXXXX
       XXXXXXXXX  XXXXXXXXXXXXXXXX
       XXXXXXXXX  XXXXXXXXXXXXX
-${c.reset}
-${c.dim}        Developed By Binidu${c.reset}
 `;
+const LOGO = `\n${c.heading(LOGO_ART)}\n${c.dim("        Developed By Binidu")}\n`;
 
 const REQUIRED_NODE = "20.19.0";
 const MAX_PROJECT_WALK = 5;
@@ -143,8 +235,30 @@ const SUBCOMMANDS = new Set(["add", "sign", "remove", "doctor", "clean", "upgrad
 const DEFAULT_ORG = "com.bini";
 const TAURI_PREREQUISITES_URL = "https://v2.tauri.app/start/prerequisites/";
 
+/** Timeouts for subprocesses that download things (tauri init, android init, rustup, installs). */
+const SLOW_STEP_MS = 300_000;
+const INSTALL_TIMEOUT_MS = 600_000;
+
 const TARGET_PLATFORMS: TargetPlatform[] = ["web", "desktop", "android", "ios"];
 const NATIVE_PLATFORMS: TauriPlatform[] = ["desktop", "android", "ios"];
+const SIGN_TARGETS: SignTarget[] = ["desktop", "windows", "macos", "linux", "android", "ios"];
+
+/** Password sources for non-interactive signing (keeps secrets out of shell history and process lists). */
+const ENV_SIGN_PASSWORD = "BINI_SIGN_PASSWORD";
+const ENV_KEY_PASSWORD = "BINI_KEY_PASSWORD";
+const ENV_APPLE_PASSWORD = "BINI_APPLE_PASSWORD";
+
+/**
+ * Lockfiles, in priority order, for detecting the package manager of an existing project.
+ * `bun.lockb` is the pre-1.1 binary lockfile; `bun.lock` is the current text one.
+ */
+const LOCKFILE_NAMES: [file: string, pm: PackageManager][] = [
+  ["bun.lockb", "bun"],
+  ["bun.lock", "bun"],
+  ["pnpm-lock.yaml", "pnpm"],
+  ["yarn.lock", "yarn"],
+  ["package-lock.json", "npm"],
+];
 
 const PLATFORM_LABELS: Record<TargetPlatform, string> = {
   web: "Web",
@@ -153,15 +267,19 @@ const PLATFORM_LABELS: Record<TargetPlatform, string> = {
   ios: "iOS",
 };
 
+type TagColor = "cyan" | "green" | "yellow" | "red" | "blue" | "magenta";
+const tagged = (color: TagColor, label: string, out: (m: string) => void = console.log) => (m: string): void =>
+  out(`${paint(["bold", color], label)} ${m}`);
+
 const log = {
-  info: (m: string) => console.log(`${c.cyan}${c.bold}INFO${c.reset} ${m}`),
-  success: (m: string) => console.log(`${c.green}${c.bold}OK${c.reset} ${m}`),
-  warn: (m: string) => console.log(`${c.yellow}${c.bold}WARN${c.reset} ${m}`),
-  error: (m: string) => console.error(`${c.red}${c.bold}ERROR${c.reset} ${m}`),
-  step: (m: string) => console.log(`${c.blue}${c.bold}STEP${c.reset} ${m}`),
-  skip: (m: string) => console.log(`${c.yellow}${c.bold}SKIP${c.reset} ${m}`),
-  command: (m: string) => console.log(`${c.magenta}${c.bold}RUN${c.reset} ${m}`),
-  plain: (m: string) => console.log(m),
+  info: tagged("cyan", "INFO"),
+  success: tagged("green", "OK"),
+  warn: tagged("yellow", "WARN"),
+  error: tagged("red", "ERROR", console.error),
+  step: tagged("blue", "STEP"),
+  skip: tagged("yellow", "SKIP"),
+  command: tagged("magenta", "RUN"),
+  plain: (m: string): void => console.log(m),
 };
 
 const followUps: string[] = [];
@@ -174,16 +292,17 @@ function addFollowUp(message: string): void {
   if (!followUps.includes(message)) followUps.push(message);
 }
 
-function isInteractive(): boolean {
-  return Boolean(process.stdin.isTTY && process.stdout.isTTY);
+function printFollowUps(): void {
+  if (followUps.length === 0) return;
+  log.plain(`\n${c.bold(c.yellow("Manual follow-ups:"))}`);
+  followUps.forEach((f, i) => log.plain(`  ${i + 1}. ${f}`));
 }
 
+/** `--yes` accepts every default, so it also turns every prompt off. */
+let assumeYes = false;
+const isInteractive = (): boolean => !assumeYes && Boolean(process.stdin.isTTY && process.stdout.isTTY);
+
 function fatal(err: unknown, label: string): never {
-  if (err instanceof Error && err.name === "ExitPromptError") {
-    log.plain("");
-    log.warn("Operation cancelled.");
-    exit(130);
-  }
   log.error(`${label}: ${err instanceof Error ? err.message : String(err)}`);
   exit(1);
 }
@@ -209,67 +328,83 @@ function checkNodeVersion(): void {
   }
 }
 
-function warmPrompts(): void {
-  for (const load of [import("@inquirer/input"), import("@inquirer/select"), import("@inquirer/checkbox")]) {
-    load.catch(() => {});
+// ─── Prompts (@clack/prompts behind the same small API the rest of the file uses) ───
+
+/**
+ * Unwraps a clack prompt result. Every clack prompt resolves to `Value | symbol` (the symbol is the cancel marker),
+ * so callers must pass the value type explicitly: `ask<string>(...)`. Without it TypeScript infers
+ * `T = Value | typeof CANCEL_SYMBOL` and the return type no longer matches.
+ */
+async function ask<T>(prompt: Promise<T | symbol>): Promise<T> {
+  const value = await prompt;
+  if (clack.isCancel(value)) {
+    log.plain("");
+    log.warn("Operation cancelled.");
+    exit(130);
   }
+  return value as T;
 }
 
-const promptTheme = {
-  prefix: { idle: `${c.cyan}?${c.reset}`, done: `${c.green}\u2714${c.reset}` },
-  helpMode: "never",
-  icon: {
-    checked: `${c.green}\u25C9${c.reset}`,
-    unchecked: `${c.dim}\u25CB${c.reset}`,
-    cursor: `${c.cyan}\u276F${c.reset}`,
-  },
-  style: {
-    highlight: (text: string) => `${c.cyan}${text.replace(/\x1b\[(?:0|39)m/g, (m) => `${m}${c.cyan}`)}${c.reset}`,
-    help: () => "",
-  },
-};
-const plainTheme = { prefix: promptTheme.prefix } as never;
+/** clack passes "" when the default is used, and wants undefined (not `true`) for "valid". */
+const toValidate =
+  (check?: (v: string) => true | string, fallback = "") =>
+  (v: string | undefined): string | undefined => {
+    if (!check) return undefined;
+    const result = check(v || fallback);
+    return result === true ? undefined : result;
+  };
 
-async function select<T>(o: { message: string; choices: { name: string; value: T }[]; default?: T }): Promise<T> {
-  const { default: prompt } = await import("@inquirer/select");
-  return prompt<T>({ ...o, loop: false, theme: promptTheme as never });
-}
+const select = <T extends string | boolean>(o: {
+  message: string;
+  choices: { name: string; value: T }[];
+  default?: T;
+}): Promise<T> =>
+  ask<T>(
+    clack.select<T>({
+      message: o.message,
+      options: o.choices.map(({ name, value }) => ({ value, label: name })) as never,
+      initialValue: o.default,
+    })
+  );
 
-async function input(o: { message: string; default?: string; validate?: (v: string) => true | string }): Promise<string> {
-  const { default: prompt } = await import("@inquirer/input");
-  return prompt({ ...o, theme: plainTheme });
-}
+const input = (o: { message: string; default?: string; validate?: (v: string) => true | string }): Promise<string> =>
+  ask<string>(
+    clack.text({
+      message: o.message,
+      defaultValue: o.default,
+      placeholder: o.default,
+      validate: toValidate(o.validate, o.default),
+    })
+  );
 
-async function password(o: { message: string; mask?: string | boolean; validate?: (v: string) => true | string }): Promise<string> {
-  const { default: prompt } = await import("@inquirer/password");
-  return prompt({ ...o, theme: plainTheme });
-}
+const password = (o: { message: string; validate?: (v: string) => true | string }): Promise<string> =>
+  ask<string>(clack.password({ message: o.message, mask: "*", validate: toValidate(o.validate) }));
 
-async function checkbox<T>(o: {
+const confirm = (o: { message: string; default?: boolean }): Promise<boolean> =>
+  ask<boolean>(clack.confirm({ message: o.message, initialValue: o.default !== false }));
+
+/** Disabled choices cannot be picked, so they are listed above the prompt instead. */
+function checkbox<T extends string>(o: {
   message: string;
   choices: { name: string; value: T; checked?: boolean; disabled?: boolean | string }[];
   required?: boolean;
 }): Promise<T[]> {
-  const { default: prompt, Separator } = await import("@inquirer/checkbox");
-  const choices = o.choices.map((ch) =>
-    ch.disabled
-      ? new Separator(
-          `${c.dim}${ch.checked ? "\u25C9" : "\u25CB"} ${ch.name}${typeof ch.disabled === "string" ? ` ${ch.disabled}` : ""}${c.reset}`
-        )
-      : ch
+  const live = o.choices.filter((ch) => !ch.disabled);
+  for (const ch of o.choices.filter((x) => x.disabled)) {
+    // Never print the iOS "requires macOS" disabled line
+    if (typeof ch.disabled === "string" && /requires macOS/i.test(ch.disabled)) continue;
+    const note = typeof ch.disabled === "string" ? ` ${ch.disabled}` : "";
+    log.plain(c.dim(`  ${ch.checked ? "[x]" : "[ ]"} ${ch.name}${note}`));
+  }
+  return ask<T[]>(
+    clack.multiselect<T>({
+      message: o.message,
+      options: live.map((ch) => ({ value: ch.value, label: ch.name })) as never,
+      initialValues: live.filter((ch) => ch.checked).map((ch) => ch.value),
+      required: o.required ?? false,
+    })
   );
-  return prompt<T>({ ...o, choices: choices as never, loop: false, theme: promptTheme as never });
 }
-
-const confirm = (o: { message: string; default?: boolean }): Promise<boolean> =>
-  select<boolean>({
-    message: o.message,
-    choices: [
-      { name: "Yes", value: true },
-      { name: "No", value: false },
-    ],
-    default: o.default !== false,
-  });
 
 function toTitleCase(slug: string): string {
   const words = slug.split(/[-_.\s]+/).filter(Boolean);
@@ -291,6 +426,7 @@ function validateProjectName(name: string): boolean {
 }
 
 const isTargetPlatform = (v: string): v is TargetPlatform => (TARGET_PLATFORMS as string[]).includes(v);
+const isSignTarget = (v: string): v is SignTarget => (SIGN_TARGETS as string[]).includes(v);
 
 const PROJECT_NAME_RULE =
   "Use lowercase letters, numbers, and hyphens only. Max 50 chars. Command names (add, sign, remove, doctor, clean, upgrade) are reserved.";
@@ -299,7 +435,9 @@ const ORG_RULE = "Use a reverse domain: lowercase letters and numbers in dot-sep
 
 const validateOrg = (org: string): boolean => org.length <= 80 && /^[a-z][a-z0-9]*(\.[a-z][a-z0-9]*)+$/.test(org);
 
-const jsString = (value: string): string => `'${value.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`;
+const TEAM_ID_PATTERN = /^[A-Za-z0-9]{10}$/;
+const THUMBPRINT_PATTERN = /^[0-9A-Fa-f]{40}$/;
+
 
 const normalizeAppName = (value: string): string => value.replace(/\s+/g, " ").trim();
 
@@ -317,7 +455,8 @@ function safeRm(targetPath: string, allowedBase = process.cwd()): void {
   const base = path.resolve(allowedBase);
   const relative = path.relative(base, resolved);
 
-  if (relative === "" || relative.startsWith("..") || path.isAbsolute(relative)) {
+  // Only a real parent-directory segment escapes the base: a folder named "..foo" is fine.
+  if (relative === "" || relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
     throw new Error(`Refusing to delete: "${resolved}" is outside the allowed base "${base}".`);
   }
   const protectedPaths = [path.resolve("/"), process.env.HOME, process.env.USERPROFILE]
@@ -363,6 +502,10 @@ const displayCmd = (bin: string, args: string[]): string =>
 
 const pmRun = (pm: PackageManager, script: string): string => `${pm} run ${script}`;
 
+/** `npm run script -- args` for npm, `<pm> run script args` for the others. */
+const pmRunWithArgs = (pm: PackageManager, script: string, args: string[]): string =>
+  pm === "npm" ? `npm run ${script} -- ${args.join(" ")}` : `${pm} run ${script} ${args.join(" ")}`;
+
 const pmTauri = (pm: PackageManager, args: string[]): { bin: string; args: string[] } =>
   pm === "npm" ? { bin: "npm", args: ["run", "tauri", "--", ...args] } : { bin: pm, args: ["run", "tauri", ...args] };
 
@@ -374,64 +517,71 @@ function tauriCmd(pm: PackageManager, args: string[], localCli: boolean): { bin:
 }
 
 function printToolchainHint(pm: PackageManager): void {
-  log.info(`Check your toolchain with ${c.cyan}${pmRun(pm, "doctor")}${c.reset}`);
-  log.plain(`     ${c.dim}Prerequisites: ${TAURI_PREREQUISITES_URL}${c.reset}`);
+  log.info(`Check your toolchain with ${c.cyan(pmRun(pm, "doctor"))}`);
+  log.plain(`     ${c.dim(`Prerequisites: ${TAURI_PREREQUISITES_URL}`)}`);
 }
 
-const PM_PRIORITY: PackageManager[] = ["bun", "yarn", "pnpm", "npm"];
-
-const LOCK_FILES: [file: string, pm: PackageManager][] = [
-  ["bun.lock", "bun"],
-  ["bun.lockb", "bun"],
-  ["yarn.lock", "yarn"],
-  ["pnpm-lock.yaml", "pnpm"],
-  ["package-lock.json", "npm"],
-];
+const PACKAGE_MANAGERS: PackageManager[] = ["bun", "yarn", "pnpm", "npm"];
 
 const INSTALL_ARGS: Record<PackageManager, string[]> = {
-  npm: ["install", "--no-audit", "--no-fund", "--loglevel=error"],
+  npm: ["install", "--prefer-offline", "--no-audit", "--no-fund", "--loglevel=error"],
   yarn: ["install", "--silent", "--no-progress"],
   pnpm: ["install", "--reporter=silent", "--config.enable-pre-post-scripts=true"],
   bun: ["install", "--silent"],
 };
 
+/**
+ * Detects the package manager from the lockfile of an existing project.
+ * Used by commands that run inside a project (add / sign / remove / doctor / upgrade / rename), where
+ * the lockfile is the authority. Creating a new project has no lockfile yet, so it keeps using the user agent.
+ */
+function detectPackageManagerFromLockfile(projectRoot: string): PackageManager | undefined {
+  for (const [file, pm] of LOCKFILE_NAMES) {
+    if (fs.existsSync(path.join(projectRoot, file))) return pm;
+  }
+  return undefined;
+}
+
+/**
+ * Standard detection, in this order:
+ *   1. an explicit flag (validated against PATH)
+ *   2. the project's lockfile, when the caller knows the project root
+ *   3. npm_config_user_agent (set by npx / pnpm dlx / yarn dlx / bunx)
+ *   4. npm
+ * Step 2 was missing in an earlier version, which made `add` / `upgrade` install with npm and leave a
+ * stray package-lock.json in pnpm / yarn / bun projects.
+ */
 function resolvePackageManager(
   requested: PackageManager | undefined,
   projectRoot?: string
-): { pm: PackageManager; failed: boolean } {
+): PackageManager {
   if (requested) {
     if (!commandExists(requested)) {
       log.error(`Requested package manager "${requested}" was not found on PATH.`);
       exit(1);
     }
-    return { pm: requested, failed: false };
+    return requested;
   }
 
   if (projectRoot) {
-    const hit = LOCK_FILES.find(([file]) => fs.existsSync(path.join(projectRoot, file)));
-    if (hit) return { pm: hit[1], failed: false };
+    const fromLock = detectPackageManagerFromLockfile(projectRoot);
+    if (fromLock) return fromLock;
   }
 
   const ua = process.env.npm_config_user_agent?.split(" ")[0]?.split("/")[0];
-  const fromUa = PM_PRIORITY.find((p) => p === ua);
-  if (fromUa) return { pm: fromUa, failed: false };
-
-  const installed = PM_PRIORITY.find(commandExists);
-  if (installed) return { pm: installed, failed: false };
-
-  log.warn("Could not detect a package manager. Install npm, yarn, pnpm, or bun.");
-  return { pm: "npm", failed: true };
+  const fromUa = PACKAGE_MANAGERS.find((p) => p === ua);
+  return fromUa ?? "npm";
 }
 
 function installDependencies(projectPath: string, pm: PackageManager, showCd = true): boolean {
   log.step(`Installing dependencies with ${pm}...`);
-  if (runBin(pm, INSTALL_ARGS[pm], projectPath, 300_000)) {
+  if (runBin(pm, INSTALL_ARGS[pm], projectPath, INSTALL_TIMEOUT_MS)) {
     log.success("Dependencies installed.");
     return true;
   }
   log.warn("Auto-install failed. Run manually:");
-  if (showCd) log.plain(`    ${c.green}cd ${path.basename(projectPath)}${c.reset}`);
-  log.plain(`    ${c.green}${pm} install${c.reset}`);
+  if (showCd) log.plain(`    ${c.green(`cd ${path.basename(projectPath)}`)}`);
+  log.plain(`    ${c.green(`${pm} install`)}`);
   return false;
 }
 
@@ -483,7 +633,22 @@ const MAINTENANCE_GROUP: CommandGroup = {
   title: "Maintenance",
   commands: [
     ["clean", "Delete build output (Vite and Tauri)"],
-    ["upgrade", "Update dependencies to the latest versions"],
+    ["upgrade", "Update dependencies and template files to the latest"],
+  ],
+};
+
+/**
+ * These are CLI commands (not package scripts), so they are printed as written.
+ * Run without a target, `add` and `remove` ask which platform with an interactive picker.
+ */
+const PLATFORM_GROUP: CommandGroup = {
+  title: "Platform",
+  raw: true,
+  commands: [
+    ["create-bini-app add", "Add a platform (pick from a list)"],
+    ["create-bini-app add <target>", "Add desktop, android or ios"],
+    ["create-bini-app remove", "Remove a platform (pick from a list)"],
+    ["create-bini-app remove <target>", "Remove desktop, android or ios"],
   ],
 };
 
@@ -498,13 +663,38 @@ function printCommands(pm: PackageManager, selected: TargetPlatform[]): void {
       ...(hasNative ? ([["doctor", "Check your machine for Tauri (tauri info)"]] as [string, string][]) : []),
     ],
   };
-  const groups = [...platformGroups, ...(hasNative ? [SIGN_GROUP] : []), maintenance, DEPLOY_GROUP];
-  const width = Math.max(...groups.flatMap((g) => g.commands.map(([s]) => pmRun(pm, s).length)));
+  // The rename commands only apply once a native target exists (they edit src-tauri/tauri.conf.json).
+  const platform: CommandGroup = {
+    ...PLATFORM_GROUP,
+    commands: [
+      ...PLATFORM_GROUP.commands,
+      ...(hasNative
+        ? ([
+            ["create-bini-app --app-name", "Change the native app name"],
+            ["create-bini-app --org", "Change the bundle ID prefix"],
+          ] as [string, string][])
+        : []),
+    ],
+  };
+  const groups = [
+    ...platformGroups,
+    ...(hasNative ? [SIGN_GROUP] : []),
+    maintenance,
+    DEPLOY_GROUP,
+    platform,
+  ];
+
+  const label = (g: CommandGroup, script: string): string => (g.raw ? script : pmRun(pm, script));
+  // Script groups share one column width, the raw CLI group aligns on its own.
+  const widthFor = (raw: boolean): number =>
+    Math.max(0, ...groups.filter((g) => Boolean(g.raw) === raw).flatMap((g) => g.commands.map(([s]) => label(g, s).length)));
+  const widths = { script: widthFor(false), raw: widthFor(true) };
 
   for (const group of groups) {
-    log.plain(`\n${c.bold}${c.cyan}${group.title}${c.reset}`);
+    const width = group.raw ? widths.raw : widths.script;
+    log.plain(`\n${c.heading(group.title)}`);
     for (const [script, description] of group.commands) {
-      log.plain(`  ${c.green}${pmRun(pm, script).padEnd(width)}${c.reset}  ${c.dim}${description}${c.reset}`);
+      log.plain(`  ${c.green(label(group, script).padEnd(width))}  ${c.dim(description)}`);
     }
   }
 }
@@ -529,23 +719,76 @@ const CLI_OPTIONS = {
   pnpm: { type: "boolean" },
   yarn: { type: "boolean" },
   bun: { type: "boolean" },
+  // sign-only
+  alias: { type: "string" },
+  "key-password": { type: "string" },
+  profile: { type: "string" },
+  team: { type: "string" },
+  identity: { type: "string" },
+  "api-issuer": { type: "string" },
+  "api-key": { type: "string" },
+  "api-key-file": { type: "string" },
+  "apple-id": { type: "string" },
+  "apple-password": { type: "string" },
+  "sign-command": { type: "string" },
+  "ci-only": { type: "boolean" },
+  generate: { type: "boolean" },
+  publisher: { type: "string" },
+  thumbprint: { type: "string" },
+  adhoc: { type: "boolean" },
 } as const;
 
+const SIGN_ONLY_FLAGS = [
+  "alias", "key-password", "profile", "team", "identity", "api-issuer", "api-key", "api-key-file",
+  "apple-id", "apple-password", "sign-command", "ci-only", "generate", "publisher", "thumbprint", "adhoc",
+] as const;
+
 function printHelp(): void {
+  const examples: [cmd: string, note: string][] = [
+    ["create-bini-app my-app", ""],
+    ["create-bini-app my-app --typescript --tailwind --platform web", ""],
+    ['create-bini-app my-app --platform android --app-name "My App"', ""],
+    ["create-bini-app my-app --platform android --app-name", "# prompt for the app name"],
+    ["create-bini-app my-app --yes --typescript --tailwind --platform web,android --org com.acme", "# no prompts at all"],
+    ["create-bini-app add", "# inside an existing project: pick the platforms from a list"],
+    ["create-bini-app add android", "# inside an existing project"],
+    ["create-bini-app add desktop,android --nosign", ""],
+    ["create-bini-app remove", "# pick the platforms to remove from a list"],
+    ["create-bini-app --app-name", "# inside a project: prompt for a new native app name"],
+    ["create-bini-app --org", "# inside a project: prompt for a new bundle ID prefix"],
+    ['create-bini-app --app-name "My App" --org com.acme', "# change both without prompts"],
+    ["create-bini-app sign", "# redo signing for everything that applies here"],
+    ["create-bini-app sign android", "# redo signing for one target"],
+    ["create-bini-app sign desktop", "# only the OS you are on (same as: create-bini-app desktop sign)"],
+    ["create-bini-app sign windows,linux --ci-only", "# choose generated or real credentials for GitHub Actions"],
+    ['create-bini-app sign desktop ./cert.pfx "pw"', "# sign Windows or macOS, picked from this OS"],
+    ['create-bini-app sign macos ./dev-id.p12 "pw" --api-issuer ID --api-key KEY --api-key-file ./AuthKey.p8 --ci-only', ""],
+    ['create-bini-app sign ios ./dist.p12 "pw" --profile ./app.mobileprovision', ""],
+    ['create-bini-app sign ios --team ABCDE12345 --api-issuer ID --api-key KEY --api-key-file ./AuthKey.p8', "# Xcode automatic signing in CI"],
+    ['create-bini-app sign android ./keystore.jks "pw" --alias upload', ""],
+    ['create-bini-app sign android --generate "pw"', "# new keystore, no prompts"],
+    ['create-bini-app sign linux --generate --publisher "My Co" --ci-only', "# no prompts, no password"],
+    ["create-bini-app remove android --yes", "# delete the Android project"],
+    ["create-bini-app doctor", "# check your machine (tauri info)"],
+    ["create-bini-app clean", "# delete dist/ and other build output"],
+    ["create-bini-app upgrade", "# update dependencies and template files"],
+  ];
+
   log.plain(`
-${c.bold}${c.cyan}Usage:${c.reset}
+${c.heading("Usage:")}
   create-bini-app [project-name] [options]        Create a new project
-  create-bini-app add <targets> [options]         Add platform(s) inside an existing Bini project
-  create-bini-app sign [targets]                  Set up or redo code signing (this OS, Android, iOS on macOS)
-  create-bini-app remove <targets> [options]      Remove platform(s) from the project (desktop, android, ios)
+  create-bini-app add [targets] [options]         Add platform(s) inside an existing Bini project (no targets: pick from a list)
+  create-bini-app sign [targets]                  Set up or redo code signing (prompts)
+  create-bini-app sign <target> <file> <password> Sign without prompts (see "Signing" below)
+  create-bini-app remove [targets] [options]      Remove platform(s) from the project (desktop, android, ios; no targets: pick from a list)
   create-bini-app --app-name [name]               Inside a project: change the native app name (prompts without a value)
   create-bini-app --org [domain]                  Inside a project: change the bundle ID prefix (prompts without a value)
   create-bini-app doctor                          Check your machine for Tauri (runs \`tauri info\`)
   create-bini-app clean                           Delete build output (Vite + Tauri), keeps node_modules
-  create-bini-app upgrade                         Update dependencies to the latest versions
+  create-bini-app upgrade                         Update dependencies and copy the latest template files (not src/, package.json, vite.config)
   create-bini-app --platform <targets>            Same as above (alias)
 
-${c.bold}${c.cyan}Options:${c.reset}
+${c.heading("Options:")}
   --version, -v       Show version number
   --help, -h          Show help
   --typescript        Use TypeScript (create mode)
@@ -553,10 +796,12 @@ ${c.bold}${c.cyan}Options:${c.reset}
   --tailwind          Use Tailwind CSS (create mode)
   --css-modules       Use CSS Modules (create mode)
   --none              No styling (create mode)
-  --force             Create: overwrite an existing directory
+  --force             Create: overwrite an existing directory. sign --generate --ci-only: replace saved signing values
   --no-install        Skip installing project dependencies (installed automatically by default)
   --no-git            Skip git init on create
-  --yes, -y           Skip the confirmation prompt (remove, bundle ID change)
+  --yes, -y           No prompts: accept the default for every question not answered by a flag and
+                      skip every confirmation (create, add, remove, bundle ID change). Signing
+                      questions are skipped too: use \`sign <target> <file> <password>\` for those.
   --platform <target> ${TARGET_PLATFORMS.join(", ")}
                       (comma-separated to pick several: web,desktop,android)
   --app-name [name]   App name (default: from the project name). It is the initial site title
@@ -571,23 +816,66 @@ ${c.bold}${c.cyan}Options:${c.reset}
   --nosign            Skip code signing setup entirely, no prompts
   --npm | --pnpm | --yarn | --bun   Force a package manager
 
-${c.bold}${c.cyan}Examples:${c.reset}
-  ${c.dim}create-bini-app my-app${c.reset}
-  ${c.dim}create-bini-app my-app --typescript --tailwind --platform web${c.reset}
-  ${c.dim}create-bini-app my-app --platform android --app-name "My App"${c.reset}
-  ${c.dim}create-bini-app my-app --platform android --app-name   # prompt for the app name${c.reset}
-  ${c.dim}create-bini-app add android                  # inside an existing project${c.reset}
-  ${c.dim}create-bini-app add desktop,android --nosign${c.reset}
-  ${c.dim}create-bini-app --app-name                   # inside a project: prompt for a new native app name${c.reset}
-  ${c.dim}create-bini-app --org                        # inside a project: prompt for a new bundle ID prefix${c.reset}
-  ${c.dim}create-bini-app --app-name "My App" --org com.acme   # change both without prompts${c.reset}
-  ${c.dim}create-bini-app sign                         # redo signing for everything that applies here${c.reset}
-  ${c.dim}create-bini-app sign android                 # redo signing for one target${c.reset}
-  ${c.dim}create-bini-app my-app --platform android --org com.acme${c.reset}
-  ${c.dim}create-bini-app remove android               # delete the Android project${c.reset}
-  ${c.dim}create-bini-app doctor                       # check your machine (tauri info)${c.reset}
-  ${c.dim}create-bini-app clean                        # delete dist/ and other build output${c.reset}
-  ${c.dim}create-bini-app upgrade                      # update every dependency to latest${c.reset}
+${c.heading("Signing:")}
+  desktop                 signs the OS you are on, on this machine (same as: create-bini-app desktop sign)
+  android, ios            local signing (iOS needs a Mac)
+  <targets> --ci-only     for windows/linux/android: you choose between letting GitHub Actions generate a
+                          self-signed key (asks for a publisher name, plus a keystore password for Android)
+                          or giving real credentials. Either way the values are saved for GitHub Actions and
+                          nothing is set up on this machine. With a generated key the workflow creates the
+                          certificate, keystore or GPG key on the first build, saves it as a GitHub secret
+                          and reuses it afterwards. With no list, every platform in the project is used.
+                          iOS and macOS cannot be generated: iOS asks for your Apple certificate and profile;
+                          macOS uses --adhoc for local testing or a real Developer ID .p12 for CI.
+  windows, macos and linux by name only work with --ci-only. Use desktop for this machine.
+
+  Local Windows/macOS signing settings are written to src-tauri/tauri.windows.conf.json and
+  src-tauri/tauri.macos.conf.json. Tauri merges them automatically on that OS, and they are git-ignored,
+  so your committed tauri.conf.json never points at a certificate that only exists on your machine.
+
+  Without prompts for CI:
+            sign windows --generate [--publisher Name] --ci-only
+            sign linux --generate [--publisher Name] --ci-only
+            sign android --generate <password> [--publisher Name] [--alias upload] --ci-only
+            (macOS cannot be generated: use --adhoc for local testing, or a real Developer ID .p12)
+            (only Android needs a password; Linux GPG keys are generated with no passphrase)
+
+  Real credentials (needed for store releases): give a file and its password and nothing is asked. The
+  file is converted to base64 and saved with its password in .env.signing (git-ignored) for GitHub Actions.
+  They take precedence over generated keys.
+
+  windows   sign desktop <cert.pfx> <password>                      on Windows: also sets up local signing
+            sign windows <cert.pfx> <password> --ci-only
+            sign desktop --sign-command "<cloud signing command with %1>"
+            sign desktop --thumbprint <sha1>                        certificate already in your Windows store
+            sign desktop --generate [--publisher Name]              free self-signed certificate (Windows only)
+  macos     sign desktop <cert.p12> <password> [--identity "Developer ID Application: Name (TEAMID)"]
+            sign macos <cert.p12> <password> --ci-only
+            notarization: --api-issuer <id> --api-key <id> --api-key-file <AuthKey.p8>
+                          or --apple-id <email> --apple-password <app password> --team <TEAMID>
+            sign desktop --adhoc                                    ad-hoc signing for local testing (no Apple account)
+  linux     sign desktop                                            on Linux: GPG key for the AppImage (prompts)
+            sign desktop --generate [--publisher Name]              no passphrase (never needed)
+  ios       sign ios <cert.p12> <password> --profile <app.mobileprovision> [--team <TEAMID>]
+            sign ios <cert.p12> <password> --profile <app.mobileprovision> --ci-only
+            sign ios --team <TEAMID> [--api-issuer <id> --api-key <id> --api-key-file <AuthKey.p8>]
+                                                                    Xcode automatic signing; the API key is
+                                                                    needed for CI (App Store Connect > Integrations)
+  android   sign android <keystore.jks> <password> [--alias upload] [--key-password <password>]
+            sign android --generate <password>                      create a new keystore.jks (password required)
+
+  --ci-only           Only save the CI values: skip the local keychain / certificate store / Gradle setup
+  Passwords can come from the environment instead of the command line (use this for a password that
+  starts with "-", or to keep it out of shell history and process lists):
+    ${ENV_SIGN_PASSWORD} (certificate or Android keystore password), ${ENV_KEY_PASSWORD} (Android key password),
+    ${ENV_APPLE_PASSWORD} (Apple ID app-specific password)
+    Linux generated GPG keys never use a passphrase.
+
+${c.heading("Tauri signing guides:")}
+${(Object.keys(SIGNING_DOCS) as SigningTarget[]).map((t) => `  ${t.padEnd(8)}${SIGNING_DOCS[t]}`).join("\n")}
+
+${c.heading("Examples:")}
+${examples.map(([cmd, note]) => `  ${c.dim(note ? `${cmd}  ${note}` : cmd)}`).join("\n")}
 `);
 }
 
@@ -608,11 +896,63 @@ function parsePlatformList(raw: string | undefined, source: string): TargetPlatf
   return result;
 }
 
+/**
+ * `sign [targets...] [file] [password]`: leading words that are sign targets (or comma lists of them)
+ * are targets, the next word is the credential file and the one after it is the password.
+ * With `--generate` there is no file, so the next word is the password, and only the very first word
+ * can name targets (otherwise a password such as "android" would be read as a target).
+ * `--platform` values are added as targets for backwards compatibility.
+ */
+function parseSignArgs(rest: string[], platformFlags: TargetPlatform[], generate: boolean): SignParsed {
+  const targets: SignTarget[] = [];
+  const add = (t: SignTarget): void => {
+    if (!targets.includes(t)) targets.push(t);
+  };
+
+  let i = 0;
+  for (; i < rest.length; i++) {
+    if (generate && i > 0) break;
+    const words = (rest[i] ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+    if (words.length === 0 || !words.every(isSignTarget)) break;
+    for (const w of words) add(w as SignTarget);
+  }
+
+  const remaining = rest.slice(i);
+  const max = generate ? 1 : 2;
+  if (remaining.length > max) {
+    log.error(`Unexpected extra argument(s): ${remaining.slice(max).join(" ")}`);
+    log.info("Usage: create-bini-app sign <target> <file> <password>");
+    exit(1);
+  }
+
+  for (const p of platformFlags) {
+    if (p === "web") log.warn('"web" has nothing to sign, ignoring it.');
+    else add(p);
+  }
+
+  const [first, second] = remaining;
+  const file = generate ? undefined : first;
+  if (file !== undefined && targets.length === 0) {
+    log.error(`Which target is "${file}" for? Use e.g.: create-bini-app sign desktop ${file} <password>`);
+    log.info(`Targets: ${SIGN_TARGETS.join(", ")}`);
+    exit(1);
+  }
+  if (file !== undefined && targets.length > 1) {
+    log.error("A credential file belongs to one target. Run sign once per target.");
+    exit(1);
+  }
+  return { targets, file, password: generate ? first : second };
+}
+
 function parseCli(args: string[]) {
   try {
     return parseArgs({ args, options: CLI_OPTIONS, allowPositionals: true, strict: true });
   } catch (err) {
-    log.error((err as Error).message);
+    const message = (err as Error).message;
+    log.error(message);
+    if (/unknown option|ambiguous/i.test(message)) {
+      log.info(`A password that starts with "-" cannot be passed as an argument: set ${ENV_SIGN_PASSWORD} instead.`);
+    }
     log.info("Run with --help to see available options.");
     return exit(1);
   }
@@ -622,33 +962,25 @@ function parseCli(args: string[]) {
  * `--app-name` and `--org` may be used without a value to ask for a prompt.
  * A bare flag is one that is last, or followed by another flag or a command name.
  * (`--app-name=` and `--app-name ""` are still treated as an empty value and rejected.)
+ * util.parseArgs is kept on purpose: it never turns "0042" into a number, which matters for passwords and IDs.
  */
 function extractPromptFlags(args: string[]): { args: string[]; promptAppName: boolean; promptOrg: boolean } {
-  const rest: string[] = [];
-  let promptAppName = false;
-  let promptOrg = false;
-
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i];
-    if (arg === "--app-name" || arg === "--org") {
-      const next = args[i + 1];
-      if (next === undefined || next.startsWith("-") || SUBCOMMANDS.has(next)) {
-        if (arg === "--app-name") promptAppName = true;
-        else promptOrg = true;
-        continue;
-      }
-    }
-    rest.push(arg);
-  }
-
-  return { args: rest, promptAppName, promptOrg };
+  const bare = new Set<string>();
+  const rest = args.filter((arg, i) => {
+    if (arg !== "--app-name" && arg !== "--org") return true;
+    const next = args[i + 1];
+    if (next !== undefined && !next.startsWith("-") && !SUBCOMMANDS.has(next)) return true;
+    bare.add(arg);
+    return false;
+  });
+  return { args: rest, promptAppName: bare.has("--app-name"), promptOrg: bare.has("--org") };
 }
 
 function parseArguments(): { positionals: string[]; flags: CliFlags } {
   const rawArgs = process.argv.slice(2);
 
   if (rawArgs.includes("--version") || rawArgs.includes("-v")) {
-    log.plain(`${c.cyan}Bini.js CLI${c.reset} v${BINIJS_VERSION}`);
+    log.plain(`${c.cyan("Bini.js CLI")} v${BINIJS_VERSION}`);
     exit(0);
   }
   if (rawArgs.includes("--help") || rawArgs.includes("-h")) {
@@ -659,7 +991,16 @@ function parseArguments(): { positionals: string[]; flags: CliFlags } {
   const { args, promptAppName, promptOrg } = extractPromptFlags(rawArgs);
   const { values, positionals } = parseCli(args);
 
-  for (const name of ["platform", "app-name", "org"] as const) {
+  // `create-bini-app desktop sign` means `create-bini-app sign desktop`.
+  const [head, second] = positionals;
+  if (second === "sign" && head !== undefined && head.split(",").every(isSignTarget)) {
+    positionals.splice(0, 2, "sign", head);
+  }
+
+  for (const name of [
+    "platform", "app-name", "org", "alias", "profile", "team", "identity",
+    "api-issuer", "api-key", "api-key-file", "apple-id", "sign-command", "publisher", "thumbprint",
+  ] as const) {
     const value = values[name];
     if (value !== undefined && value.trim() === "") {
       log.error(`--${name} requires a value.`);
@@ -676,7 +1017,7 @@ function parseArguments(): { positionals: string[]; flags: CliFlags } {
   const js = Boolean(values.javascript || values["no-typescript"]);
   const sign = Boolean(values.sign);
   const noSign = Boolean(values.nosign);
-  const pmFlags = PM_PRIORITY.filter((p) => values[p]);
+  const pmFlags = PACKAGE_MANAGERS.filter((p) => values[p]);
 
   if (ts && js) {
     log.error("Cannot use --typescript and --javascript together.");
@@ -701,6 +1042,24 @@ function parseArguments(): { positionals: string[]; flags: CliFlags } {
     exit(1);
   }
 
+  const team = values.team?.trim().toUpperCase();
+  if (team !== undefined && !TEAM_ID_PATTERN.test(team)) {
+    log.error(`Invalid --team "${values.team}". A Team ID is 10 letters and numbers, e.g. ABCDE12345.`);
+    exit(1);
+  }
+
+  const thumbprint = values.thumbprint?.replace(/[\s:]/g, "").toUpperCase();
+  if (thumbprint !== undefined && !THUMBPRINT_PATTERN.test(thumbprint)) {
+    log.error(`Invalid --thumbprint "${values.thumbprint}". A thumbprint is 40 hex characters.`);
+    exit(1);
+  }
+
+  const signOnlyUsed = SIGN_ONLY_FLAGS.filter((n) => values[n] !== undefined && values[n] !== false).map((n) => `--${n}`);
+  if (signOnlyUsed.length > 0 && positionals[0] !== "sign") {
+    log.error(`${signOnlyUsed.join(", ")} can only be used with the sign command, e.g. create-bini-app sign <target> <file> <password>`);
+    exit(1);
+  }
+
   return {
     positionals,
     flags: {
@@ -719,32 +1078,52 @@ function parseArguments(): { positionals: string[]; flags: CliFlags } {
       yes: Boolean(values.yes),
       noGit: Boolean(values["no-git"]),
       packageManager: pmFlags[0],
+      alias: values.alias?.trim(),
+      keyPassword: values["key-password"],
+      profile: values.profile?.trim(),
+      team,
+      identity: values.identity?.trim(),
+      apiIssuer: values["api-issuer"]?.trim(),
+      apiKey: values["api-key"]?.trim(),
+      apiKeyFile: values["api-key-file"]?.trim(),
+      appleId: values["apple-id"]?.trim(),
+      applePassword: values["apple-password"],
+      signCommand: values["sign-command"]?.trim(),
+      ciOnly: Boolean(values["ci-only"]),
+      generate: Boolean(values.generate),
+      publisher: values.publisher?.trim(),
+      thumbprint,
+      adhoc: Boolean(values.adhoc),
     },
   };
 }
 
 function platformChoices(userOS: UserOS) {
-  return TARGET_PLATFORMS.map((p) => {
-    if (p === "web") return { name: PLATFORM_LABELS.web, value: p, checked: true };
-    if (p === "ios" && userOS !== "macos") return { name: PLATFORM_LABELS.ios, value: p, disabled: "(requires macOS)" };
-    return { name: PLATFORM_LABELS[p], value: p };
-  });
+  return TARGET_PLATFORMS
+    .filter((p) => p !== "ios" || userOS === "macos")
+    .map((p) => {
+      if (p === "web") return { name: PLATFORM_LABELS.web, value: p, checked: true };
+      return { name: PLATFORM_LABELS[p], value: p };
+    });
 }
 
 /**
  * Resolves the app name.
- * - `--app-name "X"`  -> X
+ * - `--app-name "X"`  -> X (no prompt)
  * - `--app-name`      -> prompt (default: the value given, else `current`, else the title-cased project name)
- * - neither           -> `current`, else the title-cased project name
+ * - neither           -> `current` / title-cased project name, unless `forcePrompt` is true (native targets)
+ * Without a terminal (or with --yes) it never prompts, and only warns when the user explicitly asked for a prompt.
  */
-async function askAppName(flags: CliFlags, projectName: string, current?: string): Promise<string> {
+async function askAppName(flags: CliFlags, projectName: string, current?: string, forcePrompt = false): Promise<string> {
   const fallback = current ?? toTitleCase(projectName);
   const given = flags.appName ? normalizeAppName(flags.appName) : "";
 
-  if (!flags.promptAppName) return given || fallback;
+  // An explicit value always wins and never needs a terminal.
+  if (flags.appName && !flags.promptAppName) return given || fallback;
+  if (!flags.promptAppName && !forcePrompt) return fallback;
 
   if (!isInteractive()) {
-    log.warn(`--app-name needs a terminal to prompt, using "${given || fallback}".`);
+    if (flags.promptAppName) log.warn(`--app-name needs a terminal to prompt, using "${given || fallback}".`);
     return given || fallback;
   }
 
@@ -817,13 +1196,18 @@ async function askQuestions(flags: CliFlags, projectName: string, userOS: UserOS
   if (iosSkipped) platforms = platforms.filter((p) => p !== "ios");
 
   const web = picked.includes("web") || platforms.length === 0;
-  const appName = await askAppName(flags, projectName);
 
+  let appName: string;
   let org: string;
   if (platforms.length > 0) {
+    // Native targets: prompt for app name and org
+    appName = await askAppName(flags, projectName, undefined, true);
     org = await askOrg(flags);
   } else {
+    // Web only: use defaults (title-cased project name / com.bini)
+    if (flags.promptAppName) log.info("--app-name only applies to desktop and mobile targets, skipping the prompt.");
     if (flags.promptOrg) log.info("--org only applies to desktop and mobile targets, skipping the prompt.");
+    appName = await askAppName(flags, projectName);
     org = flags.org ?? DEFAULT_ORG;
   }
 
@@ -845,152 +1229,7 @@ async function copyAssetFiles(publicPath: string): Promise<void> {
   );
 }
 
-async function generateWebManifest(projectPath: string, appName: string): Promise<void> {
-  const manifest = {
-    name: appName,
-    short_name: appName,
-    description: "Modern React application built with Bini.js",
-    start_url: "/",
-    display: "standalone",
-    background_color: "#ffffff",
-    theme_color: "#00CFFF",
-    icons: [
-      { src: "/favicon.ico", sizes: "64x64 32x32 24x24 16x16", type: "image/x-icon" },
-      { src: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" },
-    ],
-  };
-  await writeFile(path.join(projectPath, "public", "site.webmanifest"), JSON.stringify(manifest, null, 2));
-}
 
-async function generateViteConfig(projectPath: string, ext: ScriptExtension, styling: StylingOption): Promise<void> {
-  const imports = [
-    `import { defineConfig, loadEnv } from 'vite';`,
-    `import react from '@vitejs/plugin-react';`,
-    `import { biniroute } from 'bini-router';`,
-    `import { biniOverlay } from 'bini-overlay';`,
-    `import { biniEnv } from 'bini-env';`,
-    `import { biniSSG } from 'bini-ssg';`,
-    ...(styling === "Tailwind" ? [`import tailwindcss from '@tailwindcss/vite';`] : []),
-  ].join("\n");
-
-  const tailwindPlugin = styling === "Tailwind" ? `\n      tailwindcss(),` : "";
-
-  const content = `${imports}
-
-export default defineConfig(async ({ mode, isSsrBuild }) => {
-  const env = loadEnv(mode, process.cwd(), '');
-  const port = parseInt(env['PORT'] ?? '3000', 10);
-
-  const isTauri = env['TAURI'] === 'true' || process.env.TAURI === 'true';
-  const tauriDevHost = process.env.TAURI_DEV_HOST;
-  const isCodespace = !!env['CODESPACE_NAME'];
-
-  const host = tauriDevHost || (isTauri || isCodespace ? '0.0.0.0' : 'localhost');
-
-  const hmrConfig = tauriDevHost
-    ? { protocol: 'ws', host: tauriDevHost, port: port + 1, overlay: false }
-    : isCodespace
-      ? { clientPort: 443, overlay: false }
-      : { overlay: false, host: 'localhost', protocol: 'ws' };
-
-  const nativePkg = 'bini-native';
-  const native = isTauri && !isSsrBuild ? (await import(/* @vite-ignore */ nativePkg)).biniNative() : null;
-
-  return {
-    plugins: [${tailwindPlugin}
-      react(),
-      biniroute(),
-      biniOverlay(),
-      biniEnv(),
-      biniSSG(),
-      native,
-    ],
-
-    server: {
-      port,
-      host,
-      open: !isTauri,
-      cors: true,
-      hmr: hmrConfig,
-      watch: {
-        usePolling: isCodespace || isTauri,
-        ignored: [
-          '**/dist/**',
-          '**/node_modules/**',
-          ...(isTauri ? ['**/src-tauri/**'] : []),
-        ],
-      },
-      strictPort: isTauri,
-    },
-
-    preview: {
-      port,
-      host: '0.0.0.0',
-      open: true,
-      cors: true,
-    },
-
-    build: {
-      outDir: 'dist',
-      modulePreload: { polyfill: false },
-      chunkSizeWarningLimit: 1000,
-      rolldownOptions: {
-        output: {
-          chunkFileNames: 'js/[name]-[hash].js',
-          entryFileNames: 'js/[name]-[hash].js',
-          assetFileNames: (assetInfo) => {
-            const name = assetInfo.names?.[0] ?? assetInfo.name ?? '';
-            const ext = name.split('.').pop()?.toLowerCase() || '';
-            if (/png|jpe?g|gif|svg|webp|avif/.test(ext)) {
-              return 'assets/images/[name]-[hash][extname]';
-            }
-            if (/woff2?|eot|ttf|otf/.test(ext)) {
-              return 'assets/fonts/[name]-[hash][extname]';
-            }
-            if (ext === 'css') return 'css/[name]-[hash][extname]';
-            if (ext === 'json') return 'data/[name]-[hash][extname]';
-            return 'assets/[name]-[hash][extname]';
-          },
-        },
-        onwarn(warning, warn) {
-          const ignoreCodes = [
-            'MODULE_EXTERNALIZED',
-            'INEFFECTIVE_DYNAMIC_IMPORT',
-            'UNRESOLVED_IMPORT',
-          ];
-          const ignoreMessages = [
-            'stream',
-            'externalized',
-            'dynamic import will not move module',
-          ];
-          const code = warning.code || '';
-          const message = warning.message || '';
-
-          if (ignoreCodes.includes(code)) return;
-          if (ignoreMessages.some((msg) => message.includes(msg))) return;
-          warn(warning);
-        },
-      },
-    },
-
-    resolve: {
-      alias: { '@': '/src' },
-    },
-
-    css: {
-      modules: { localsConvention: 'camelCase' },
-      devSourcemap: true,
-    },
-
-    optimizeDeps: {
-      include: ['react', 'react-dom', 'react-router-dom'],
-    },
-  };
-});
-`;
-
-  await writeFile(path.join(projectPath, `vite.config.${ext}`), content);
-}
 
 function generateBundleIdentifier(org: string, projectName: string): string {
   const sanitized = projectName.toLowerCase().replace(/[^a-z0-9]+/g, "") || "app";
@@ -1014,6 +1253,8 @@ function readTauriConfSync(tauriDir: string): AnyJson | null {
   }
 }
 
+const hasTauriConf = (tauriDir: string): boolean => fs.existsSync(path.join(tauriDir, "tauri.conf.json"));
+
 async function patchTauriConf(tauriDir: string, mutate: (conf: AnyJson) => void): Promise<boolean> {
   const confPath = path.join(tauriDir, "tauri.conf.json");
   if (!fs.existsSync(confPath)) {
@@ -1033,16 +1274,120 @@ async function patchTauriConf(tauriDir: string, mutate: (conf: AnyJson) => void)
   }
 }
 
+/** Merges `patch` into `bundle.<key>` of tauri.conf.json (used for iOS, whose Team ID is safe to commit). */
+const patchBundle = (tauriDir: string, key: "windows" | "macOS" | "iOS", patch: AnyJson): Promise<boolean> =>
+  patchTauriConf(tauriDir, (conf) => {
+    conf.bundle ??= {};
+    conf.bundle[key] = { ...(conf.bundle[key] ?? {}), ...patch };
+  });
+
+/**
+ * Machine-specific signing settings (a Windows certificate thumbprint, a macOS keychain identity) only exist on
+ * the machine that holds the certificate. Committing them into tauri.conf.json makes CI and teammates fail, so they
+ * go into Tauri's platform override files instead: `tauri.windows.conf.json` and `tauri.macos.conf.json` are merged
+ * automatically on that OS, and both files are git-ignored.
+ */
+type LocalOverrideOS = "windows" | "macos";
+type LocalBundleKey = "windows" | "macOS";
+
+const localConfFile = (tauriDir: string, target: LocalOverrideOS): string => path.join(tauriDir, `tauri.${target}.conf.json`);
+
+/** The effective `bundle.<key>` settings: tauri.conf.json with the local override applied on top. */
+function readBundleSetting(tauriDir: string, target: LocalOverrideOS, key: LocalBundleKey): AnyJson {
+  const base = (readTauriConfSync(tauriDir)?.bundle?.[key] ?? {}) as AnyJson;
+  let local: AnyJson = {};
+  try {
+    local = (readJsonSync(localConfFile(tauriDir, target)).bundle?.[key] ?? {}) as AnyJson;
+  } catch {}
+  return { ...base, ...local };
+}
+
+async function patchLocalBundle(tauriDir: string, target: LocalOverrideOS, key: LocalBundleKey, patch: AnyJson): Promise<boolean> {
+  const file = localConfFile(tauriDir, target);
+  try {
+    // .gitignore first, so the file is never on disk un-ignored.
+    await appendGitignoreEntries(path.dirname(tauriDir), SIGNING_GITIGNORE);
+    let conf: AnyJson = {};
+    try {
+      conf = JSON.parse(await fsPromises.readFile(file, "utf-8")) as AnyJson;
+    } catch {}
+    conf.bundle ??= {};
+    conf.bundle[key] = { ...(conf.bundle[key] ?? {}), ...patch };
+    await writeFile(file, JSON.stringify(conf, null, 2) + "\n");
+    return true;
+  } catch (err) {
+    log.warn(`Could not update ${file}: ${(err as Error).message}`);
+    return false;
+  }
+}
+
 const shellQuote = (value: string): string => `'${value.replace(/'/g, `'\\''`)}'`;
 
-const escapeProperty = (value: string): string => value.replace(/[\r\n]/g, "").replace(/[\\:=#! ]/g, "\\$&");
+/**
+ * Java .properties files are read as Latin-1, so everything outside printable ASCII is written as \\uXXXX.
+ * Writing raw UTF-8 would corrupt non-ASCII passwords and paths.
+ */
+const escapeProperty = (value: string): string =>
+  value
+    .replace(/[\r\n]/g, "")
+    .replace(/[\\:=#! ]/g, "\\$&")
+    .replace(/[^\x20-\x7e]/g, (ch) => `\\u${ch.charCodeAt(0).toString(16).padStart(4, "0")}`);
+
+/** Reverses escapeProperty (Java .properties escapes). */
+const unescapeProperty = (value: string): string =>
+  value.replace(/\\u([0-9a-fA-F]{4})|\\(.)/g, (_m, hex: string | undefined, ch: string | undefined) =>
+    hex !== undefined ? String.fromCharCode(parseInt(hex, 16)) : (ch as string)
+  );
 
 const SIGNING_ENV_HEADER = [
   "# Code signing secrets, never commit this file.",
-  "# Load before building with: set -a; source .env.signing; set +a",
+  "# Used by the deploy script to upload these as GitHub secrets for CI builds.",
+  "# Local builds do not need this file: they are signed from your local tauri.<os>.conf.json, keychain and Xcode.",
+  "# APPLE_API_KEY_PATH only points at a file on this machine: it is for local notarization, not a CI secret.",
   "",
 ];
-const SIGNING_GITIGNORE = [".env.signing"];
+
+/** Everything that must never be committed. Appended to the project's .gitignore whenever signing is set up. */
+const SIGNING_GITIGNORE = [
+  ".env.signing",
+  ".bini-signing/",
+  "tauri.windows.conf.json",
+  "tauri.macos.conf.json",
+  "*.jks",
+  "*.keystore",
+  "*.p12",
+  "*.pfx",
+  "*.p8",
+  "*.mobileprovision",
+  "*.key",
+  "keystore.properties",
+];
+
+/**
+ * Real-credential keys for a target: what a previous `sign <target> <file> <password>` run wrote.
+ * `saveGeneratedValues` never touches these, so swapping real credentials for generated ones has to
+ * remove them explicitly, or the workflow (which prefers the real secret) keeps using the old file.
+ * The generated-side keys (the *_PUBLISHER entries) are overwritten by saveGeneratedValues directly.
+ *
+ * Linux also stores the RPM-signing variables: Tauri reads TAURI_SIGNING_RPM_KEY for the .rpm bundle,
+ * so a real Linux credential includes the AppImage and RPM variables.
+ */
+const REAL_CREDENTIAL_KEYS: Partial<Record<SigningTarget, string[]>> = {
+  windows: ["WINDOWS_CERTIFICATE", "WINDOWS_CERTIFICATE_PASSWORD"],
+  android: ["ANDROID_KEY_BASE64", "ANDROID_KEY_ALIAS", "ANDROID_KEY_PASSWORD", "ANDROID_KEYSTORE_PASSWORD"],
+  linux: [
+    "GPG_PRIVATE_KEY", "SIGN_KEY", "APPIMAGETOOL_SIGN_PASSPHRASE", "APPIMAGETOOL_FORCE_SIGN",
+    "TAURI_SIGNING_RPM_KEY", "TAURI_SIGNING_RPM_KEY_PASSPHRASE",
+  ],
+  ios: ["IOS_CERTIFICATE", "IOS_CERTIFICATE_PASSWORD", "IOS_MOBILE_PROVISION", "APPLE_DEVELOPMENT_TEAM"],
+  macos: [
+    "APPLE_CERTIFICATE", "APPLE_CERTIFICATE_PASSWORD", "APPLE_SIGNING_IDENTITY",
+    "APPLE_API_ISSUER", "APPLE_API_KEY", "APPLE_API_KEY_P8",
+    "APPLE_ID", "APPLE_PASSWORD", "APPLE_TEAM_ID", "KEYCHAIN_PASSWORD",
+  ],
+};
+
+const SIGNING_ENV_FILE = ".env.signing";
 
 async function writeKeyValueFile(filePath: string, vars: Record<string, string>): Promise<void> {
   let existing = "";
@@ -1067,6 +1412,30 @@ async function writeKeyValueFile(filePath: string, vars: Record<string, string>)
   await writeFile(filePath, merged.join("\n") + "\n", 0o600);
 }
 
+/**
+ * Deletes the named keys from a KEY='value' file, preserving every other line and its quoting.
+ * Used together with REAL_CREDENTIAL_KEYS when the user confirms replacing real credentials with
+ * generated ones: otherwise the old real-credential line would stay and the workflow would keep
+ * preferring it, silently ignoring the replacement.
+ * No-op when the file does not exist or holds none of the keys.
+ */
+async function removeKeyValueKeys(filePath: string, keys: string[]): Promise<void> {
+  if (keys.length === 0) return;
+  let existing = "";
+  try { existing = await fsPromises.readFile(filePath, "utf-8"); } catch { return; }
+  const drop = new Set(keys);
+  const lines = existing.replace(/\r\n/g, "\n").split("\n");
+  const kept = lines.filter((line) => {
+    const key = /^([A-Za-z_][A-Za-z0-9_]*)=/.exec(line)?.[1];
+    return !(key && drop.has(key));
+  });
+  if (kept.length === lines.length) return;
+  // Preserve the trailing newline when the original had one.
+  const trailing = kept.at(-1) === "" ? kept : [...kept, ""];
+  await fsPromises.writeFile(filePath, trailing.join("\n"), { mode: 0o600 });
+  await fsPromises.chmod(filePath, 0o600).catch(() => {});
+}
+
 async function appendGitignoreEntries(projectPath: string, entries: string[]): Promise<void> {
   const gitignorePath = path.join(projectPath, ".gitignore");
   let existing = "";
@@ -1077,6 +1446,21 @@ async function appendGitignoreEntries(projectPath: string, entries: string[]): P
   if (missing.length === 0) return;
   const prefix = existing.length > 0 && !existing.endsWith("\n") ? "\n" : "";
   await fsPromises.appendFile(gitignorePath, `${prefix}${missing.join("\n")}\n`);
+}
+
+const fileBase64 = async (file: string): Promise<string> => (await fsPromises.readFile(file)).toString("base64");
+
+/**
+ * Saves values for GitHub Actions in the git-ignored .env.signing (never prints the values).
+ * .gitignore is updated first, so the secrets file is never on disk unignored, and the mode is
+ * enforced afterwards because writeFile's mode does not apply to a file that already exists.
+ */
+async function saveCiValues(projectPath: string, vars: Record<string, string>): Promise<void> {
+  await appendGitignoreEntries(projectPath, SIGNING_GITIGNORE);
+  const envPath = path.join(projectPath, SIGNING_ENV_FILE);
+  await writeKeyValueFile(envPath, vars);
+  await fsPromises.chmod(envPath, 0o600).catch(() => {}); // no-op on Windows
+  log.success(`Saved for GitHub Actions in ${path.relative(projectPath, envPath)}: ${Object.keys(vars).join(", ")}`);
 }
 
 async function patchAndroidGradleSigning(androidGenDir: string): Promise<void> {
@@ -1137,9 +1521,159 @@ async function patchAndroidGradleSigning(androidGenDir: string): Promise<void> {
 const minLength = (n: number, label: string) => (v: string) =>
   v.length >= n ? true : `${label} must be at least ${n} characters.`;
 const required = (v: string) => (v.trim().length > 0 ? true : "Required.");
-const fileMustExist = (v: string) => (fs.existsSync(v) ? true : "File not found.");
+
+/** PKCS12 keystores (.p12/.pfx) require the key password to equal the store password. */
+const isPkcs12File = (file: string): boolean => /\.(p12|pfx)$/i.test(file);
+
+// ─── Android ─────────────────────────────────────────────────────────────────
+
+function readKeystoreProperties(file: string): Record<string, string> | null {
+  try {
+    const out: Record<string, string> = {};
+    for (const raw of fs.readFileSync(file, "utf-8").split("\n")) {
+      const line = raw.replace(/\r$/, "");
+      if (line.trim() === "" || line.trimStart().startsWith("#")) continue;
+      // escapeProperty escapes "=" inside values, so the first "=" is always the separator.
+      const i = line.indexOf("=");
+      if (i <= 0) continue;
+      out[line.slice(0, i)] = unescapeProperty(line.slice(i + 1));
+    }
+    return out;
+  } catch {
+    return null;
+  }
+}
+
+type KeystoreCheck = "ok" | "bad" | "no-keytool";
+
+/** Opens the keystore with keytool to check the store password and that the alias exists. */
+function verifyKeystore(file: string, storePass: string, alias: string): KeystoreCheck {
+  if (!commandExists("keytool")) return "no-keytool";
+  try {
+    execFileSync("keytool", ["-list", "-keystore", file, "-storepass:env", "BINI_STOREPASS", "-alias", alias], {
+      stdio: "pipe",
+      timeout: 30_000,
+      windowsHide: true,
+      env: { ...process.env, BINI_STOREPASS: storePass },
+    });
+    return "ok";
+  } catch {
+    return "bad";
+  }
+}
+
+/** Creates a new keystore with keytool. The key password equals the store password (PKCS12 requires it). */
+function generateAndroidKeystore(file: string, alias: string, storePassword: string, projectName: string): boolean {
+  if (!commandExists("keytool")) {
+    log.warn("keytool not found on PATH (ships with the JDK). Add it to PATH or use Android Studio's copy.");
+  }
+  log.step(`Generating ${path.relative(process.cwd(), file) || "keystore.jks"}...`);
+  const dname = `CN=${projectName}, OU=Dev, O=Bini, L=Unknown, S=Unknown, C=US`;
+  try {
+    execFileSync(
+      "keytool",
+      [
+        "-genkeypair", "-v",
+        "-keystore", file,
+        "-keyalg", "RSA", "-keysize", "2048", "-validity", "10000",
+        "-alias", alias,
+        "-storepass:env", "BINI_STOREPASS",
+        "-keypass:env", "BINI_KEYPASS",
+        "-dname", dname,
+      ],
+      {
+        stdio: "pipe",
+        timeout: 30_000,
+        windowsHide: true,
+        env: { ...process.env, BINI_STOREPASS: storePassword, BINI_KEYPASS: storePassword },
+      }
+    );
+    log.success(`Keystore created at ${path.relative(process.cwd(), file) || "keystore.jks"}`);
+    log.info("Back up the keystore and its password: every Play Store update must be signed with the same key.");
+    return true;
+  } catch (err) {
+    log.warn(`Could not generate keystore automatically: ${(err as Error).message.split("\n")[0]}`);
+    log.info("Generate it manually with keytool, see https://v2.tauri.app/distribute/sign/android/");
+    return false;
+  }
+}
+
+/** Writes keystore.properties and wires Gradle. Returns false when the Android project does not exist yet. */
+async function writeAndroidLocalConfig(
+  ctx: SigningContext,
+  storeFile: string,
+  alias: string,
+  storePassword: string,
+  keyPassword: string
+): Promise<boolean> {
+  const { projectPath, tauriDir } = ctx;
+  const androidGenDir = path.join(tauriDir, "gen", "android");
+  if (!fs.existsSync(androidGenDir)) return false;
+
+  const propsPath = path.join(androidGenDir, "keystore.properties");
+  await writeFile(
+    propsPath,
+    [
+      `storePassword=${escapeProperty(storePassword)}`,
+      `keyPassword=${escapeProperty(keyPassword)}`,
+      `keyAlias=${escapeProperty(alias)}`,
+      `storeFile=${escapeProperty(storeFile)}`,
+      "",
+    ].join("\n"),
+    0o600
+  );
+  log.success(`Wrote ${path.relative(projectPath, propsPath)}`);
+
+  await appendGitignoreEntries(projectPath, SIGNING_GITIGNORE);
+  await patchAndroidGradleSigning(androidGenDir);
+  return true;
+}
+
+async function saveAndroidCiValues(
+  projectPath: string,
+  keystoreFile: string,
+  alias: string,
+  storePassword: string,
+  keyPassword: string
+): Promise<void> {
+  await saveCiValues(projectPath, {
+    ANDROID_KEY_BASE64: await fileBase64(keystoreFile),
+    ANDROID_KEY_ALIAS: alias,
+    ANDROID_KEY_PASSWORD: keyPassword,
+    ANDROID_KEYSTORE_PASSWORD: storePassword,
+  });
+}
+
+/** Interactive `--ci-only` with a real keystore: only saves the values for GitHub Actions, changes nothing locally. */
+async function setupAndroidCiOnly(ctx: SigningContext): Promise<boolean> {
+  const { projectPath } = ctx;
+  log.info("Saving Android signing for GitHub Actions only: nothing is changed on this machine.");
+
+  const file = await askFile("Path to your keystore (.jks, .keystore or .p12)", [".jks", ".keystore", ".p12", ".pfx"]);
+  const alias = await input({ message: "Key alias:", default: "upload" });
+  const storePassword = await password({ message: "Keystore password:", validate: minLength(6, "Password") });
+
+  let keyPassword = storePassword;
+  if (!isPkcs12File(file)) {
+    const kp = await password({ message: "Key password (leave blank if same as keystore password):" });
+    if (kp.length > 0) keyPassword = kp;
+  }
+
+  const check = verifyKeystore(file, storePassword, alias);
+  if (check === "bad") {
+    log.warn("keytool could not open that keystore with that password and alias.");
+    if (!(await confirm({ message: "Use it anyway?", default: false }))) return false;
+  } else if (check === "ok") {
+    log.success("Keystore opened successfully.");
+  }
+
+  await saveAndroidCiValues(projectPath, file, alias, storePassword, keyPassword);
+  return true;
+}
 
 async function setupAndroidSigning(ctx: SigningContext): Promise<boolean> {
+  if (ctx.ciOnly) return setupAndroidCiOnly(ctx);
+
   const { projectPath, tauriDir, pm } = ctx;
   const androidGenDir = path.join(tauriDir, "gen", "android");
   if (!fs.existsSync(androidGenDir)) {
@@ -1147,9 +1681,9 @@ async function setupAndroidSigning(ctx: SigningContext): Promise<boolean> {
     return false;
   }
 
-  const gitignoreEntries = ["src-tauri/gen/android/keystore.properties", "*.jks", "*.keystore"];
-
   const propsPath = path.join(androidGenDir, "keystore.properties");
+  const rootStore = path.join(projectPath, "keystore.jks");
+
   if (fs.existsSync(propsPath)) {
     const replace = await confirm({
       message: `${path.relative(projectPath, propsPath)} already exists. Replace it?`,
@@ -1157,8 +1691,17 @@ async function setupAndroidSigning(ctx: SigningContext): Promise<boolean> {
     });
     if (!replace) {
       log.skip("Kept existing keystore.properties.");
-      await appendGitignoreEntries(projectPath, gitignoreEntries);
+      await appendGitignoreEntries(projectPath, SIGNING_GITIGNORE);
       await patchAndroidGradleSigning(androidGenDir);
+
+      // Make sure GitHub Actions gets the same credentials.
+      const props = readKeystoreProperties(propsPath);
+      const keepStore = props?.storeFile && fs.existsSync(props.storeFile) ? props.storeFile : rootStore;
+      if (props?.keyAlias && props.storePassword && props.keyPassword && fs.existsSync(keepStore)) {
+        await saveAndroidCiValues(projectPath, keepStore, props.keyAlias, props.storePassword, props.keyPassword);
+      } else {
+        log.info("Could not read the existing keystore settings, so nothing was saved for GitHub Actions. Run sign again and replace them.");
+      }
       return true;
     }
   }
@@ -1167,100 +1710,707 @@ async function setupAndroidSigning(ctx: SigningContext): Promise<boolean> {
     log.warn("keytool not found on PATH (ships with the JDK). Add it to PATH or use Android Studio's copy.");
   }
 
-  const storeFile = path.join(projectPath, "keystore.jks");
-  let keyAlias = "upload";
+  let source: "root" | "generate" | "file";
+  if (fs.existsSync(rootStore)) {
+    log.info("Using the existing keystore.jks in the project root.");
+    source = "root";
+  } else {
+    source = await select<"generate" | "file">({
+      message: "Android release keystore:",
+      choices: [
+        { name: "Generate a new keystore (recommended for a new app)", value: "generate" },
+        { name: "Use a keystore file I already have (for example from the Play Store)", value: "file" },
+      ],
+      default: "generate",
+    });
+  }
+
+  let alias = "upload";
   let storePassword: string;
   let keyPassword: string;
 
-  if (fs.existsSync(storeFile)) {
-    log.info("Using the existing keystore.jks in the project root.");
-    keyAlias = await input({ message: "Key alias:", default: "upload" });
-    storePassword = await password({ message: "Keystore password:", mask: "*", validate: minLength(6, "Password") });
-    const kp = await password({ message: "Key password (leave blank if same as keystore password):", mask: "*" });
-    keyPassword = kp.length > 0 ? kp : storePassword;
-  } else {
-    storePassword = await password({ message: "Set a keystore password (min 6 chars):", mask: "*", validate: minLength(6, "Password") });
+  if (source === "generate") {
+    storePassword = await password({ message: "Set a keystore password (min 6 chars):", validate: minLength(6, "Password") });
     keyPassword = storePassword;
+    if (!generateAndroidKeystore(rootStore, alias, storePassword, path.basename(projectPath))) return false;
+  } else {
+    let picked = rootStore;
+    if (source === "file") {
+      picked = await askFile("Path to your keystore (.jks, .keystore or .p12)", [".jks", ".keystore", ".p12", ".pfx"]);
+    }
+    alias = await input({ message: "Key alias:", default: "upload" });
+    storePassword = await password({ message: "Keystore password:", validate: minLength(6, "Password") });
+    // A PKCS12 keystore has one password for both, so there is nothing separate to ask.
+    const kp = isPkcs12File(picked) ? "" : await password({ message: "Key password (leave blank if same as keystore password):" });
+    keyPassword = kp.length > 0 ? kp : storePassword;
 
-    log.step("Generating keystore.jks in the project root...");
-    const dname = `CN=${path.basename(projectPath)}, OU=Dev, O=Bini, L=Unknown, S=Unknown, C=US`;
-    try {
-      execFileSync(
-        "keytool",
-        [
-          "-genkeypair", "-v",
-          "-keystore", storeFile,
-          "-keyalg", "RSA", "-keysize", "2048", "-validity", "10000",
-          "-alias", keyAlias,
-          "-storepass:env", "BINI_STOREPASS",
-          "-keypass:env", "BINI_KEYPASS",
-          "-dname", dname,
-        ],
-        {
-          stdio: "pipe",
-          timeout: 30_000,
-          windowsHide: true,
-          env: { ...process.env, BINI_STOREPASS: storePassword, BINI_KEYPASS: keyPassword },
-        }
-      );
-      log.success("Keystore created at keystore.jks");
-      log.info("Back up keystore.jks and its password: every Play Store update must be signed with the same key.");
-    } catch (err) {
-      log.warn(`Could not generate keystore automatically: ${(err as Error).message.split("\n")[0]}`);
-      log.info("Generate it manually with keytool, see https://v2.tauri.app/distribute/sign/android/");
-      return false;
+    const check = verifyKeystore(picked, storePassword, alias);
+    if (check === "bad") {
+      log.warn("keytool could not open that keystore with that password and alias.");
+      if (!(await confirm({ message: "Use it anyway?", default: false }))) return false;
+    } else if (check === "ok") {
+      log.success("Keystore opened successfully.");
+    }
+
+    if (path.resolve(picked) !== path.resolve(rootStore)) {
+      await fsPromises.copyFile(picked, rootStore);
+      log.success("Copied the keystore to keystore.jks in the project root.");
     }
   }
 
-  await writeFile(
-    propsPath,
-    [
-      `storePassword=${escapeProperty(storePassword)}`,
-      `keyPassword=${escapeProperty(keyPassword)}`,
-      `keyAlias=${escapeProperty(keyAlias)}`,
-      `storeFile=${escapeProperty(storeFile)}`,
-      "",
-    ].join("\n"),
-    0o600
-  );
-  log.success(`Wrote ${path.relative(projectPath, propsPath)}`);
-
-  await appendGitignoreEntries(projectPath, gitignoreEntries);
-  await patchAndroidGradleSigning(androidGenDir);
+  await writeAndroidLocalConfig(ctx, rootStore, alias, storePassword, keyPassword);
+  await saveAndroidCiValues(projectPath, rootStore, alias, storePassword, keyPassword);
   log.success(`Android release signing configured. \`${pmRun(pm, "android:build")}\` will now produce a signed release.`);
   return true;
 }
 
+/** Non-interactive: an existing keystore (`sign android <file> <password>`) or a new one (`--generate`). */
+async function applyAndroidKeystore(
+  ctx: SigningContext,
+  flags: CliFlags,
+  file: string | undefined,
+  pass: string
+): Promise<boolean> {
+  const { projectPath } = ctx;
+  const alias = flags.alias ?? "upload";
+  const rootStore = path.join(projectPath, "keystore.jks");
+  let source: string;
+  let keyPass = flags.keyPassword ?? process.env[ENV_KEY_PASSWORD] ?? pass;
+
+  if (file === undefined) {
+    if (pass.length < 6) {
+      log.error("The keystore password must be at least 6 characters.");
+      return false;
+    }
+    if (fs.existsSync(rootStore)) {
+      log.error("keystore.jks already exists in the project root, so it was not overwritten. To use it: sign android keystore.jks <password>");
+      return false;
+    }
+    if (!generateAndroidKeystore(rootStore, alias, pass, path.basename(projectPath))) return false;
+    source = rootStore;
+    keyPass = pass;
+  } else {
+    source = file;
+    if (isPkcs12File(file) && keyPass !== pass) {
+      log.warn("A .p12/.pfx keystore uses one password for the store and the key, so the key password was ignored.");
+      keyPass = pass;
+    }
+    const check = verifyKeystore(source, pass, alias);
+    if (check === "bad") {
+      log.error(`keytool could not open that keystore with that password and the alias "${alias}". Check the password and --alias.`);
+      return false;
+    }
+    if (check === "ok") log.success("Keystore opened successfully.");
+    else log.info("keytool was not found, so the keystore could not be checked.");
+  }
+
+  if (!ctx.ciOnly) {
+    if (path.resolve(source) !== path.resolve(rootStore)) await fsPromises.copyFile(source, rootStore);
+    const wired = await writeAndroidLocalConfig(ctx, rootStore, alias, pass, keyPass);
+    if (!wired) log.info("No Android project here yet, so only the GitHub Actions values were saved. Add it with: create-bini-app add android");
+  }
+  await saveAndroidCiValues(projectPath, source, alias, pass, keyPass);
+  return true;
+}
+
+// ─── Windows: self-signed certificate ────────────────────────────────────────
+
 const sanitizeCertName = (name: string): string => name.replace(/[",=+<>#;\\]/g, "").trim() || "Bini App";
 
-function generateSelfSignedCertificate(publisher: string): string | null {
-  const script =
-    '$c = New-SelfSignedCertificate -Type CodeSigningCert -Subject ("CN=" + $env:BINI_CERT_CN) ' +
-    "-CertStoreLocation Cert:\\CurrentUser\\My -KeyAlgorithm RSA -KeyLength 2048 -HashAlgorithm SHA256 " +
-    "-NotAfter (Get-Date).AddYears(3); $c.Thumbprint";
+/** Runs a PowerShell script whose last output line is a certificate thumbprint. */
+function psThumbprint(script: string, env: Record<string, string>, failure: string): string | null {
   try {
     const out = execFileSync("powershell", ["-NoProfile", "-NonInteractive", "-Command", script], {
       encoding: "utf8",
       stdio: "pipe",
       timeout: 60_000,
       windowsHide: true,
-      env: { ...process.env, BINI_CERT_CN: publisher },
+      env: { ...process.env, ...env },
     });
     const thumbprint = (out.trim().split(/\r?\n/).pop() ?? "").trim();
-    if (!/^[0-9A-Fa-f]{40}$/.test(thumbprint)) throw new Error("PowerShell did not return a thumbprint.");
+    if (!THUMBPRINT_PATTERN.test(thumbprint)) throw new Error("PowerShell did not return a thumbprint.");
     return thumbprint.toUpperCase();
   } catch (err) {
-    log.warn(`Could not create the certificate automatically: ${(err as Error).message.split("\n")[0]}`);
-    log.info('Create one manually: New-SelfSignedCertificate -Type CodeSigningCert -Subject "CN=Your Name" -CertStoreLocation Cert:\\CurrentUser\\My');
+    log.warn(`${failure}: ${(err as Error).message.split("\n")[0]}`);
     return null;
   }
+}
+
+function generateSelfSignedCertificate(publisher: string): string | null {
+  const thumbprint = psThumbprint(
+    '$c = New-SelfSignedCertificate -Type CodeSigningCert -Subject ("CN=" + $env:BINI_CERT_CN) ' +
+      "-CertStoreLocation Cert:\\CurrentUser\\My -KeyAlgorithm RSA -KeyLength 2048 -HashAlgorithm SHA256 " +
+      "-NotAfter (Get-Date).AddYears(3); $c.Thumbprint",
+    { BINI_CERT_CN: publisher },
+    "Could not create the certificate automatically"
+  );
+  if (!thumbprint) {
+    log.info('Create one manually: New-SelfSignedCertificate -Type CodeSigningCert -Subject "CN=Your Name" -CertStoreLocation Cert:\\CurrentUser\\My');
+  }
+  return thumbprint;
+}
+
+/** Imports a .pfx into the current user's certificate store and returns its thumbprint. */
+const importPfxToWindowsStore = (file: string, pass: string): string | null =>
+  psThumbprint(
+    "$pw = ConvertTo-SecureString $env:BINI_PFX_PASS -AsPlainText -Force; " +
+      "$c = Import-PfxCertificate -FilePath $env:BINI_PFX -CertStoreLocation Cert:\\CurrentUser\\My -Password $pw; " +
+      "$c.Thumbprint",
+    { BINI_PFX: file, BINI_PFX_PASS: pass },
+    "Could not import the certificate into the Windows certificate store"
+  );
+
+/**
+ * Imports a .p12 into the login keychain so local builds can sign with it.
+ * Note: `security import` only accepts the password through `-P`, so it is briefly visible in the process list
+ * on this machine. There is no environment-variable or stdin alternative.
+ */
+function importToMacKeychain(file: string, pass: string, identity: string): boolean {
+  const have = spawnSync("security", ["find-identity", "-v", "-p", "codesigning"], { encoding: "utf8" });
+  if (have.status === 0 && identity && have.stdout.includes(identity)) {
+    log.info("That certificate is already in your keychain.");
+    return true;
+  }
+  const keychain = path.join(os.homedir(), "Library", "Keychains", "login.keychain-db");
+  const r = spawnSync(
+    "security",
+    ["import", file, "-k", keychain, "-P", pass, "-T", "/usr/bin/codesign", "-T", "/usr/bin/security"],
+    { encoding: "utf8" }
+  );
+  if (r.status !== 0) {
+    log.warn(`Could not import the certificate into your keychain: ${(r.stderr || "security failed").trim().split("\n").pop()}`);
+    return false;
+  }
+  log.success("Imported the certificate into your login keychain.");
+  log.info("macOS may ask once for permission to use the key the first time you build.");
+  return true;
+}
+
+// ─── Real (paid) certificates: guide, import and checks ──────────────────────
+
+type GuideTarget = "macos" | "ios" | "windows";
+
+const GUIDES: Record<GuideTarget, { title: string; steps: string[] }> = {
+  macos: {
+    title: "Get a Developer ID Application certificate (apps distributed outside the Mac App Store)",
+    steps: [
+      "Join the Apple Developer Program (paid, yearly): https://developer.apple.com/programs/",
+      "Only the Account Holder can create this certificate. Open https://developer.apple.com/account/resources/certificates/add",
+      'Choose "Developer ID Application" and upload a certificate request (CSR). No Mac? Pick "create a request" in this tool and it makes the CSR for you.',
+      "Download the .cer Apple gives you. On a Mac, double-click it, then export it from Keychain Access (with its private key) as a .p12. Without a Mac, this tool builds the .p12 from your .cer.",
+      "For notarization create an App Store Connect API key: App Store Connect > Users and Access > Integrations. Note the Issuer ID and Key ID, and download the .p8 (it can only be downloaded once).",
+    ],
+  },
+  ios: {
+    title: "Get an Apple Distribution certificate and provisioning profile (TestFlight and the App Store)",
+    steps: [
+      "Join the Apple Developer Program (paid, yearly): https://developer.apple.com/programs/",
+      "Register an App ID whose bundle ID matches your app: https://developer.apple.com/account/resources/identifiers/add",
+      'Create an "Apple Distribution" certificate with a CSR (pick "create a request" here if you have no Mac) and get it as a .p12: https://developer.apple.com/account/resources/certificates/add',
+      'Create a provisioning profile: Profiles > + > "App Store Connect", select the App ID and the certificate, and download the .mobileprovision: https://developer.apple.com/account/resources/profiles/add',
+      "For CI automatic signing, create an App Store Connect API key with Admin access: App Store Connect > Users and Access > Integrations. Note the Issuer ID and Key ID, download the .p8 (only once).",
+      "To publish, also create the app in App Store Connect with the same bundle ID.",
+    ],
+  },
+  windows: {
+    title: "Get a Windows code signing certificate",
+    steps: [
+      "Buy a code signing certificate (OV or EV) from a certificate authority listed in Microsoft's docs. An SSL certificate does not work.",
+      "Since June 2023, new OV/EV certificates are issued on hardware or in a cloud HSM, so you usually cannot export a .pfx. Older certificates may still come as a .pfx.",
+      'Have a .pfx? Choose "Use a certificate I already have" and give its thumbprint, then add the .pfx for CI.',
+      'Have a .cer and a .key instead? Run: openssl pkcs12 -export -in cert.cer -inkey private-key.key -out certificate.pfx',
+      'Cloud or hardware key (Azure Key Vault, Azure Artifact Signing, your CA\'s cloud signer)? Choose the custom sign command option: Tauri runs your tool through bundle.windows.signCommand.',
+    ],
+  },
+};
+
+function printGuide(target: GuideTarget): void {
+  const guide = GUIDES[target];
+  log.plain(`\n${c.heading(guide.title)}`);
+  guide.steps.forEach((step, i) => log.plain(`  ${i + 1}. ${step}`));
+  log.plain("");
+}
+
+const cleanPath = (v: string): string =>
+  v.trim().replace(/^["']|["']$/g, "").replace(/^~(?=$|[\\/])/, os.homedir());
+
+function newestDownload(exts: string[]): string | undefined {
+  const dir = path.join(os.homedir(), "Downloads");
+  try {
+    const files = fs
+      .readdirSync(dir)
+      .filter((f) => exts.includes(path.extname(f).toLowerCase()))
+      .map((f) => ({ file: path.join(dir, f), time: fs.statSync(path.join(dir, f)).mtimeMs }))
+      .sort((a, b) => b.time - a.time);
+    return files[0]?.file;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Asks for a file. Drag and drop works (quotes are stripped) and the newest matching file in Downloads is the default. */
+async function askFile(message: string, exts: string[]): Promise<string> {
+  const value = await input({
+    message,
+    default: newestDownload(exts),
+    validate: (v) => (fs.existsSync(cleanPath(v)) ? true : "File not found."),
+  });
+  return path.resolve(cleanPath(value));
+}
+
+interface CertInfo {
+  subject: string;
+  commonName: string;
+  notAfter: Date;
+  /** The .p12/.pfx contains a private key (without one the certificate cannot sign). */
+  hasKey: boolean;
+  /** true / false when the certificate lists its allowed uses, undefined when it does not say. */
+  codeSigning: boolean | undefined;
+}
+
+type CertInspection = CertInfo | "no-openssl" | "unreadable";
+
+/** Reads a .p12/.pfx with openssl. Returns "no-openssl" when it cannot check, "unreadable" for a wrong password or bad file. */
+function inspectCertificate(file: string, pass: string): CertInspection {
+  if (!commandExists("openssl")) return "no-openssl";
+  const env = { ...process.env, BINI_P12_PASS: pass };
+  for (const legacy of [false, true]) {
+    const extra = legacy ? ["-legacy"] : [];
+    const pem = spawnSync("openssl", ["pkcs12", "-in", file, "-nokeys", "-clcerts", "-passin", "env:BINI_P12_PASS", ...extra], {
+      encoding: "utf8",
+      env,
+      windowsHide: true,
+    });
+    if (pem.status !== 0) continue;
+    const info = spawnSync("openssl", ["x509", "-noout", "-subject", "-enddate", "-nameopt", "multiline,utf8"], {
+      input: pem.stdout,
+      encoding: "utf8",
+      windowsHide: true,
+    });
+    if (info.status !== 0) continue;
+
+    const keys = spawnSync("openssl", ["pkcs12", "-in", file, "-nocerts", "-nodes", "-passin", "env:BINI_P12_PASS", ...extra], {
+      encoding: "utf8",
+      env,
+      windowsHide: true,
+    });
+    const hasKey = keys.status === 0 && /PRIVATE KEY/.test(keys.stdout);
+
+    // `-ext` is not supported by every openssl build (for example LibreSSL), so this is best effort.
+    const eku = spawnSync("openssl", ["x509", "-noout", "-ext", "extendedKeyUsage"], {
+      input: pem.stdout,
+      encoding: "utf8",
+      windowsHide: true,
+    });
+    let codeSigning: boolean | undefined;
+    if (eku.status === 0 && /Extended Key Usage/i.test(eku.stdout)) codeSigning = /Code Signing/i.test(eku.stdout);
+
+    const commonName = /commonName\s*=\s*(.+)/.exec(info.stdout)?.[1]?.trim() ?? "";
+    const end = /notAfter=(.+)/.exec(info.stdout)?.[1]?.trim();
+    const notAfter = end ? new Date(end) : new Date(NaN);
+    return { subject: commonName || "unknown", commonName, notAfter, hasKey, codeSigning };
+  }
+  return "unreadable";
+}
+
+function describeExpiry(what: string, date: Date): void {
+  if (Number.isNaN(date.getTime())) return;
+  const days = Math.floor((date.getTime() - Date.now()) / 86_400_000);
+  const when = date.toISOString().slice(0, 10);
+  if (days < 0) log.warn(`${what} expired on ${when}.`);
+  else if (days < 30) log.warn(`${what} expires in ${days} days (${when}).`);
+  else log.info(`${what} is valid until ${when}.`);
+}
+
+type CertKind = "windows" | "macos" | "ios";
+
+/** Prints what is in the certificate and warns when it is the wrong kind. Returns false only when it cannot be opened. */
+function reportCertificate(info: CertInspection, kind: CertKind): boolean {
+  if (info === "unreadable") {
+    log.warn("Could not open the certificate: wrong password, or the file is not a .p12/.pfx.");
+    return false;
+  }
+  if (info === "no-openssl") {
+    log.info("openssl was not found, so the certificate could not be checked (Git for Windows includes one).");
+    return true;
+  }
+
+  log.success(`Certificate: ${info.subject}`);
+  describeExpiry("The certificate", info.notAfter);
+  if (!info.hasKey) log.warn("This file has no private key inside, so it cannot sign. Export it again with the private key.");
+
+  const cn = info.commonName;
+  if (kind === "macos") {
+    if (/^Developer ID Application:/.test(cn)) {
+      // the right kind
+    } else if (/^(Apple Distribution|3rd Party Mac Developer Application)/.test(cn)) {
+      log.warn("This is a Mac App Store certificate. For apps you distribute yourself you need a \"Developer ID Application\" certificate.");
+    } else if (/^(Apple Development|Mac Developer|Developer ID Installer)/.test(cn)) {
+      log.warn(`"${cn}" cannot sign apps for download. You need a "Developer ID Application" certificate.`);
+    } else {
+      log.warn('Expected a certificate named "Developer ID Application: ...". Notarization will fail with any other kind.');
+    }
+  } else if (kind === "ios") {
+    if (/^(Apple Distribution|iPhone Distribution)/.test(cn)) {
+      // the right kind
+    } else if (/^(Apple Development|iPhone Developer)/.test(cn)) {
+      log.warn("This is a development certificate. TestFlight and the App Store need an \"Apple Distribution\" certificate.");
+    } else {
+      log.warn('Expected a certificate named "Apple Distribution: ...".');
+    }
+  } else if (info.codeSigning === false) {
+    log.warn("This certificate is not marked for code signing. Windows will not accept it for signing apps.");
+  }
+  return true;
+}
+
+interface ProfileInfo {
+  name?: string;
+  team?: string;
+  bundleId?: string;
+  expires?: Date;
+  /** get-task-allow is true: a development profile that App Store builds cannot use. */
+  development?: boolean;
+}
+
+/** A .mobileprovision is a signed blob with a plain-text plist inside, so it can be read on any OS. */
+function inspectProvisioningProfile(file: string): ProfileInfo | null {
+  try {
+    const text = fs.readFileSync(file).toString("latin1");
+    const start = text.indexOf("<?xml");
+    const end = text.indexOf("</plist>");
+    if (start < 0 || end < 0) return null;
+    const plist = text.slice(start, end + 8);
+    const appId = /<key>application-identifier<\/key>\s*<string>([^<]+)<\/string>/.exec(plist)?.[1];
+    const team = /<key>TeamIdentifier<\/key>\s*<array>\s*<string>([^<]+)<\/string>/.exec(plist)?.[1];
+    const expires = /<key>ExpirationDate<\/key>\s*<date>([^<]+)<\/date>/.exec(plist)?.[1];
+    const taskAllow = /<key>get-task-allow<\/key>\s*<(true|false)\s*\/>/.exec(plist)?.[1];
+    return {
+      name: /<key>Name<\/key>\s*<string>([^<]*)<\/string>/.exec(plist)?.[1],
+      team,
+      bundleId: appId && team && appId.startsWith(`${team}.`) ? appId.slice(team.length + 1) : appId,
+      expires: expires ? new Date(expires) : undefined,
+      development: taskAllow === "true",
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Prints the profile details and warns about a mismatch with the app's identifier or team. */
+function describeProfile(profile: ProfileInfo, identifier: string | undefined, team: string | undefined): void {
+  log.success(`Profile: ${profile.name ?? "unnamed"}${profile.team ? ` (team ${profile.team})` : ""}`);
+  if (
+    profile.bundleId &&
+    identifier &&
+    profile.bundleId !== "*" &&
+    !profile.bundleId.endsWith("*") &&
+    profile.bundleId !== identifier
+  ) {
+    log.warn(`The profile is for "${profile.bundleId}" but your app's identifier is "${identifier}". The build will fail until they match (create-bini-app --org can change the identifier).`);
+  }
+  if (team && profile.team && team !== profile.team) {
+    log.warn(`The profile belongs to team ${profile.team}, not ${team}.`);
+  }
+  if (profile.development) {
+    log.warn('This is a development profile. For TestFlight and the App Store create one of type "App Store Connect".');
+  }
+  if (profile.expires) describeExpiry("The profile", profile.expires);
+}
+
+/**
+ * No Mac? Create the private key and certificate request (CSR) with openssl, let the user upload it to Apple,
+ * then turn the .cer Apple returns into a .p12. The key stays in .bini-signing/ (git-ignored): keep it safe.
+ */
+async function createAppleCertificate(
+  projectPath: string,
+  target: "macos" | "ios"
+): Promise<{ file: string; pass: string } | null> {
+  if (!commandExists("openssl")) {
+    log.warn("openssl was not found. Install it (Git for Windows includes one), or create the request in Keychain Access on a Mac.");
+    return null;
+  }
+
+  const dir = path.join(projectPath, ".bini-signing");
+  const keyFile = path.join(dir, "apple-signing.key");
+  const csrFile = path.join(dir, "apple-signing.csr");
+  const pemFile = path.join(dir, "apple-signing.pem");
+  const p12File = path.join(dir, "apple-signing.p12");
+  await fsPromises.mkdir(dir, { recursive: true });
+  await appendGitignoreEntries(projectPath, SIGNING_GITIGNORE);
+
+  if (!fs.existsSync(keyFile) || !fs.existsSync(csrFile)) {
+    const email = (
+      await input({
+        message: "Your Apple ID email (for the request):",
+        validate: (v) => (/^\S+@\S+\.\S+$/.test(v.trim()) ? true : "Enter a valid email address."),
+      })
+    ).trim();
+    const name = (await input({ message: "Your name or company:", default: toTitleCase(path.basename(projectPath)) }))
+      .trim()
+      .replace(/[\/\\=,+<>#;"]/g, "");
+
+    const gen = spawnSync("openssl", ["genrsa", "-out", keyFile, "2048"], { encoding: "utf8", windowsHide: true });
+    const req =
+      gen.status === 0
+        ? spawnSync("openssl", ["req", "-new", "-key", keyFile, "-out", csrFile, "-subj", `/emailAddress=${email}/CN=${name}/C=US`], {
+            encoding: "utf8",
+            windowsHide: true,
+          })
+        : gen;
+    if (req.status !== 0) {
+      log.warn(`Could not create the request: ${(req.stderr || "openssl failed").trim().split("\n").pop()}`);
+      return null;
+    }
+    log.success("Created the private key and certificate request in .bini-signing/");
+  } else {
+    log.info("Reusing the request already in .bini-signing/");
+  }
+
+  const kind = target === "macos" ? "Developer ID Application" : "Apple Distribution";
+  log.plain(`\n${c.bold("Next steps")}`);
+  log.plain(`  1. Open https://developer.apple.com/account/resources/certificates/add`);
+  log.plain(`  2. Choose "${kind}" and upload this file: ${c.cyan(csrFile)}`);
+  log.plain(`  3. Download the .cer file Apple gives you, then give its path below`);
+  log.plain(`     ${c.dim("(You can press Ctrl+C now and run create-bini-app sign again later: the request is kept.)")}\n`);
+
+  const cer = await askFile("Path to the downloaded .cer", [".cer", ".crt"]);
+
+  let conv = spawnSync("openssl", ["x509", "-inform", "DER", "-in", cer, "-out", pemFile], { encoding: "utf8", windowsHide: true });
+  if (conv.status !== 0) {
+    conv = spawnSync("openssl", ["x509", "-inform", "PEM", "-in", cer, "-out", pemFile], { encoding: "utf8", windowsHide: true });
+  }
+  if (conv.status !== 0) {
+    log.warn("That file could not be read as a certificate.");
+    return null;
+  }
+
+  // PBE-SHA1-3DES keeps the .p12 importable by macOS (OpenSSL 3 defaults are not).
+  const pass = randomBytes(12).toString("hex");
+  const exp = spawnSync(
+    "openssl",
+    [
+      "pkcs12", "-export",
+      "-inkey", keyFile, "-in", pemFile, "-out", p12File,
+      "-certpbe", "PBE-SHA1-3DES", "-keypbe", "PBE-SHA1-3DES", "-macalg", "sha1",
+      "-passout", "env:BINI_P12_PASS",
+    ],
+    { encoding: "utf8", env: { ...process.env, BINI_P12_PASS: pass }, windowsHide: true }
+  );
+  if (exp.status !== 0) {
+    log.warn(`Could not build the .p12: ${(exp.stderr || "openssl failed").trim().split("\n").pop()}`);
+    log.info("Make sure the certificate matches the request in .bini-signing/ (use the .cer for that exact request).");
+    return null;
+  }
+  log.success("Built apple-signing.p12 in .bini-signing/. Back up apple-signing.key: it is the only copy of the private key.");
+  return { file: p12File, pass };
+}
+
+interface CollectedCertificate {
+  file: string;
+  pass: string;
+  info: CertInspection;
+}
+
+/** Walks the user through getting and providing a certificate file (.p12 or .pfx). Returns null when skipped. */
+async function collectCertificate(
+  projectPath: string,
+  target: GuideTarget,
+  label: string
+): Promise<CollectedCertificate | null> {
+  const ext = target === "windows" ? ".pfx" : ".p12";
+  const exts = target === "windows" ? [".pfx", ".p12"] : [".p12"];
+
+  for (;;) {
+    const choice = await select<"have" | "csr" | "guide" | "skip">({
+      message: `${label}:`,
+      choices: [
+        { name: `I have the ${ext} file`, value: "have" },
+        ...(target !== "windows"
+          ? [{ name: "I have no certificate yet: create a request (CSR) on this machine", value: "csr" as const }]
+          : []),
+        { name: "Show me how to get one", value: "guide" },
+        { name: "Skip for now (CI will use a basic signature)", value: "skip" },
+      ],
+      default: "have",
+    });
+
+    if (choice === "skip") return null;
+    if (choice === "guide") {
+      printGuide(target);
+      continue;
+    }
+
+    let file: string;
+    let pass: string;
+    if (choice === "csr" && target !== "windows") {
+      const made = await createAppleCertificate(projectPath, target);
+      if (!made) continue;
+      ({ file, pass } = made);
+    } else {
+      file = await askFile(`Path to the ${ext} file`, exts);
+      pass = await password({ message: "Certificate export password:" });
+    }
+
+    const info = inspectCertificate(file, pass);
+    const readable = reportCertificate(info, target);
+    if (!readable && !(await confirm({ message: "Use it anyway?", default: false }))) continue;
+    return { file, pass, info };
+  }
+}
+
+/** Collects a certificate for GitHub Actions and stores it (base64 + password) in the git-ignored .env.signing. */
+async function saveCiCertificate(
+  projectPath: string,
+  target: GuideTarget,
+  label: string,
+  prefix: "APPLE_CERTIFICATE" | "WINDOWS_CERTIFICATE",
+  extra: Record<string, string> = {}
+): Promise<CollectedCertificate | null> {
+  const cert = await collectCertificate(projectPath, target, label);
+  if (!cert) {
+    log.info("Skipped. CI builds will use a basic signature until you add a certificate.");
+    return null;
+  }
+  try {
+    await saveCiValues(projectPath, {
+      [prefix]: await fileBase64(cert.file),
+      [`${prefix}_PASSWORD`]: cert.pass,
+      ...extra,
+    });
+    return cert;
+  } catch (err) {
+    log.warn(`Could not read the certificate: ${(err as Error).message}`);
+    return null;
+  }
+}
+
+// ─── Windows ─────────────────────────────────────────────────────────────────
+
+/** Cloud/hardware signing lives in its own file so local builds never call the signing service. */
+const CLOUD_SIGN_CONFIG = "tauri.cloud-sign.conf.json";
+
+async function writeWindowsSignCommand(ctx: SigningContext, signCommand: string): Promise<boolean> {
+  const { projectPath, tauriDir, pm } = ctx;
+  if (!hasTauriConf(tauriDir)) {
+    log.error("src-tauri/tauri.conf.json was not found. Add the desktop target first: create-bini-app add desktop");
+    return false;
+  }
+  if (!signCommand.includes("%1")) {
+    log.error("The sign command must contain %1 (the file to sign).");
+    return false;
+  }
+
+  const file = path.join(tauriDir, CLOUD_SIGN_CONFIG);
+  await writeFile(file, JSON.stringify({ bundle: { windows: { signCommand } } }, null, 2) + "\n");
+  const rel = path.relative(projectPath, file).replace(/\\/g, "/");
+  log.success(`Wrote ${rel}`);
+  log.info("Your normal tauri.conf.json is untouched, so local builds do not call the signing service.");
+  log.info(`Sign a build with it: ${c.cyan(pmRunWithArgs(pm, "tauri:build", ["--config", rel]))}`);
+  log.info("GitHub Actions: bini-deploy installs the matching CLI (Azure Artifact Signing, relic, SSL.com eSigner, jsign) when it recognises the command.");
+  return true;
+}
+
+async function setupWindowsSignCommand(ctx: SigningContext): Promise<boolean> {
+  printGuide("windows");
+  const signCommand = (
+    await input({
+      message: "Sign command (%1 is the file to sign):",
+      default: "artifact-signing-cli -e <endpoint> -a <account> -c <profile> %1",
+      validate: (v) => (v.includes("%1") ? true : "The command must contain %1."),
+    })
+  ).trim();
+  return writeWindowsSignCommand(ctx, signCommand);
+}
+
+/**
+ * Points the local Windows build at a certificate that is already in the Windows certificate store.
+ * Written to the git-ignored src-tauri/tauri.windows.conf.json (merged by Tauri on Windows only), so the
+ * committed tauri.conf.json never references a certificate that CI or a teammate does not have.
+ */
+async function applyWindowsThumbprint(tauriDir: string, certificateThumbprint: string): Promise<boolean> {
+  const ok = await patchLocalBundle(tauriDir, "windows", "windows", {
+    certificateThumbprint,
+    digestAlgorithm: "sha256",
+    timestampUrl: "http://timestamp.digicert.com",
+  });
+  if (ok) {
+    log.success(`Windows signing configured (thumbprint ${certificateThumbprint})`);
+    log.info("Saved in src-tauri/tauri.windows.conf.json: git-ignored, and Tauri merges it automatically on Windows only.");
+  }
+  return ok;
+}
+
+/** `--generate`: free self-signed certificate (Windows only). */
+async function generateWindowsCertificate(ctx: SigningContext, publisherName: string | undefined): Promise<boolean> {
+  if (ctx.userOS !== "windows") {
+    log.error("--generate needs a Windows PC for the certificate store. On this machine use a .pfx file or --sign-command.");
+    return false;
+  }
+  if (!hasTauriConf(ctx.tauriDir)) {
+    log.error("src-tauri/tauri.conf.json was not found. Add the desktop target first: create-bini-app add desktop");
+    return false;
+  }
+  const publisher = sanitizeCertName(publisherName ?? toTitleCase(path.basename(ctx.projectPath)));
+  const thumbprint = generateSelfSignedCertificate(publisher);
+  if (!thumbprint) return false;
+  log.success(`Certificate created for "${publisher}" (thumbprint ${thumbprint})`);
+  log.info("Self-signed apps still show a Windows SmartScreen warning to other people.");
+  return applyWindowsThumbprint(ctx.tauriDir, thumbprint);
+}
+
+/** Non-interactive: save a .pfx for CI and, on Windows, import it so local builds sign with it too. */
+async function applyWindowsCertificate(ctx: SigningContext, file: string, pass: string): Promise<boolean> {
+  const { projectPath, tauriDir, userOS } = ctx;
+
+  const info = inspectCertificate(file, pass);
+  if (!reportCertificate(info, "windows")) return false;
+
+  await saveCiValues(projectPath, {
+    WINDOWS_CERTIFICATE: await fileBase64(file),
+    WINDOWS_CERTIFICATE_PASSWORD: pass,
+  });
+
+  if (ctx.ciOnly || userOS !== "windows") {
+    log.info("Saved for GitHub Actions only: local Windows signing needs a Windows PC.");
+    return true;
+  }
+  if (!hasTauriConf(tauriDir)) {
+    log.info("No desktop project here yet, so only the GitHub Actions values were saved. Add it with: create-bini-app add desktop");
+    return true;
+  }
+
+  const thumbprint = importPfxToWindowsStore(file, pass);
+  if (!thumbprint) {
+    log.info("Local signing was not configured, but the GitHub Actions values are saved.");
+    return true;
+  }
+  await applyWindowsThumbprint(tauriDir, thumbprint);
+  return true;
+}
+
+async function setupWindowsCiOnly(ctx: SigningContext): Promise<boolean> {
+  log.info("Saving Windows signing for GitHub Actions only: this machine does not sign Windows builds locally.");
+  const method = await select<"pfx" | "cloud">({
+    message: "Windows certificate:",
+    choices: [
+      { name: "A certificate file (.pfx)", value: "pfx" },
+      { name: "Cloud or hardware key: custom sign command (new OV/EV certificates)", value: "cloud" },
+    ],
+    default: "pfx",
+  });
+  if (method === "cloud") return setupWindowsSignCommand(ctx);
+  const cert = await saveCiCertificate(ctx.projectPath, "windows", "Windows certificate (.pfx) for GitHub Actions", "WINDOWS_CERTIFICATE");
+  return cert !== null;
 }
 
 async function setupWindowsSigning(ctx: SigningContext): Promise<boolean> {
   const { projectPath, tauriDir } = ctx;
 
-  const current = readTauriConfSync(tauriDir)?.bundle?.windows as AnyJson | undefined;
-  if (current?.certificateThumbprint) {
+  if (ctx.userOS !== "windows" || ctx.ciOnly || !hasTauriConf(tauriDir)) return setupWindowsCiOnly(ctx);
+
+  const current = readBundleSetting(tauriDir, "windows", "windows");
+  if (current.certificateThumbprint) {
     log.info(`Current certificate thumbprint: ${current.certificateThumbprint}`);
     if (!(await confirm({ message: "Windows signing is already configured. Overwrite it?", default: false }))) {
       log.skip("Kept existing Windows signing configuration.");
@@ -1268,50 +2418,218 @@ async function setupWindowsSigning(ctx: SigningContext): Promise<boolean> {
     }
   }
 
-  const method = await select<"generate" | "existing">({
+  const method = await select<"generate" | "existing" | "cloud">({
     message: "Windows code signing certificate:",
     choices: [
       { name: "Generate a free self-signed certificate (easiest)", value: "generate" },
       { name: "Use a certificate I already have (enter its thumbprint)", value: "existing" },
+      { name: "Cloud or hardware key: custom sign command (new OV/EV certificates)", value: "cloud" },
     ],
     default: "generate",
   });
+  if (method === "cloud") return setupWindowsSignCommand(ctx);
 
-  let certificateThumbprint: string;
   if (method === "generate") {
-    const publisher = sanitizeCertName(
-      await input({ message: "Publisher name for the certificate:", default: toTitleCase(path.basename(projectPath)) })
-    );
-    const thumbprint = generateSelfSignedCertificate(publisher);
-    if (!thumbprint) return false;
-    certificateThumbprint = thumbprint;
-    log.success(`Certificate created for "${publisher}" (thumbprint ${thumbprint})`);
-    log.info("Self-signed apps still show a Windows SmartScreen warning to other people.");
+    const publisher = await input({ message: "Publisher name for the certificate:", default: toTitleCase(path.basename(projectPath)) });
     log.info("For public releases, use a certificate from a trusted authority, or sign in CI.");
-  } else {
-    certificateThumbprint = (
-      await input({ message: "Certificate thumbprint (Personal > Certificates > Details in certmgr.msc):", validate: required })
-    ).trim();
+    return generateWindowsCertificate(ctx, publisher);
   }
 
-  const ok = await patchTauriConf(tauriDir, (conf) => {
-    conf.bundle = conf.bundle ?? {};
-    conf.bundle.windows = {
-      ...(conf.bundle.windows ?? {}),
-      certificateThumbprint,
-      digestAlgorithm: "sha256",
-      timestampUrl: "http://timestamp.digicert.com",
-    };
-  });
-  if (ok) log.success("Windows signing configured in tauri.conf.json");
+  const certificateThumbprint = (
+    await input({
+      message: "Certificate thumbprint (Personal > Certificates > Details in certmgr.msc):",
+      validate: (v) => (THUMBPRINT_PATTERN.test(v.replace(/[\s:]/g, "")) ? true : "A thumbprint is 40 hex characters."),
+    })
+  )
+    .replace(/[\s:]/g, "")
+    .toUpperCase();
+  const ok = await applyWindowsThumbprint(tauriDir, certificateThumbprint);
+  if (ok) await saveCiCertificate(projectPath, "windows", "Windows certificate (.pfx) for GitHub Actions", "WINDOWS_CERTIFICATE");
   return ok;
+}
+
+// ─── Apple notarization ──────────────────────────────────────────────────────
+
+/** The .p8 file is saved by content (APPLE_API_KEY_P8): CI cannot see a path on this machine. */
+async function buildApiKeyVars(issuer: string | undefined, keyId: string | undefined, keyFile: string | undefined): Promise<Record<string, string> | null> {
+  if (!issuer || !keyId || !keyFile) return null;
+  const abs = path.resolve(cleanPath(keyFile));
+  if (!fs.existsSync(abs)) {
+    log.error(`The .p8 file was not found: ${abs}`);
+    return null;
+  }
+  const text = await fsPromises.readFile(abs, "utf-8");
+  if (!text.includes("PRIVATE KEY")) log.warn("That file does not look like an App Store Connect API key (.p8).");
+  return {
+    APPLE_API_ISSUER: issuer,
+    APPLE_API_KEY: keyId,
+    APPLE_API_KEY_P8: Buffer.from(text, "utf-8").toString("base64"),
+    APPLE_API_KEY_PATH: abs,
+  };
+}
+
+/** Notarization values from the command line. null = none given, false = invalid (already reported). */
+async function notarizationFromFlags(flags: CliFlags): Promise<Record<string, string> | null | false> {
+  const hasKey = flags.apiIssuer !== undefined || flags.apiKey !== undefined || flags.apiKeyFile !== undefined;
+  const hasAppleId = flags.appleId !== undefined;
+
+  if (hasKey && hasAppleId) {
+    log.error("Use either the API key options (--api-issuer, --api-key, --api-key-file) or --apple-id, not both.");
+    return false;
+  }
+  if (hasKey) {
+    if (!flags.apiIssuer || !flags.apiKey || !flags.apiKeyFile) {
+      log.error("Notarization with an API key needs all of: --api-issuer, --api-key and --api-key-file.");
+      return false;
+    }
+    const vars = await buildApiKeyVars(flags.apiIssuer, flags.apiKey, flags.apiKeyFile);
+    return vars ?? false;
+  }
+  if (hasAppleId) {
+    const appPassword = flags.applePassword ?? process.env[ENV_APPLE_PASSWORD];
+    if (!appPassword || !flags.team) {
+      log.error(`Notarization with an Apple ID needs --apple-id, --team and an app-specific password (--apple-password or ${ENV_APPLE_PASSWORD}).`);
+      return false;
+    }
+    return { APPLE_ID: flags.appleId as string, APPLE_PASSWORD: appPassword, APPLE_TEAM_ID: flags.team };
+  }
+  return null;
+}
+
+/** Interactive notarization questions. null = skipped. */
+async function promptNotarization(): Promise<Record<string, string> | null> {
+  const wantsNotarization = await confirm({
+    message: "Set up notarization credentials too? (avoids the 'unidentified developer' warning)",
+    default: false,
+  });
+  if (!wantsNotarization) return null;
+
+  const authMethod = await select<"apiKey" | "appleId">({
+    message: "Notarization method:",
+    choices: [
+      { name: "App Store Connect API key", value: "apiKey" },
+      { name: "Apple ID + app-specific password", value: "appleId" },
+    ],
+    default: "apiKey",
+  });
+
+  if (authMethod === "apiKey") {
+    const issuer = (await input({ message: "APPLE_API_ISSUER (Issuer ID):", validate: required })).trim();
+    const keyId = (await input({ message: "APPLE_API_KEY (Key ID):", validate: required })).trim();
+    const keyFile = await askFile("Path to the downloaded .p8 private key", [".p8"]);
+    const vars = await buildApiKeyVars(issuer, keyId, keyFile);
+    return vars;
+  }
+  return {
+    APPLE_ID: (await input({ message: "Apple ID email:", validate: required })).trim(),
+    APPLE_PASSWORD: await password({ message: "App-specific password:" }),
+    APPLE_TEAM_ID: (await input({ message: "Apple Team ID:", validate: required })).trim(),
+  };
+}
+
+// ─── macOS ───────────────────────────────────────────────────────────────────
+
+/**
+ * The identity lives in the git-ignored src-tauri/tauri.macos.conf.json (merged by Tauri on macOS only):
+ * a keychain identity, or the ad-hoc "-", only means something on this Mac and would break CI if committed.
+ */
+const setMacosIdentity = async (tauriDir: string, signingIdentity: string): Promise<boolean> => {
+  const ok = await patchLocalBundle(tauriDir, "macos", "macOS", { signingIdentity });
+  if (ok) {
+    log.success(`macOS signingIdentity set to "${signingIdentity}"`);
+    log.info("Saved in src-tauri/tauri.macos.conf.json: git-ignored, and Tauri merges it automatically on macOS only.");
+  }
+  return ok;
+};
+
+/** `--adhoc`: ad-hoc signing for local testing, no Apple account. */
+async function applyMacosAdhoc(tauriDir: string): Promise<boolean> {
+  if (!hasTauriConf(tauriDir)) {
+    log.error("src-tauri/tauri.conf.json was not found. Add the desktop target first: create-bini-app add desktop");
+    return false;
+  }
+  return setMacosIdentity(tauriDir, "-");
+}
+
+/** Non-interactive: save a Developer ID .p12 (and notarization) for CI and, on a Mac, import it for local builds. */
+async function applyMacosCertificate(ctx: SigningContext, flags: CliFlags, file: string, pass: string): Promise<boolean> {
+  const { projectPath, tauriDir, userOS } = ctx;
+
+  const notarization = await notarizationFromFlags(flags);
+  if (notarization === false) return false;
+
+  const info = inspectCertificate(file, pass);
+  if (!reportCertificate(info, "macos")) return false;
+
+  const identity = flags.identity ?? (typeof info === "object" ? info.commonName : "");
+  if (!identity) {
+    log.error('The signing identity could not be read from the certificate. Pass it with --identity "Developer ID Application: Name (TEAMID)".');
+    return false;
+  }
+
+  await saveCiValues(projectPath, {
+    APPLE_CERTIFICATE: await fileBase64(file),
+    APPLE_CERTIFICATE_PASSWORD: pass,
+    APPLE_SIGNING_IDENTITY: identity,
+    // Used by the CI workflow to create a temporary keychain for the imported certificate.
+    KEYCHAIN_PASSWORD: randomBytes(16).toString("hex"),
+    ...(notarization ?? {}),
+  });
+
+  if (!notarization) {
+    log.info("No notarization credentials given. Add them with --api-issuer/--api-key/--api-key-file (or --apple-id) to avoid the Gatekeeper warning.");
+  }
+
+  if (ctx.ciOnly || userOS !== "macos") {
+    log.info("Saved for GitHub Actions only: local macOS signing needs a Mac.");
+    return true;
+  }
+  if (!hasTauriConf(tauriDir)) {
+    log.info("No desktop project here yet, so only the GitHub Actions values were saved. Add it with: create-bini-app add desktop");
+    return true;
+  }
+
+  importToMacKeychain(file, pass, identity);
+  await setMacosIdentity(tauriDir, identity);
+  return true;
+}
+
+async function setupMacosCiOnly(ctx: SigningContext): Promise<boolean> {
+  const { projectPath } = ctx;
+  log.info("Saving macOS signing for GitHub Actions only: this machine does not sign macOS builds locally.");
+
+  const cert = await collectCertificate(projectPath, "macos", "Developer ID certificate (.p12) for GitHub Actions");
+  if (!cert) {
+    log.info("Skipped. CI builds will use a basic signature until you add a certificate.");
+    return false;
+  }
+
+  let identity = typeof cert.info === "object" ? cert.info.commonName : "";
+  if (!identity) {
+    identity = (await input({ message: 'Signing identity (for example "Developer ID Application: Name (TEAMID)"):', validate: required })).trim();
+  } else {
+    log.info(`Signing identity: ${identity}`);
+  }
+
+  const notarization = await promptNotarization();
+  await saveCiValues(projectPath, {
+    APPLE_CERTIFICATE: await fileBase64(cert.file),
+    APPLE_CERTIFICATE_PASSWORD: cert.pass,
+    APPLE_SIGNING_IDENTITY: identity,
+    KEYCHAIN_PASSWORD: randomBytes(16).toString("hex"),
+    ...(notarization ?? {}),
+  });
+  return true;
 }
 
 async function setupMacosSigning(ctx: SigningContext): Promise<boolean> {
   const { projectPath, tauriDir, pm } = ctx;
 
-  const existingIdentity = readTauriConfSync(tauriDir)?.bundle?.macOS?.signingIdentity as string | undefined;
+  if (ctx.userOS !== "macos" || ctx.ciOnly || !hasTauriConf(tauriDir)) return setupMacosCiOnly(ctx);
+
+  const existingIdentity = readBundleSetting(tauriDir, "macos", "macOS").signingIdentity as string | undefined;
   let mode: "adhoc" | "identity";
+  let identityUsed = existingIdentity ?? "";
 
   let keepExisting = false;
   if (existingIdentity) {
@@ -1336,152 +2654,184 @@ async function setupMacosSigning(ctx: SigningContext): Promise<boolean> {
       mode === "adhoc"
         ? "-"
         : (await input({ message: 'Signing identity (from "security find-identity -v -p codesigning"):', validate: required })).trim();
-
-    const ok = await patchTauriConf(tauriDir, (conf) => {
-      conf.bundle = conf.bundle ?? {};
-      conf.bundle.macOS = { ...(conf.bundle.macOS ?? {}), signingIdentity };
-    });
-    if (!ok) return false;
-    log.success(`macOS signingIdentity set to "${signingIdentity}" in tauri.conf.json`);
+    identityUsed = signingIdentity;
+    if (!(await setMacosIdentity(tauriDir, signingIdentity))) return false;
   }
 
   if (mode !== "identity") return true;
 
-  const wantsNotarization = await confirm({
-    message: "Set up notarization credentials too? (avoids the 'unidentified developer' warning)",
-    default: false,
-  });
-  if (!wantsNotarization) return true;
+  await saveCiCertificate(
+    projectPath,
+    "macos",
+    "Developer ID certificate (.p12) for GitHub Actions",
+    "APPLE_CERTIFICATE",
+    {
+      APPLE_SIGNING_IDENTITY: identityUsed,
+      KEYCHAIN_PASSWORD: randomBytes(16).toString("hex"),
+    }
+  );
 
-  const authMethod = await select<"apiKey" | "appleId">({
-    message: "Notarization method:",
-    choices: [
-      { name: "App Store Connect API key", value: "apiKey" },
-      { name: "Apple ID + app-specific password", value: "appleId" },
-    ],
-    default: "apiKey",
-  });
+  const notarization = await promptNotarization();
+  if (!notarization) return true;
 
-  const vars: Record<string, string> = {};
-  if (authMethod === "apiKey") {
-    vars.APPLE_API_ISSUER = await input({ message: "APPLE_API_ISSUER (Issuer ID):" });
-    vars.APPLE_API_KEY = await input({ message: "APPLE_API_KEY (Key ID):" });
-    vars.APPLE_API_KEY_PATH = path.resolve(await input({ message: "Path to downloaded .p8 private key:", validate: fileMustExist }));
-  } else {
-    vars.APPLE_ID = await input({ message: "Apple ID email:" });
-    vars.APPLE_PASSWORD = await password({ message: "App-specific password:", mask: "*" });
-    vars.APPLE_TEAM_ID = await input({ message: "Apple Team ID:" });
-  }
-
-  const envPath = path.join(projectPath, ".env.signing");
-  await writeKeyValueFile(envPath, vars);
-  await appendGitignoreEntries(projectPath, SIGNING_GITIGNORE);
-  log.success(`Wrote notarization credentials to ${path.relative(projectPath, envPath)}`);
-  log.info(`Run "set -a; source .env.signing; set +a" before \`${pmRun(pm, "tauri:build")}\` to notarize your app.`);
+  await saveCiValues(projectPath, notarization);
+  log.info("Local builds are signed with the identity in tauri.macos.conf.json (its certificate must be in your keychain): nothing to export.");
+  log.info(`The notarization credentials are used by GitHub Actions. To notarize a local build, run "set -a; source .env.signing; set +a" before \`${pmRun(pm, "tauri:build")}\`.`);
   return true;
 }
 
-async function setupLinuxSigning(ctx: SigningContext): Promise<boolean> {
-  const { projectPath, pm } = ctx;
+// ─── iOS ─────────────────────────────────────────────────────────────────────
 
-  const gpg = commandExists("gpg") ? "gpg" : commandExists("gpg2") ? "gpg2" : null;
-  if (!gpg) {
-    log.warn("gpg not found. Install it (for example: sudo apt install gnupg), then re-run: create-bini-app sign desktop");
+/** Saves the Team ID in tauri.conf.json so local iOS builds need no environment variables (a Team ID is safe to commit). */
+async function saveIosTeam(tauriDir: string, team: string): Promise<boolean> {
+  if (!hasTauriConf(tauriDir)) return false;
+  const saved = await patchBundle(tauriDir, "iOS", { developmentTeam: team });
+  if (saved) log.success("Saved the Team ID in tauri.conf.json (bundle.iOS.developmentTeam): local iOS builds need no environment variables.");
+  return saved;
+}
+
+/** `sign ios --team <TEAMID>`: Xcode automatic signing. The API key is saved for CI when provided. */
+async function applyIosTeam(
+  tauriDir: string,
+  projectPath: string,
+  team: string | undefined,
+  flags: CliFlags
+): Promise<boolean> {
+  if (!team) {
+    log.error("iOS needs --team <TEAMID> (automatic signing), or a certificate file with --profile.");
+    return false;
+  }
+  if (!(await saveIosTeam(tauriDir, team))) {
+    log.error("src-tauri/tauri.conf.json was not found. Add the iOS target first: create-bini-app add ios");
     return false;
   }
 
-  const method = await select<"generate" | "existing">({
-    message: "GPG signing key:",
-    choices: [
-      { name: "Generate a new key (recommended)", value: "generate" },
-      { name: "Use a key I already have", value: "existing" },
-    ],
-    default: "generate",
-  });
-
-  let signKey = "";
-  let passphrase: string;
-
-  if (method === "generate") {
-    const name = (await input({ message: "Name for the key:", default: toTitleCase(path.basename(projectPath)) })).trim();
-    const email = (
-      await input({
-        message: "Email for the key:",
-        validate: (v) => (/^\S+@\S+\.\S+$/.test(v.trim()) ? true : "Enter a valid email address."),
-      })
-    ).trim();
-    passphrase = await password({ message: "Set a key passphrase (min 6 chars):", mask: "*", validate: minLength(6, "Passphrase") });
-
-    log.step("Generating GPG key (RSA 4096, valid for 3 years)...");
-    const result = spawnSync(
-      gpg,
-      ["--batch", "--pinentry-mode", "loopback", "--passphrase-fd", "0", "--quick-generate-key", `${name} <${email}>`, "rsa4096", "sign", "3y"],
-      { input: passphrase, encoding: "utf8", timeout: 180_000, windowsHide: true }
-    );
-    if (result.error || result.status !== 0) {
-      log.warn(`Could not generate a GPG key automatically: ${(result.stderr || result.error?.message || "unknown error").trim().split("\n")[0]}`);
-      log.info('Generate one manually with `gpg --full-generate-key`, then re-run with --sign and pick "Use a key I already have".');
-      return false;
-    }
-    let fingerprint = /([0-9A-F]{40})\.rev/i.exec(result.stderr ?? "")?.[1];
-    if (!fingerprint) {
-      const listing = spawnSync(gpg, ["--list-secret-keys", "--with-colons", email], { encoding: "utf8", windowsHide: true });
-      fingerprint = (listing.stdout ?? "").split("\n").find((l) => l.startsWith("fpr:"))?.split(":")[9];
-    }
-    if (!fingerprint) {
-      log.warn("The key was created but its ID could not be read. Run `gpg --list-secret-keys` and re-run with --sign.");
-      return false;
-    }
-    signKey = fingerprint.toUpperCase();
-    log.success(`GPG key created (${signKey.slice(-16)})`);
-    log.info(`Share your public key so people can verify your builds: ${gpg} --armor --export ${signKey}`);
+  // For CI automatic signing, Xcode needs an App Store Connect API key. Save it when provided.
+  const apiVars = await buildApiKeyVars(flags.apiIssuer, flags.apiKey, flags.apiKeyFile);
+  if (apiVars) {
+    await saveCiValues(projectPath, apiVars);
+    log.success("Saved the App Store Connect API key for CI automatic signing.");
+  } else if (flags.apiIssuer || flags.apiKey || flags.apiKeyFile) {
+    log.warn("Part of the App Store Connect API key was given but not all three of --api-issuer, --api-key and --api-key-file. Nothing was saved.");
   } else {
-    signKey = (await input({ message: "GPG key ID to sign with (blank = default key):" })).trim();
-    passphrase = await password({ message: "GPG key passphrase:", mask: "*" });
+    log.info("No API key provided. Local automatic signing only needs Xcode; CI automatic signing needs --api-issuer, --api-key and --api-key-file.");
   }
 
-  const vars: Record<string, string> = { SIGN: "1", APPIMAGETOOL_SIGN_PASSPHRASE: passphrase };
-  if (signKey) vars.SIGN_KEY = signKey;
+  log.info("Sign in with your Apple ID in Xcode (Settings > Accounts) so automatic signing can create the certificates.");
+  return true;
+}
 
-  const envPath = path.join(projectPath, ".env.signing");
-  await writeKeyValueFile(envPath, vars);
-  await appendGitignoreEntries(projectPath, SIGNING_GITIGNORE);
-  log.success(`Wrote AppImage signing config to ${path.relative(projectPath, envPath)}`);
-  log.info(`Run "set -a; source .env.signing; set +a" before \`${pmRun(pm, "tauri:build")}\` to sign the AppImage.`);
+/** Non-interactive: save an Apple Distribution .p12 and provisioning profile for CI. */
+async function applyIosCredentials(
+  ctx: SigningContext,
+  flags: CliFlags,
+  file: string,
+  pass: string
+): Promise<boolean> {
+  const { projectPath, tauriDir } = ctx;
+
+  if (!flags.profile) {
+    log.error("iOS needs the provisioning profile too: --profile <app.mobileprovision>");
+    return false;
+  }
+  const profileFile = path.resolve(cleanPath(flags.profile));
+  if (!fs.existsSync(profileFile)) {
+    log.error(`The provisioning profile was not found: ${profileFile}`);
+    return false;
+  }
+
+  const info = inspectCertificate(file, pass);
+  if (!reportCertificate(info, "ios")) return false;
+
+  const profile = inspectProvisioningProfile(profileFile);
+  const identifier = readTauriConfSync(tauriDir)?.identifier as string | undefined;
+  if (profile) describeProfile(profile, identifier, flags.team);
+  else log.warn("Could not read the provisioning profile, so it was not checked.");
+
+  const team = flags.team ?? profile?.team;
+  if (!team) {
+    log.error("The Team ID could not be read from the profile. Pass it with --team ABCDE12345.");
+    return false;
+  }
+
+  await saveCiValues(projectPath, {
+    IOS_CERTIFICATE: await fileBase64(file),
+    IOS_CERTIFICATE_PASSWORD: pass,
+    IOS_MOBILE_PROVISION: await fileBase64(profileFile),
+    APPLE_DEVELOPMENT_TEAM: team,
+  });
+
+  if (!ctx.ciOnly) {
+    await saveIosTeam(tauriDir, team);
+    log.info("Local iOS builds use Xcode's automatic signing, so nothing else is configured on this machine.");
+  }
   return true;
 }
 
 async function setupIosSigning(ctx: SigningContext): Promise<boolean> {
-  const { projectPath, pm } = ctx;
+  const { projectPath, pm, tauriDir } = ctx;
+  const isMac = ctx.userOS === "macos" && !ctx.ciOnly;
 
-  const mode = await select<"automatic" | "manual">({
-    message: "Signing method:",
-    choices: [
-      { name: "Automatic (Xcode-managed, recommended for local builds)", value: "automatic" },
-      { name: "Manual (certificate + provisioning profile, for CI)", value: "manual" },
-    ],
-    default: "automatic",
-  });
-
-  if (mode === "automatic") {
-    log.info("Nothing to configure locally. Sign in with your Apple ID in Xcode (Settings > Accounts).");
-    return true;
+  let mode: "automatic" | "manual" = "manual";
+  if (isMac) {
+    mode = await select<"automatic" | "manual">({
+      message: "Signing method:",
+      choices: [
+        { name: "Automatic (Xcode-managed, recommended for local builds)", value: "automatic" },
+        { name: "Manual (certificate + provisioning profile, for CI)", value: "manual" },
+      ],
+      default: "automatic",
+    });
+  } else {
+    log.info("Saving iOS signing for GitHub Actions only: local iOS builds need a Mac with Xcode.");
   }
 
-  const certPath = await input({ message: "Path to exported certificate (.p12):", validate: fileMustExist });
-  const certPassword = await password({ message: "Certificate export password:", mask: "*" });
-  const provisionPath = await input({ message: "Path to provisioning profile (.mobileprovision):", validate: fileMustExist });
+  if (mode === "automatic") {
+    log.info("Local builds use Xcode's automatic signing. Sign in with your Apple ID in Xcode (Settings > Accounts).");
+    const team = (
+      await input({
+        message: "Apple Team ID (10 characters, Enter to skip):",
+        validate: (v) => (v.trim() === "" || TEAM_ID_PATTERN.test(v.trim()) ? true : "A Team ID is 10 letters and numbers, e.g. ABCDE12345."),
+      })
+    )
+      .trim()
+      .toUpperCase();
+    if (team) await saveIosTeam(tauriDir, team);
+    if (!(await confirm({ message: "Also add credentials for GitHub Actions builds?", default: false }))) return true;
+  }
+
+  const cert = await collectCertificate(projectPath, "ios", "Apple Distribution certificate (.p12)");
+  if (!cert) {
+    log.info("Skipped. CI will build for the simulator only until you add real credentials.");
+    return false;
+  }
+
+  const provisionPath = await askFile("Path to the provisioning profile (.mobileprovision)", [".mobileprovision"]);
+  const profile = inspectProvisioningProfile(provisionPath);
+  const identifier = readTauriConfSync(tauriDir)?.identifier as string | undefined;
+  if (profile) describeProfile(profile, identifier, undefined);
+
+  let team = profile?.team;
+  if (!team) {
+    team = (
+      await input({
+        message: "Apple Team ID (10 characters):",
+        validate: (v) => (TEAM_ID_PATTERN.test(v.trim()) ? true : "A Team ID is 10 letters and numbers, e.g. ABCDE12345."),
+      })
+    )
+      .trim()
+      .toUpperCase();
+  }
 
   try {
-    const envPath = path.join(projectPath, ".env.signing");
-    await writeKeyValueFile(envPath, {
-      IOS_CERTIFICATE: (await fsPromises.readFile(certPath)).toString("base64"),
-      IOS_CERTIFICATE_PASSWORD: certPassword,
-      IOS_MOBILE_PROVISION: (await fsPromises.readFile(provisionPath)).toString("base64"),
+    await saveCiValues(projectPath, {
+      IOS_CERTIFICATE: await fileBase64(cert.file),
+      IOS_CERTIFICATE_PASSWORD: cert.pass,
+      IOS_MOBILE_PROVISION: await fileBase64(provisionPath),
+      APPLE_DEVELOPMENT_TEAM: team,
     });
-    await appendGitignoreEntries(projectPath, SIGNING_GITIGNORE);
-    log.success(`Wrote iOS signing credentials to ${path.relative(projectPath, envPath)}`);
-    log.info(`Run "set -a; source .env.signing; set +a" before \`${pmRun(pm, "ios:build")}\` to sign your iOS app.`);
+    if (!ctx.ciOnly && hasTauriConf(tauriDir)) await patchBundle(tauriDir, "iOS", { developmentTeam: team });
+    log.info(`These credentials are used by GitHub Actions. Local \`${pmRun(pm, "ios:build")}\` runs use automatic signing: nothing to export.`);
     return true;
   } catch (err) {
     log.warn(`Could not read/encode certificate or profile: ${(err as Error).message}`);
@@ -1489,12 +2839,375 @@ async function setupIosSigning(ctx: SigningContext): Promise<boolean> {
   }
 }
 
+// ─── Linux ───────────────────────────────────────────────────────────────────
+
+const gpgCommand = (): string | undefined => ["gpg", "gpg2"].find(commandExists);
+
+function printLinuxGuide(): void {
+  log.plain(`\n${c.heading("Sign Linux packages with GPG")}`);
+  [
+    "Install GnuPG (gpg or gpg2).",
+    "Create a key with `gpg --full-gen-key` (RSA 4096), or let this tool generate one.",
+    "AppImage: builds read SIGN=1, SIGN_KEY=<key id>, APPIMAGETOOL_FORCE_SIGN=1, and APPIMAGETOOL_SIGN_PASSPHRASE only if the key has one.",
+    "RPM: builds read TAURI_SIGNING_RPM_KEY (ASCII-armored private key) and TAURI_SIGNING_RPM_KEY_PASSPHRASE when set.",
+    `Full guide: ${SIGNING_DOCS.linux}`,
+  ].forEach((step, i) => log.plain(`  ${i + 1}. ${step}`));
+  log.plain("");
+}
+
+/**
+ * Creates an RSA 4096 key valid for 3 years and returns its key ID.
+ * An empty passphrase makes an unprotected key (nothing to remember or store).
+ */
+function generateGpgKey(gpg: string, name: string, email: string, passphrase = ""): string | null {
+  const realName = name.replace(/[<>()\r\n:]/g, "").trim();
+  const batch = [
+    "Key-Type: RSA",
+    "Key-Length: 4096",
+    "Subkey-Type: RSA",
+    "Subkey-Length: 4096",
+    `Name-Real: ${realName.length >= 5 ? realName : `${realName} App`}`,
+    ...(email ? [`Name-Email: ${email}`] : []),
+    "Expire-Date: 3y",
+    passphrase ? `Passphrase: ${passphrase}` : "%no-protection",
+    "%commit",
+    "",
+  ].join("\n");
+
+  log.step("Generating a GPG key (this can take a minute)...");
+  const gen = spawnSync(gpg, ["--batch", "--pinentry-mode", "loopback", "--gen-key"], {
+    input: batch,
+    encoding: "utf8",
+    windowsHide: true,
+    timeout: 180_000,
+  });
+  if (gen.status !== 0) {
+    log.warn(`Could not generate the key: ${(gen.stderr || "gpg failed").trim().split("\n").pop()}`);
+    return null;
+  }
+
+  const fromOutput = /key ([0-9A-Fa-f]{16,40}) marked as ultimately trusted/.exec(gen.stderr)?.[1];
+  if (fromOutput) return fromOutput.toUpperCase();
+
+  const list = spawnSync(gpg, ["--list-secret-keys", "--with-colons", "--keyid-format", "LONG"], { encoding: "utf8", windowsHide: true });
+  const id = list.stdout.split("\n").filter((l) => l.startsWith("sec:")).at(-1)?.split(":")[4];
+  if (!id) {
+    log.warn("The key was created, but its ID could not be read. Find it with: gpg --list-secret-keys");
+    return null;
+  }
+  return id;
+}
+
+/** Exports the secret key as base64 (what CI stores). It also proves the key ID and passphrase are right. */
+function exportGpgSecretKey(gpg: string, keyId: string, passphrase: string): string | null {
+  const r = spawnSync(gpg, ["--batch", "--pinentry-mode", "loopback", "--passphrase-fd", "0", "--armor", "--export-secret-keys", keyId], {
+    input: `${passphrase}\n`,
+    encoding: "utf8",
+    windowsHide: true,
+    maxBuffer: 10 * 1024 * 1024,
+  });
+  if (r.status !== 0 || !r.stdout.includes("PRIVATE KEY")) {
+    log.warn(`Could not export the secret key (wrong key ID or passphrase?): ${(r.stderr || "gpg failed").trim().split("\n").pop()}`);
+    return null;
+  }
+  return Buffer.from(r.stdout, "utf8").toString("base64");
+}
+
+interface LinuxKey {
+  keyId: string;
+  pass: string;
+  privateKey: string;
+}
+
+/** Walks the user through generating or providing a GPG key. Returns null when skipped. */
+async function collectLinuxKey(projectName: string): Promise<LinuxKey | null> {
+  const gpg = gpgCommand();
+  if (!gpg) {
+    log.warn(`gpg was not found. Install GnuPG (gpg or gpg2), then run this again. Guide: ${SIGNING_DOCS.linux}`);
+    return null;
+  }
+
+  for (;;) {
+    const choice = await select<"generate" | "have" | "guide" | "skip">({
+      message: "Linux package signing key (GPG):",
+      choices: [
+        { name: "Generate a new GPG key (RSA 4096, valid 3 years)", value: "generate" },
+        { name: "Use a GPG key I already have", value: "have" },
+        { name: "Show me how", value: "guide" },
+        { name: "Skip for now (the AppImage and RPM will be unsigned)", value: "skip" },
+      ],
+      default: "generate",
+    });
+
+    if (choice === "skip") return null;
+    if (choice === "guide") {
+      printLinuxGuide();
+      continue;
+    }
+
+    let keyId: string | null;
+    let pass: string;
+    if (choice === "generate") {
+      const name = await input({ message: "Name for the key:", default: toTitleCase(projectName) });
+      const email = (
+        await input({
+          message: "Email for the key (Enter to skip):",
+          validate: (v) => (v.trim() === "" || /^\S+@\S+\.\S+$/.test(v.trim()) ? true : "Enter a valid email address."),
+        })
+      ).trim();
+      pass = "";
+      keyId = generateGpgKey(gpg, name, email);
+    } else {
+      keyId = (await input({ message: "Key ID or fingerprint:", validate: required })).trim();
+      pass = await password({ message: "Key passphrase (leave blank if it has none):" });
+    }
+    if (!keyId) continue;
+
+    const privateKey = exportGpgSecretKey(gpg, keyId, pass);
+    if (!privateKey) continue;
+
+    log.success(`GPG key ${keyId} is ready.`);
+    return { keyId, pass, privateKey };
+  }
+}
+
+/**
+ * Saves the GPG key for both AppImage and RPM signing, plus APPIMAGETOOL_FORCE_SIGN so a signing
+ * failure aborts the build instead of producing a silently unsigned artifact.
+ * Tauri reads TAURI_SIGNING_RPM_KEY (ASCII-armored key) and TAURI_SIGNING_RPM_KEY_PASSPHRASE for RPM.
+ */
+async function saveLinuxValues(ctx: SigningContext, key: LinuxKey): Promise<void> {
+  await saveCiValues(ctx.projectPath, {
+    GPG_PRIVATE_KEY: key.privateKey,
+    SIGN: "1",
+    SIGN_KEY: key.keyId,
+    APPIMAGETOOL_FORCE_SIGN: "1",
+    TAURI_SIGNING_RPM_KEY: key.privateKey,
+    ...(key.pass ? {
+      APPIMAGETOOL_SIGN_PASSPHRASE: key.pass,
+      TAURI_SIGNING_RPM_KEY_PASSPHRASE: key.pass,
+    } : {}),
+  });
+  log.info(`Local builds read these from .env.signing: run "set -a; source .env.signing; set +a" before \`${pmRun(ctx.pm, "tauri:build")}\`.`);
+}
+
+async function setupLinuxSigning(ctx: SigningContext): Promise<boolean> {
+  const key = await collectLinuxKey(path.basename(ctx.projectPath));
+  if (!key) {
+    log.info("Skipped. The AppImage and RPM stay unsigned until you set it up again.");
+    return false;
+  }
+  await saveLinuxValues(ctx, key);
+  return true;
+}
+
+/** Non-interactive local key: `sign desktop --generate [--publisher Name]` on Linux (never uses a passphrase). */
+async function applyLinuxKey(ctx: SigningContext, flags: CliFlags): Promise<boolean> {
+  const gpg = gpgCommand();
+  if (!gpg) {
+    log.error(`gpg was not found. Install GnuPG (gpg or gpg2). Guide: ${SIGNING_DOCS.linux}`);
+    return false;
+  }
+  // Generated keys are always unprotected - a passphrase is never used on the generate path.
+  const pass = "";
+  const publisher = await resolvePublisherName(ctx.projectPath, flags.publisher);
+  const keyId = generateGpgKey(gpg, publisher, "", pass);
+  if (!keyId) return false;
+  const privateKey = exportGpgSecretKey(gpg, keyId, pass);
+  if (!privateKey) return false;
+  await saveLinuxValues(ctx, { keyId, pass, privateKey });
+  return true;
+}
+
+// ─── --ci-only: credentials generated by GitHub Actions ──────────────────────
+
+/** Values that mean "signing for this target is already saved for GitHub Actions" (generated or real). */
+const SAVED_SIGNING_KEYS: Record<SigningTarget, RegExp> = {
+  windows: /^(WINDOWS_PUBLISHER|WINDOWS_CERTIFICATE)=/m,
+  macos: /^APPLE_CERTIFICATE=/m,
+  linux: /^(LINUX_PUBLISHER|GPG_PRIVATE_KEY)=/m,
+  android: /^(ANDROID_PUBLISHER|ANDROID_KEY_BASE64)=/m,
+  ios: /^(IOS_CERTIFICATE|APPLE_API_KEY)=/m,
+};
+
+function hasSavedCiSigning(projectPath: string, target: SigningTarget): boolean {
+  try {
+    return SAVED_SIGNING_KEYS[target].test(fs.readFileSync(path.join(projectPath, SIGNING_ENV_FILE), "utf-8"));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Only a publisher name (and a keystore password for Android) is stored. The workflow creates the
+ * certificate, keystore or GPG key on the first build, saves it as a GitHub secret and reuses it afterwards.
+ */
+async function saveGeneratedValues(
+  projectPath: string,
+  target: SigningTarget,
+  publisher: string,
+  pass: string,
+  alias = "upload"
+): Promise<void> {
+  const values: Record<SigningTarget, Record<string, string>> = {
+    windows: { WINDOWS_PUBLISHER: publisher },
+    macos: {},
+    linux: { LINUX_PUBLISHER: publisher },
+    android: {
+      ANDROID_PUBLISHER: publisher,
+      ANDROID_KEY_ALIAS: alias,
+      ANDROID_KEYSTORE_PASSWORD: pass,
+      ANDROID_KEY_PASSWORD: pass,
+    },
+    ios: {},
+  };
+  await saveCiValues(projectPath, values[target]);
+}
+
+/**
+ * Replaces any real credentials for this target with the generated-key values. The workflow prefers
+ * a real secret over the publisher name, so the old lines have to go or the replacement is a no-op.
+ * A no-op when the file (or those keys) is absent.
+ */
+async function clearRealCredentialsBeforeGenerate(projectPath: string, target: SigningTarget): Promise<void> {
+  const keys = REAL_CREDENTIAL_KEYS[target];
+  if (!keys?.length) return;
+  const removed = keys.filter((key) => {
+    try {
+      return new RegExp(`^${key}=`, "m").test(fs.readFileSync(path.join(projectPath, SIGNING_ENV_FILE), "utf-8"));
+    } catch {
+      return false;
+    }
+  });
+  await removeKeyValueKeys(path.join(projectPath, SIGNING_ENV_FILE), keys);
+  if (removed.length > 0) {
+    log.info(`Removed the previous ${target} credentials from ${SIGNING_ENV_FILE}: ${removed.join(", ")}`);
+  }
+}
+
+const GENERATED_NOTE: Record<SigningTarget, string> = {
+  windows: "GitHub Actions creates a self-signed Windows certificate with this publisher name on the first build and saves it as a GitHub secret.",
+  macos: "",
+  linux: "GitHub Actions creates a GPG key with this name (no passphrase) on the first build and saves it as a GitHub secret. The same key signs the AppImage and the RPM.",
+  android: "GitHub Actions creates a keystore with this publisher name and password on the first build and saves it as a GitHub secret.",
+  ios: "",
+};
+
+/** Printed after a generated value is saved: what the workflow will do and what it needs. */
+function printGeneratedNotes(target: SigningTarget): void {
+  log.info(GENERATED_NOTE[target]);
+  log.info("Later builds reuse the saved key. Add a repository secret SECRETS_PAT (a token with Secrets: read and write) so the workflow can save it.");
+  log.info("Self-signed keys are not trusted on other people's systems. Use real credentials for store releases (see --help).");
+}
+
+/** Interactive `--ci-only` prompt: the publisher name, and a keystore password for Android only. */
+async function setupGeneratedInCi(ctx: SigningContext, target: SigningTarget): Promise<boolean> {
+  const { projectPath } = ctx;
+
+  if (target === "macos" || target === "ios") {
+    log.error(
+      target === "macos"
+        ? "macOS certificates cannot be generated. Use --adhoc for local testing, or provide a real Developer ID .p12."
+        : "iOS credentials come from Apple and cannot be generated in CI."
+    );
+    return false;
+  }
+
+  if (hasSavedCiSigning(projectPath, target)) {
+    const redo = await confirm({
+      message: `${target} signing is already saved for GitHub Actions. Replace it? (a key already created in GitHub will no longer match)`,
+      default: false,
+    });
+    if (!redo) {
+      log.skip(`Kept existing ${target} signing values.`);
+      return true;
+    }
+    // The workflow prefers a real secret over the generated publisher name, so replacing only takes
+    // effect once the old real-credential lines are gone.
+    await clearRealCredentialsBeforeGenerate(projectPath, target);
+  }
+
+  const publisher = await resolvePublisherName(projectPath, undefined);
+
+  let pass = "";
+  if (target === "android") {
+    pass = await password({ message: "Keystore password (min 6 chars):", validate: minLength(6, "Password") });
+  }
+
+  await saveGeneratedValues(projectPath, target, publisher, pass);
+  printGeneratedNotes(target);
+  return true;
+}
+
+/** Publisher name: `--publisher` wins; otherwise prompt (default: project name), or silent default when non-interactive. */
+async function resolvePublisherName(projectPath: string, given: string | undefined): Promise<string> {
+  const fallback = toTitleCase(path.basename(projectPath));
+  if (given !== undefined) return sanitizeCertName(given);
+  if (isInteractive()) {
+    const value = await input({ message: "Publisher name for the signing key:", default: fallback });
+    return sanitizeCertName(value);
+  }
+  return sanitizeCertName(fallback);
+}
+
+/** Non-interactive: `sign <target> --generate [<password>] [--publisher Name] --ci-only`. Only Android takes a password. */
+async function applyGeneratedInCi(ctx: SigningContext, flags: CliFlags, given: string | undefined): Promise<boolean> {
+  const target = ctx.target;
+  if (!target || target === "ios") {
+    log.error("iOS credentials come from Apple and cannot be generated in CI. Use: sign ios <cert.p12> <password> --profile <app.mobileprovision> --ci-only");
+    return false;
+  }
+  if (target === "macos") {
+    log.error("macOS certificates cannot be generated. Use ad-hoc for local testing (`sign desktop --adhoc`), or provide a real Developer ID .p12 for CI.");
+    return false;
+  }
+  if (target === "linux" && given !== undefined && given.length > 0) {
+    log.warn("Linux generated GPG keys never use a passphrase; ignoring the password argument.");
+  }
+
+  if (hasSavedCiSigning(ctx.projectPath, target) && !flags.force) {
+    log.error(`${target} signing is already saved in ${SIGNING_ENV_FILE}. Re-run with --force to replace it (a key already created in GitHub will no longer match).`);
+    return false;
+  }
+
+  // With --force (or after the "already saved" gate), drop any real credentials first so the
+  // generated publisher name actually takes effect.
+  await clearRealCredentialsBeforeGenerate(ctx.projectPath, target);
+
+  const publisher = await resolvePublisherName(ctx.projectPath, flags.publisher);
+  let pass = "";
+  if (target === "android") {
+    const resolved = await resolveSecret(given, ENV_SIGN_PASSWORD, "Keystore password:");
+    if (resolved === null) return false;
+    if (resolved.length < 6) {
+      log.error("The password must be at least 6 characters.");
+      return false;
+    }
+    pass = resolved;
+  }
+
+  await saveGeneratedValues(ctx.projectPath, target, publisher, pass, flags.alias);
+  printGeneratedNotes(target);
+  return true;
+}
+
+// ─── Signing: orchestration ──────────────────────────────────────────────────
+
 const SIGNING_LABEL: Record<SigningTarget, string> = {
   android: "Android release signing",
   windows: "Windows code signing",
   macos: "macOS code signing",
-  linux: "Linux AppImage signing",
+  linux: "Linux package signing",
   ios: "iOS code signing",
+};
+
+/** Tauri's own signing guides, shown for every target. Linux signing is manual, so it only links here. */
+const SIGNING_DOCS: Record<SigningTarget, string> = {
+  macos: "https://v2.tauri.app/distribute/sign/macos/",
+  windows: "https://v2.tauri.app/distribute/sign/windows/",
+  linux: "https://v2.tauri.app/distribute/sign/linux/",
+  ios: "https://v2.tauri.app/distribute/sign/ios/",
+  android: "https://v2.tauri.app/distribute/sign/android/",
 };
 
 const signingHint = (platform: TauriPlatform): string => `Set it up later with: create-bini-app sign ${platform}`;
@@ -1502,37 +3215,195 @@ const signingHint = (platform: TauriPlatform): string => `Set it up later with: 
 const signingTargetFor = (platform: TauriPlatform, userOS: UserOS): SigningTarget =>
   platform === "desktop" ? userOS : platform;
 
+/** Interactive signing for one target. */
 async function setupCodeSigning(ctx: SigningContext): Promise<boolean> {
   const { platform, signFlag, userOS } = ctx;
-  const target = signingTargetFor(platform, userOS);
+  const target = ctx.target ?? signingTargetFor(platform, userOS);
 
   if (signFlag === false) {
     log.info(`Skipping ${target} signing (--nosign). ${signingHint(platform)}`);
     return false;
   }
   if (!isInteractive()) {
-    log.info(`Skipping ${target} signing (non-interactive). ${signingHint(platform)}`);
+    log.info(`Skipping ${target} signing (no prompts). ${signingHint(platform)}`);
     return false;
   }
 
   log.step(SIGNING_LABEL[target]);
+  log.plain(`     ${c.dim(`Guide: ${SIGNING_DOCS[target]}`)}`);
   const wantsSigning = signFlag === true || (await confirm({ message: `Set up ${target} signing now?`, default: false }));
   if (!wantsSigning) {
     log.info(`Skipped. ${signingHint(platform)}`);
     return false;
   }
 
-  if (platform === "desktop") {
+  if (platform === "desktop" && !ctx.target) {
     log.info(`Desktop signing is set up for ${userOS} only. Sign the other systems in CI (GitHub Actions) on their own runners.`);
+  }
+
+  if (ctx.ciOnly && target === "ios") {
+    log.info("iOS certificates are issued by Apple, so they cannot be generated in CI. You will be asked for your certificate and provisioning profile.");
+  }
+
+  // macOS: no generated keys - real Developer ID for CI, or ad-hoc for local testing.
+  // Windows, Linux and Android can either let GitHub Actions generate a key, or use real credentials.
+  if (ctx.ciOnly && target !== "ios" && target !== "macos") {
+    const mode = await select<"generate" | "real">({
+      message: `${target} credentials for GitHub Actions:`,
+      choices: [
+        { name: "Let GitHub Actions generate a self-signed key (easiest, not trusted by other systems)", value: "generate" },
+        { name: "Use real credentials I already have (needed for store releases)", value: "real" },
+      ],
+      default: "generate",
+    });
+    if (mode === "generate") return setupGeneratedInCi(ctx, target);
   }
 
   switch (target) {
     case "android": return setupAndroidSigning(ctx);
     case "windows": return setupWindowsSigning(ctx);
     case "macos": return setupMacosSigning(ctx);
-    case "linux": return setupLinuxSigning(ctx);
     case "ios": return setupIosSigning(ctx);
+    case "linux": return setupLinuxSigning(ctx);
   }
+}
+
+/** The certificate/keystore password: given on the command line, from the environment, or asked for. */
+async function resolveSecret(given: string | undefined, envName: string, message: string): Promise<string | null> {
+  if (given !== undefined) return given;
+  const fromEnv = process.env[envName];
+  if (fromEnv !== undefined) return fromEnv;
+  if (isInteractive()) return password({ message });
+  log.error(`A password is required: pass it after the file, or set ${envName}.`);
+  return null;
+}
+
+/** True when `sign` has everything it needs on the command line, so no question is asked. */
+const hasSignInputs = (parsed: SignParsed, flags: CliFlags): boolean =>
+  parsed.file !== undefined ||
+  flags.signCommand !== undefined ||
+  flags.thumbprint !== undefined ||
+  flags.generate ||
+  flags.adhoc ||
+  (flags.team !== undefined && parsed.targets.includes("ios")) ||
+  (flags.profile !== undefined && parsed.targets.includes("ios"));
+
+/** `sign <target> <file> <password>` and the file-less modes (--generate, --thumbprint, --adhoc, ios --team): no prompts. */
+async function signWithArguments(
+  root: string,
+  parsed: SignParsed,
+  flags: CliFlags,
+  userOS: UserOS,
+  pm: PackageManager
+): Promise<number> {
+  const only = parsed.targets[0];
+  if (parsed.targets.length !== 1 || only === undefined) {
+    log.error("Name the target to sign, for example: create-bini-app sign desktop ./cert.pfx <password>");
+    return 1;
+  }
+
+  const target: SigningTarget = only === "desktop" ? userOS : only;
+  const modeFlags: [flag: string, used: boolean, targets: SigningTarget[]][] = [
+    ["--sign-command", flags.signCommand !== undefined, ["windows"]],
+    ["--thumbprint", flags.thumbprint !== undefined, ["windows"]],
+    ["--publisher", flags.publisher !== undefined, ["windows", "android", "linux"]],
+    ["--adhoc", flags.adhoc, ["macos"]],
+    ["--generate", flags.generate, ["windows", "android", "linux"]],
+    ["--api-issuer", flags.apiIssuer !== undefined, ["ios", "macos"]],
+    ["--api-key", flags.apiKey !== undefined, ["ios", "macos"]],
+    ["--api-key-file", flags.apiKeyFile !== undefined, ["ios", "macos"]],
+  ];
+  for (const [flag, used, targets] of modeFlags) {
+    if (used && !targets.includes(target)) {
+      log.error(`${flag} only works for the ${targets.join(" and ")} target.`);
+      return 1;
+    }
+  }
+
+  // A profile without its certificate used to fall through to the interactive flow silently.
+  if (target === "ios" && flags.profile !== undefined && parsed.file === undefined) {
+    log.error("--profile needs the certificate too: create-bini-app sign ios <cert.p12> <password> --profile <app.mobileprovision>");
+    return 1;
+  }
+
+  const fileless =
+    flags.signCommand !== undefined ||
+    flags.thumbprint !== undefined ||
+    flags.adhoc ||
+    flags.generate ||
+    (target === "ios" && parsed.file === undefined);
+  if (fileless && parsed.file !== undefined) {
+    log.error("Give either a credential file or one of --sign-command, --thumbprint, --generate, --adhoc, not both.");
+    return 1;
+  }
+  if (target === "linux" && !flags.generate) {
+    log.error(`Linux signing has no credential file. Run it with prompts (create-bini-app sign desktop, or sign linux --ci-only), or let GitHub Actions create a key with: sign linux --generate --ci-only`);
+    return 1;
+  }
+  if (flags.ciOnly && fileless && !flags.generate) {
+    log.error("--sign-command, --thumbprint, --adhoc and ios --team set up this machine, so they cannot be combined with --ci-only.");
+    return 1;
+  }
+  if (flags.generate && target === "macos") {
+    log.error("macOS certificates cannot be generated. Use --adhoc for local testing, or provide a real Developer ID .p12 (optionally with --ci-only).");
+    return 1;
+  }
+
+  const tauriDir = path.join(root, "src-tauri");
+  const ctx: SigningContext = {
+    projectPath: root,
+    tauriDir,
+    platform: target === "android" ? "android" : target === "ios" ? "ios" : "desktop",
+    userOS,
+    signFlag: true,
+    pm,
+    target,
+    ciOnly: flags.ciOnly,
+  };
+
+  let ok = false;
+  let savedForCi = true;
+
+  if (flags.ciOnly && flags.generate) {
+    ok = await applyGeneratedInCi(ctx, flags, parsed.password);
+  } else if (fileless && !(flags.generate && (target === "android" || target === "linux"))) {
+    savedForCi = false;
+    if (flags.signCommand !== undefined) ok = await writeWindowsSignCommand(ctx, flags.signCommand);
+    else if (flags.thumbprint !== undefined) ok = await applyWindowsThumbprint(tauriDir, flags.thumbprint);
+    else if (target === "windows") ok = await generateWindowsCertificate(ctx, flags.publisher);
+    else if (target === "macos") ok = await applyMacosAdhoc(tauriDir);
+    else ok = await applyIosTeam(tauriDir, root, flags.team, flags);
+  } else {
+    const file = parsed.file === undefined ? undefined : path.resolve(cleanPath(parsed.file));
+    if (file !== undefined && !fs.existsSync(file)) {
+      log.error(`File not found: ${parsed.file}`);
+      return 1;
+    }
+
+    // Linux --generate never needs a password. Only Android requires one for generate.
+    if (target === "linux" && flags.generate) {
+      if (parsed.password) log.warn("Linux generated GPG keys never use a passphrase; ignoring the password argument.");
+      ok = await applyLinuxKey(ctx, flags);
+    } else {
+      const pass = await resolveSecret(parsed.password, ENV_SIGN_PASSWORD, target === "android" ? "Keystore password:" : "Certificate password:");
+      if (pass === null) return 1;
+
+      if (file === undefined && !flags.generate) {
+        log.error(`File not found: ${parsed.file ?? "(none)"}`);
+        return 1;
+      }
+
+      if (target === "windows") ok = await applyWindowsCertificate(ctx, file as string, pass);
+      else if (target === "macos") ok = await applyMacosCertificate(ctx, flags, file as string, pass);
+      else if (target === "ios") ok = await applyIosCredentials(ctx, flags, file as string, pass);
+      else ok = await applyAndroidKeystore(ctx, flags, file, pass);
+    }
+  }
+
+  if (ok) {
+    log.plain(`\n${c.green("Done.")}${savedForCi ? ` Upload the saved values to GitHub with: ${c.cyan(pmRun(pm, "deploy"))}` : ""}`);
+  }
+  return ok ? 0 : 1;
 }
 
 async function initTauri(o: InitTauriOptions): Promise<InitResult> {
@@ -1557,10 +3428,10 @@ async function initTauri(o: InitTauriOptions): Promise<InitResult> {
   const cmd = tauriCmd(pm, initArgs, localCli);
   log.step("Initializing Tauri...");
   log.command(displayCmd(cmd.bin, cmd.args));
-  if (!runBin(cmd.bin, cmd.args, projectPath, 120_000)) {
+  if (!runBin(cmd.bin, cmd.args, projectPath, SLOW_STEP_MS)) {
     const manual = pmTauri(pm, initArgs);
     log.warn("Tauri init failed. After installing dependencies, run manually:");
-    log.plain(`  ${c.yellow}${displayCmd(manual.bin, manual.args)}${c.reset}`);
+    log.plain(`  ${c.yellow(displayCmd(manual.bin, manual.args))}`);
     addFollowUp(`Install dependencies (${pm} install), then run: ${displayCmd(manual.bin, manual.args)}`);
     return "failed";
   }
@@ -1574,9 +3445,9 @@ async function initTauri(o: InitTauriOptions): Promise<InitResult> {
     if (win) win.title = appName;
   });
   if (patched) {
-    log.success(`App name set to "${appName}", bundle identifier ${c.cyan}${identifier}${c.reset}`);
+    log.success(`App name set to "${appName}", bundle identifier ${c.cyan(identifier)}`);
     log.info("Replace the identifier with your own reverse-DNS id before publishing to an app store.");
-    log.info(`Change them later with: ${c.cyan}create-bini-app --app-name${c.reset} / ${c.cyan}create-bini-app --org${c.reset}`);
+    log.info(`Change them later with: ${c.cyan("create-bini-app --app-name")} / ${c.cyan("create-bini-app --org")}`);
   }
 
   if (!fs.existsSync(path.join(projectPath, "public", "logo.png"))) {
@@ -1623,10 +3494,10 @@ async function initMobile(
 
   log.step(`Initializing ${label} support...`);
   log.command(displayCmd(cmd.bin, cmd.args));
-  if (!runBin(cmd.bin, cmd.args, projectPath)) {
+  if (!runBin(cmd.bin, cmd.args, projectPath, SLOW_STEP_MS)) {
     if (platform === "android") {
       log.warn("Android init failed (JAVA_HOME / ANDROID_HOME / NDK_HOME set?). Run manually:");
-      log.plain(`  ${c.yellow}${manualCmd}${c.reset}`);
+      log.plain(`  ${c.yellow(manualCmd)}`);
       addFollowUp(`Fix the Android toolchain (JDK 17, ANDROID_HOME, NDK_HOME), then run: ${manualCmd}`);
     } else {
       log.warn(`iOS init failed. Please run manually: ${manualCmd}`);
@@ -1640,7 +3511,7 @@ async function initMobile(
     if (commandExists("rustup")) {
       log.step("Adding Rust Android targets");
       log.command(`rustup target add ${ANDROID_RUST_TARGETS.join(" ")}`);
-      if (runBin("rustup", ["target", "add", ...ANDROID_RUST_TARGETS], projectPath)) {
+      if (runBin("rustup", ["target", "add", ...ANDROID_RUST_TARGETS], projectPath, SLOW_STEP_MS)) {
         log.success("Rust Android targets ready");
       } else {
         log.warn("Could not add Rust Android targets. Run the rustup command above manually.");
@@ -1663,12 +3534,26 @@ async function setupTauri(
   const tauriDir = path.join(projectPath, "src-tauri");
   const result = await initTauri(o);
 
+  const mobileResults = new Map<TauriPlatform, MobileResult>();
   for (const p of platforms) {
-    if (p !== "desktop") await initMobile(p, { projectPath, pm, userOS, localCli });
+    if (p !== "desktop") mobileResults.set(p, await initMobile(p, { projectPath, pm, userOS, localCli }));
   }
 
   if (result === "ok") {
+    // Guard: if src-tauri already has signing for a target, keep it. Otherwise set it up.
+    const signing = detectProject(projectPath, undefined).signing;
     for (const p of platforms) {
+      // Signing a platform whose init did not finish would only fail with "project not found".
+      const init = mobileResults.get(p);
+      if (init === "failed" || init === "manual") {
+        log.skip(`${p}: signing skipped because the ${p} project was not created. ${signingHint(p)}`);
+        continue;
+      }
+      const target = signingTargetFor(p, userOS);
+      if (signing[target]) {
+        log.skip(`${p}: signing already configured in src-tauri`);
+        continue;
+      }
       await setupCodeSigning({ projectPath, tauriDir, platform: p, userOS, signFlag, pm });
     }
   }
@@ -1677,163 +3562,6 @@ async function setupTauri(
   log.success(`Tauri setup complete for ${platforms.join(", ")}`);
 }
 
-const CSS_RESET = `* { box-sizing: border-box; }
-html { font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; -webkit-font-smoothing: antialiased; }
-body { line-height: 1.5; min-height: 100vh; margin: 0; }
-#root { min-height: 100vh; }
-`;
-
-const PAGE_CSS = `.home {
-  display: flex;
-  min-height: 100vh;
-  width: 100%;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  background: #ffffff;
-}
-
-.home-main {
-  display: flex;
-  min-height: 100vh;
-  width: 100%;
-  max-width: 48rem;
-  flex-direction: column;
-  align-items: center;
-  justify-content: space-between;
-  padding: 6rem 2rem;
-}
-
-.home-logo { height: 1.75rem; width: auto; }
-
-.home-text {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 1.5rem;
-  text-align: center;
-}
-
-.home-title {
-  max-width: 20rem;
-  margin: 0;
-  font-size: 1.875rem;
-  font-weight: 600;
-  line-height: 2.5rem;
-  letter-spacing: -0.025em;
-  color: #000000;
-}
-
-.home-code {
-  border-radius: 0.25rem;
-  background: #f4f4f5;
-  padding: 0.125rem 0.375rem;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 0.9em;
-}
-
-.home-desc { max-width: 28rem; margin: 0; font-size: 1.125rem; line-height: 2rem; color: #52525b; }
-.home-link { font-weight: 500; color: #09090b; text-decoration: none; }
-.home-actions { display: flex; width: 100%; flex-direction: column; gap: 0.75rem; }
-
-.home-btn {
-  display: flex;
-  height: 3rem;
-  width: 100%;
-  align-items: center;
-  justify-content: center;
-  border-radius: 9999px;
-  padding: 0 2rem;
-  font-weight: 500;
-  text-decoration: none;
-  transition: background-color 0.15s, color 0.15s;
-}
-
-.home-btn-primary { background: #000000; color: #ffffff; }
-.home-btn-primary:hover { background: #27272a; }
-.home-btn-secondary { border: 1px solid #d4d4d8; background: #ffffff; color: #000000; }
-.home-btn-secondary:hover { background: #fafafa; }
-
-@media (min-width: 640px) {
-  .home-main { align-items: flex-start; padding: 8rem 4rem; }
-  .home-logo { height: 2rem; }
-  .home-text { align-items: flex-start; text-align: left; }
-  .home-actions { width: auto; flex-direction: row; }
-  .home-btn { width: auto; }
-}
-
-@media (prefers-color-scheme: dark) {
-  .home { background: #000000; }
-  .home-logo { filter: invert(1); }
-  .home-title { color: #fafafa; }
-  .home-code { background: #18181b; }
-  .home-desc { color: #a1a1aa; }
-  .home-link { color: #fafafa; }
-  .home-btn-primary { background: #ffffff; color: #000000; }
-  .home-btn-primary:hover { background: #e4e4e7; }
-  .home-btn-secondary { border-color: #3f3f46; background: transparent; color: #ffffff; }
-  .home-btn-secondary:hover { background: #18181b; }
-}
-`;
-
-function generateGlobalStyles(styling: StylingOption): string {
-  if (styling === "Tailwind") return `@import "tailwindcss";\n\n${CSS_RESET}`;
-  if (styling === "CSS Modules") return CSS_RESET;
-  return `${CSS_RESET}\n${PAGE_CSS}`;
-}
-
-const buildCommand = (useTypeScript: boolean, mainExt: FileExtension): string =>
-  `${useTypeScript ? "tsc --noEmit && " : ""}vite build && vite build --ssr src/main.${mainExt}`;
-
-function basePackageJson(projectName: string, useTypeScript: boolean, mainExt: FileExtension, styling: StylingOption) {
-  const dependencies: Record<string, string> = {
-    react: "latest",
-    "react-dom": "latest",
-    "react-router-dom": "latest",
-    hono: "latest",
-    "bini-router": "latest",
-    "bini-overlay": "latest",
-    "bini-server": "latest",
-    "bini-ssg": "latest",
-  };
-
-  const devDependencies: Record<string, string> = {
-    "@vitejs/plugin-react": "latest",
-    vite: "latest",
-    oxlint: "latest",
-    oxfmt: "latest",
-    "bini-env": "latest",
-    "bini-deploy": "latest",
-  };
-
-  if (useTypeScript) {
-    Object.assign(devDependencies, {
-      "@types/react": "latest",
-      "@types/react-dom": "latest",
-      "@types/node": "latest",
-      typescript: "latest",
-    });
-  }
-  if (styling === "Tailwind") {
-    Object.assign(devDependencies, { tailwindcss: "latest", "@tailwindcss/vite": "latest" });
-  }
-
-  const scripts: Record<string, string> = {
-    dev: "vite --host --open",
-    build: buildCommand(useTypeScript, mainExt),
-    start: "bini-server",
-    preview: "vite preview --host --open",
-    deploy: "bini-deploy",
-    clean: "npx create-bini-app clean",
-    upgrade: "npx create-bini-app upgrade",
-    "type-check": useTypeScript ? "tsc --noEmit" : "echo 'TypeScript not enabled'",
-    lint: "oxlint src",
-    format: "oxfmt src",
-    check: useTypeScript ? "oxlint src && oxfmt src && tsc --noEmit" : "oxlint src && oxfmt src",
-  };
-
-  return { name: projectName, type: "module", version: "1.0.0", scripts, dependencies, devDependencies };
-}
 
 function nativePackagePatch(): NativePackagePatch {
   return {
@@ -1893,491 +3621,6 @@ async function applyNativePatch(root: string): Promise<boolean> {
   }
 }
 
-type PageKey =
-  | "root" | "main" | "logo" | "text" | "title" | "code"
-  | "desc" | "link" | "actions" | "primary" | "secondary";
-
-const TAILWIND_CLASSES: Record<PageKey, string> = {
-  root: "flex min-h-screen w-full flex-col items-center justify-center bg-white font-sans dark:bg-black",
-  main: "flex min-h-screen w-full max-w-3xl flex-col items-center justify-between px-8 py-24 sm:items-start sm:px-16 sm:py-32",
-  logo: "h-7 w-auto sm:h-8 dark:invert",
-  text: "flex flex-col items-center gap-6 text-center sm:items-start sm:text-left",
-  title: "max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50",
-  code: "rounded bg-zinc-100 px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-zinc-900",
-  desc: "max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400",
-  link: "font-medium text-zinc-950 no-underline dark:text-zinc-50",
-  actions: "flex w-full flex-col gap-3 sm:w-auto sm:flex-row",
-  primary:
-    "flex h-12 w-full items-center justify-center rounded-full bg-black px-8 font-medium text-white transition-colors hover:bg-zinc-800 dark:bg-white dark:text-black dark:hover:bg-zinc-200 sm:w-auto",
-  secondary:
-    "flex h-12 w-full items-center justify-center rounded-full border border-zinc-300 bg-white px-8 font-medium text-black transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:bg-transparent dark:text-white dark:hover:bg-zinc-900 sm:w-auto",
-};
-
-const PLAIN_CLASS_NAMES: Record<PageKey, string> = {
-  root: "home",
-  main: "home-main",
-  logo: "home-logo",
-  text: "home-text",
-  title: "home-title",
-  code: "home-code",
-  desc: "home-desc",
-  link: "home-link",
-  actions: "home-actions",
-  primary: "home-btn home-btn-primary",
-  secondary: "home-btn home-btn-secondary",
-};
-
-const MODULE_CLASS_EXPR: Record<PageKey, string> = {
-  root: "{styles.home}",
-  main: "{styles.homeMain}",
-  logo: "{styles.homeLogo}",
-  text: "{styles.homeText}",
-  title: "{styles.homeTitle}",
-  code: "{styles.homeCode}",
-  desc: "{styles.homeDesc}",
-  link: "{styles.homeLink}",
-  actions: "{styles.homeActions}",
-  primary: "{`${styles.homeBtn} ${styles.homeBtnPrimary}`}",
-  secondary: "{`${styles.homeBtn} ${styles.homeBtnSecondary}`}",
-};
-
-function buildPageContent(fileExt: FileExtension, styling: StylingOption): string {
-  const cn = (key: PageKey): string =>
-    styling === "Tailwind"
-      ? `className="${TAILWIND_CLASSES[key]}"`
-      : styling === "CSS Modules"
-        ? `className=${MODULE_CLASS_EXPR[key]}`
-        : `className="${PLAIN_CLASS_NAMES[key]}"`;
-
-  const cssImport = styling === "CSS Modules" ? `import styles from './page.module.css';\n\n` : "";
-
-  return `${cssImport}export default function Home() {
-  return (
-    <div ${cn("root")}>
-      <main ${cn("main")}>
-        <img
-          src="/bini.svg"
-          alt="Bini.js"
-          width="120"
-          height="32"
-          ${cn("logo")}
-        />
-
-        <div ${cn("text")}>
-          <h1 ${cn("title")}>
-            To get started, edit the{" "}
-            <code ${cn("code")}>
-              src/app/page.${fileExt}
-            </code>{" "}
-            file.
-          </h1>
-
-          <p ${cn("desc")}>
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a href="https://bini.js.org/showcase" ${cn("link")}>
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a href="https://bini.js.org" ${cn("link")}>
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-
-        <div ${cn("actions")}>
-          <a
-            href="https://bini.js.org/showcase"
-            target="_blank"
-            rel="noopener noreferrer"
-            ${cn("primary")}
-          >
-            Showcase
-          </a>
-          <a
-            href="https://bini.js.org"
-            target="_blank"
-            rel="noopener noreferrer"
-            ${cn("secondary")}
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
-  );
-}
-`;
-}
-
-async function generateAppFiles(
-  projectPath: string,
-  mainExt: FileExtension,
-  useTypeScript: boolean,
-  styling: StylingOption,
-  appName: string
-): Promise<void> {
-  const appPath = path.join(projectPath, "src/app");
-
-  const ts = (tsCode: string, jsCode = ""): string => (useTypeScript ? tsCode : jsCode);
-
-  const childrenProp = ts(`{ children }: { children: React.ReactNode }`, `{ children }`);
-
-  const mainContent = `import React from 'react';
-import { createRoot, hydrateRoot } from 'react-dom/client';
-import App from './App';
-
-const noopSubscribe = () => () => {};
-
-function ClientOnly(${childrenProp}) {
-  const hasMounted = React.useSyncExternalStore(
-    noopSubscribe,
-    () => true,
-    () => false
-  );
-
-  if (import.meta.env.DEV && !hasMounted) {
-    return null;
-  }
-
-  return <>{children}</>;
-}
-
-if (typeof window !== 'undefined') {
-  const rootElement = document.getElementById('root');
-  if (rootElement) {
-    const isShell = ${ts(
-      `(window as unknown as { __BINI_SHELL__?: boolean }).__BINI_SHELL__ === true`,
-      `window.__BINI_SHELL__ === true`
-    )};
-
-    if (isShell) {
-      createRoot(rootElement).render(<App />);
-    } else if (import.meta.env.DEV) {
-      hydrateRoot(
-        rootElement,
-        <ClientOnly>
-          <App />
-        </ClientOnly>
-      );
-    } else {
-      hydrateRoot(rootElement, <App />);
-    }
-  }
-}
-
-export { App };
-
-export async function render(url${ts(": string")})${ts(": Promise<string>")} {
-  const ReactDOMServer = await import('react-dom/server');
-  const { createElement } = await import('react');
-  const { StaticRouter } = await import('react-router-dom');
-  const { AppRoutes, basename: rawBasename } = await import('./App');
-  const { Writable } = await import('stream');
-
-  const basename${ts(": string")} = rawBasename;
-
-  const normalizedBase = basename === '/' ? '' : basename.replace(/\\/$/, '');
-
-  const routePath = url.startsWith('/') ? url : \`/\${url}\`;
-
-  const fullUrl = normalizedBase && !routePath.startsWith(normalizedBase)
-    ? \`\${normalizedBase}\${routePath}\`
-    : routePath;
-
-  return new Promise${ts("<string>")}((resolve, reject) => {
-    let html = '';
-    const writable = new Writable({
-      write(chunk, _enc, callback) {
-        html += chunk.toString();
-        callback();
-      },
-    });
-
-    const { pipe } = ReactDOMServer.renderToPipeableStream(
-      createElement(
-        StaticRouter,
-        { location: fullUrl, basename },
-        createElement(AppRoutes)
-      ),
-      {
-        onAllReady() {
-          pipe(writable);
-          writable.on('finish', () => resolve(html));
-        },
-        onError: (err${ts(": unknown")}) => {
-          reject(err);
-        },
-      }
-    );
-  });
-}
-`;
-
-  // The title is web-only: the native app name lives in src-tauri/tauri.conf.json.
-  const siteName = jsString(appName);
-  const layoutContent = `import React from 'react';
-import './globals.css';
-
-export const metadata = {
-  title      : ${siteName},
-  description: 'Modern React application built with Bini.js',
-  keywords   : ['Bini.js', 'React', 'Vite'],
-  themeColor : '#00CFFF',
-  manifest   : '/site.webmanifest',
-  openGraph: {
-    siteName   : ${siteName},
-    title      : ${siteName},
-    description: 'Modern React application built with Bini.js',
-    images     : [{ url: '/og-image.png', width: 1200, height: 630 }],
-  },
-  twitter: {
-    card   : 'summary_large_image',
-    title  : ${siteName},
-    creator: '@binidu01',
-    images : ['/og-image.png'],
-  },
-  icons: {
-    icon : [{ url: '/favicon.ico', type: 'image/x-icon' }],
-    apple: [{ url: '/apple-touch-icon.png', sizes: '180x180' }],
-  },
-};
-
-const jsonLd = {
-  '@context'   : 'https://schema.org',
-  '@type'      : 'WebSite',
-  name         : 'Bini.js',
-  alternateName: 'Bini',
-  url          : 'https://bini.js.org/',
-};
-
-export default function RootLayout(${childrenProp}) {
-  return (
-    <React.Fragment>
-      <script
-        type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
-      />
-      {children}
-    </React.Fragment>
-  );
-}
-`;
-
-  await Promise.all([
-    writeFile(path.join(projectPath, "src", `main.${mainExt}`), mainContent),
-    writeFile(path.join(appPath, `layout.${mainExt}`), layoutContent),
-    writeFile(path.join(appPath, `page.${mainExt}`), buildPageContent(mainExt, styling)),
-  ]);
-}
-
-const generateApiFile = (projectPath: string, ext: ScriptExtension): Promise<void> =>
-  writeFile(
-    path.join(projectPath, `src/app/api/hello.${ext}`),
-    `import { Hono } from 'hono'
-
-const app = new Hono()
-
-app.all('/hello', (c) => {
-  return c.json({
-    message  : 'Hello from Bini.js!',
-    timestamp: new Date().toISOString(),
-    method   : c.req.method,
-  })
-})
-
-export default app
-`
-  );
-
-function generateReadme(projectName: string, useTypeScript: boolean, pm: PackageManager): string {
-  const mainExt = useTypeScript ? "tsx" : "jsx";
-  const run = (script: string): string => `${pm} run ${script}`;
-  const tauriRun = (args: string): string => (pm === "npm" ? `${pm} run tauri -- ${args}` : `${pm} run tauri ${args}`);
-  const bullets = (items: string[]): string => items.map((i) => `- ${i}`).join("\n");
-  const table = (rows: [string, string][]): string =>
-    ["| Command | Description |", "|---|---|", ...rows.map(([cmd, desc]) => `| \`${cmd}\` | ${desc} |`)].join("\n");
-
-  const rows: [string, string][] = [
-    [run("dev"), "Start the Vite development server with HMR"],
-    [run("build"), `${useTypeScript ? "Type-check, build" : "Build"} the client and SSR bundle, then prerender every route`],
-    [run("start"), "Serve the production build with bini-server"],
-    [run("preview"), "Preview the production build"],
-    [run("tauri:dev"), "Desktop app in development mode"],
-    [run("tauri:build"), "Build a distributable desktop app"],
-    [run("tauri:icon"), "Generate all app icons from `public/logo.png`"],
-    [run("android"), "Run the Android app on an emulator or device"],
-    [run("android:build"), "Build an APK / AAB"],
-    [run("ios"), "Run the iOS app on a simulator or device (macOS only)"],
-    [run("ios:build"), "Build the iOS app (macOS only)"],
-    [run("sign"), "Set up or redo code signing"],
-    [run("doctor"), "Check your machine for Tauri (runs `tauri info`)"],
-    [tauriRun("<args>"), "Pass-through to the Tauri CLI"],
-    [run("clean"), "Delete build output (`dist/`, and the Tauri/Rust build output when present). `node_modules` is kept"],
-    [run("upgrade"), "Update every dependency to its latest version (and `cargo update` for Rust)"],
-    [run("deploy"), "Deploy with bini-deploy (Netlify, Vercel, Cloudflare Workers, Node.js, Deno or GitHub)"],
-  ];
-
-  const sections: string[] = [
-    `# ${projectName}\n\nA **Bini.js** application built with **Vite** and **Hono**. It runs on the web, and on desktop (Windows, macOS, Linux), Android and iOS through **Tauri**.\n\nRequires Node.js >= ${REQUIRED_NODE}.`,
-
-    [
-      "## Commands",
-      table(rows),
-      "The desktop, Android and iOS commands only work once that target is in the project: pick it when creating the project, or add it later (see [Adding and removing platforms](#adding-and-removing-platforms)).",
-    ].join("\n\n"),
-
-    [
-      "## Features",
-      bullets([
-        "File-based routing, nested layouts, per-route metadata and code splitting (**bini-router**).",
-        "API routes in `src/app/api/` (Vite middleware in dev, **bini-server** in production, edge runtimes when deployed).",
-        `Static site generation (**bini-ssg**) from the \`render()\` export of \`src/main.${mainExt}\`.`,
-        "Dev overlay with Shiki-powered error highlighting (**bini-overlay**) and GitHub Codespaces support.",
-        "Environment variables (**bini-env**).",
-        "Linting with **Oxlint** and formatting with **Oxfmt**" + (useTypeScript ? ", type-checked with **TypeScript**." : "."),
-      ]),
-    ].join("\n\n"),
-
-    [
-      "## Desktop and mobile (Tauri v2)",
-      `Native targets add \`src-tauri/\`, \`bini-native\` and the scripts above. Every Tauri script sets \`TAURI=true\`, so the dev server binds to \`TAURI_DEV_HOST\` / \`0.0.0.0\` on port 3000 (Tauri's \`devUrl\`) and no browser tab opens. ` +
-        `Release builds run \`${run("build")}\` first, so the packaged app ships the same prerendered HTML as the web.`,
-      `\`bini-native\` is loaded by \`vite.config\` only when \`TAURI=true\`. It serves \`/api/*\` in-process, opens external links in the system browser and wires Cargo, capabilities and manifests for the web APIs you use.`,
-      `Prerequisites: ${TAURI_PREREQUISITES_URL}`,
-      bullets([
-        `Desktop bundles are not cross-compiled: build on the OS you target. Regenerate icons from \`public/logo.png\` with \`${run("tauri:icon")}\`.`,
-        "Android: commit the generated `src-tauri/gen/android`. Only `keystore.properties`, `.gradle/` and build output are git-ignored.",
-        "iOS: needs macOS with Xcode.",
-      ]),
-    ].join("\n\n"),
-
-    [
-      "## App name and bundle ID",
-      "The native app name and bundle identifier are set once, when Tauri is first set up, and live in `src-tauri/tauri.conf.json` (`productName`, the window `title` and `identifier`). " +
-        "The `title` in `src/app/layout.tsx` only affects the web page, so editing it does not rename the desktop or mobile app.",
-      "To change them, run these from inside the project. Without a value you get a prompt, with a value it is applied directly:",
-      "```bash\nnpx create-bini-app --app-name                     # prompt for a new app name\nnpx create-bini-app --org                          # prompt for a new bundle ID prefix\nnpx create-bini-app --app-name \"My App\" --org com.acme\n```",
-      bullets([
-        "`--app-name` updates `productName` and the first window title, and the Android app name when it can be found.",
-        "`--org` rebuilds the identifier as `<org>.<project>`, with the project name reduced to lowercase letters and numbers (for example `com.acme.myapp`), and asks you to confirm before changing it. App stores treat a new identifier as a different app.",
-        "The generated `src-tauri/gen/android` and `src-tauri/gen/apple` projects keep the old values. Commit first, then remove and re-add the platform to regenerate it, or edit it by hand.",
-      ]),
-    ].join("\n\n"),
-
-    [
-      "## Code signing",
-      `Secrets live in git-ignored files:\n\n${bullets([
-        "Desktop and iOS: `.env.signing` (load with `set -a; source .env.signing; set +a`).",
-        "Android: `keystore.jks` in the project root and `src-tauri/gen/android/keystore.properties`. The Gradle config only signs when that file exists, so debug builds and fresh clones keep working. Back up `keystore.jks` and its password.",
-      ])}`,
-      `\`${run("sign")}\` prompts only for what applies here: desktop signs for the OS you run it on, Android is included once it was added, and iOS appears only on macOS. ` +
-        "Pass a target to redo just one, e.g. `npx create-bini-app sign android`.",
-    ].join("\n\n"),
-
-    [
-      "## Adding and removing platforms",
-      `Run from inside the project. \`vite.config\`, \`src/main.${mainExt}\` and \`src/app/*\` are never touched, and re-running skips anything already configured.`,
-      "```bash\nnpx create-bini-app add desktop,android,ios\nnpx create-bini-app remove <desktop|android|ios>\n```",
-    ].join("\n\n"),
-
-    `Docs: https://bini.js.org\n\nBuilt with **Bini.js v${BINIJS_VERSION}**`,
-  ];
-
-  return sections.join("\n\n---\n\n") + "\n";
-}
-
-const generateTsConfig = (projectPath: string): Promise<void> =>
-  writeFile(
-    path.join(projectPath, "tsconfig.json"),
-    JSON.stringify(
-      {
-        compilerOptions: {
-          target: "ES2022",
-          lib: ["ES2022", "DOM", "DOM.Iterable"],
-          module: "ESNext",
-          skipLibCheck: true,
-          moduleResolution: "bundler",
-          allowImportingTsExtensions: true,
-          allowArbitraryExtensions: true,
-          resolveJsonModule: true,
-          isolatedModules: true,
-          noEmit: true,
-          jsx: "react-jsx",
-          strict: true,
-          paths: { "@/*": ["./src/*"] },
-          forceConsistentCasingInFileNames: true,
-          types: ["vite/client", "node"],
-        },
-        include: ["src"],
-        exclude: ["node_modules", "dist"],
-      },
-      null,
-      2
-    )
-  );
-
-async function generateLintAndFormatConfigs(projectPath: string): Promise<void> {
-  await Promise.all([
-    writeFile(
-      path.join(projectPath, ".oxlintrc.json"),
-      JSON.stringify(
-        {
-          $schema: "./node_modules/oxlint/configuration_schema.json",
-          plugins: ["react"],
-          env: { browser: true, es2022: true },
-          ignorePatterns: ["dist", "node_modules"],
-        },
-        null,
-        2
-      )
-    ),
-    writeFile(
-      path.join(projectPath, ".oxfmtrc.json"),
-      JSON.stringify(
-        {
-          semi: false,
-          singleQuote: true,
-          tabWidth: 2,
-          printWidth: 100,
-          trailingComma: "es5",
-          sortImports: true,
-          sortTailwindcssClasses: true,
-        },
-        null,
-        2
-      )
-    ),
-  ]);
-}
-
-const GITIGNORE = `node_modules/
-.pnpm-store/
-
-dist/
-dist-ssr/
-*.local
-*.tsbuildinfo
-
-.env
-.env.local
-.env.*.local
-.env.signing
-
-src-tauri/target/
-src-tauri/gen/**/build/
-src-tauri/gen/android/.gradle/
-src-tauri/gen/android/local.properties
-src-tauri/gen/apple/Externals/
-
-.vscode/
-.idea/
-.DS_Store
-Thumbs.db
-
-*.log
-`;
-
 function findProjectRoot(startDir: string): string | null {
   let dir = path.resolve(startDir);
   for (let i = 0; i <= MAX_PROJECT_WALK; i++) {
@@ -2408,22 +3651,35 @@ function detectProject(root: string, pmFlag: PackageManager | undefined): Detect
   const tauriDir = path.join(root, "src-tauri");
   const conf = readTauriConfSync(tauriDir);
   let envSigning = "";
-  try { envSigning = fs.readFileSync(path.join(root, ".env.signing"), "utf-8"); } catch {}
+  try { envSigning = fs.readFileSync(path.join(root, SIGNING_ENV_FILE), "utf-8"); } catch {}
+
+  // Windows and macOS settings can live in tauri.conf.json (older projects) or in the local override files.
+  const winBundle = readBundleSetting(tauriDir, "windows", "windows");
+  const macBundle = readBundleSetting(tauriDir, "macos", "macOS");
 
   return {
     root,
     name: typeof pkg.name === "string" && pkg.name ? pkg.name : path.basename(root),
-    pm: resolvePackageManager(pmFlag, root).pm,
+    // Existing project: the lockfile is the authority, the user agent is not (running `npx create-bini-app`
+    // inside a pnpm project should not silently switch to npm).
+    pm: resolvePackageManager(pmFlag, root),
     hasNative: conf !== null,
     nativeReady: Boolean(deps["bini-native"] && deps["@tauri-apps/cli"]),
     hasAndroid: fs.existsSync(path.join(tauriDir, "gen", "android")),
     hasIos: fs.existsSync(path.join(tauriDir, "gen", "apple")),
     signing: {
-      android: fs.existsSync(path.join(tauriDir, "gen", "android", "keystore.properties")),
-      windows: Boolean(conf?.bundle?.windows?.certificateThumbprint),
-      macos: Boolean(conf?.bundle?.macOS?.signingIdentity),
-      linux: /^SIGN=/m.test(envSigning),
-      ios: /^IOS_CERTIFICATE=/m.test(envSigning),
+      android:
+        fs.existsSync(path.join(tauriDir, "gen", "android", "keystore.properties")) ||
+        /^(ANDROID_KEY_BASE64|ANDROID_PUBLISHER)=/m.test(envSigning),
+      windows:
+        Boolean(winBundle.certificateThumbprint) ||
+        fs.existsSync(path.join(tauriDir, CLOUD_SIGN_CONFIG)) ||
+        /^(WINDOWS_CERTIFICATE|WINDOWS_PUBLISHER)=/m.test(envSigning),
+      macos:
+        Boolean(macBundle.signingIdentity) ||
+        /^APPLE_CERTIFICATE=/m.test(envSigning),
+      linux: /^(GPG_PRIVATE_KEY|LINUX_PUBLISHER)=/m.test(envSigning),
+      ios: /^(IOS_CERTIFICATE|APPLE_API_KEY)=/m.test(envSigning) || Boolean(conf?.bundle?.iOS?.developmentTeam),
     },
   };
 }
@@ -2451,12 +3707,13 @@ function pickerChoices(project: DetectedProject, userOS: UserOS) {
   };
   return [
     { name: PLATFORM_LABELS.web, value: "web" as TargetPlatform, checked: true, disabled: "(included)" },
-    ...NATIVE_PLATFORMS.map((p) => {
-      const value: TargetPlatform = p;
-      if (present[p]) return { name: PLATFORM_LABELS[p], value, checked: true, disabled: "(already added)" };
-      if (p === "ios" && userOS !== "macos") return { name: PLATFORM_LABELS[p], value, disabled: "(requires macOS)" };
-      return { name: PLATFORM_LABELS[p], value };
-    }),
+    ...NATIVE_PLATFORMS
+      .filter((p) => p !== "ios" || userOS === "macos")
+      .map((p) => {
+        const value: TargetPlatform = p;
+        if (present[p]) return { name: PLATFORM_LABELS[p], value, checked: true, disabled: "(already added)" };
+        return { name: PLATFORM_LABELS[p], value };
+      }),
   ];
 }
 
@@ -2464,7 +3721,7 @@ function printSigningStatus(platforms: TauriPlatform[], signing: Record<SigningT
   for (const p of platforms) {
     const label = p === "desktop" ? `desktop (${userOS})` : p;
     if (signing[signingTargetFor(p, userOS)]) log.plain(`  ${label}: signing configured`);
-    else log.plain(`  ${label}: signing not configured ${c.dim}(run: create-bini-app sign ${p})${c.reset}`);
+    else log.plain(`  ${label}: signing not configured ${c.dim(`(run: create-bini-app sign ${p})`)}`);
   }
 }
 
@@ -2475,7 +3732,7 @@ async function addPlatforms(requested: TargetPlatform[], flags: CliFlags, userOS
   const root = requireProjectRoot();
 
   const project = detectProject(root, flags.packageManager);
-  log.info(`Project ${c.cyan}${project.name}${c.reset} at ${c.dim}${root}${c.reset}`);
+  log.info(`Project ${c.cyan(project.name)} at ${c.dim(root)}`);
 
   const ignored = [
     flags.typescript !== undefined && (flags.typescript ? "--typescript" : "--javascript"),
@@ -2572,7 +3829,7 @@ async function addPlatforms(requested: TargetPlatform[], flags: CliFlags, userOS
       projectPath: root,
       pm: project.pm,
       projectName: project.name,
-      appName: await askAppName(flags, project.name),
+      appName: await askAppName(flags, project.name, undefined, true),
       org: await askOrg(flags),
       localCli,
     });
@@ -2619,82 +3876,151 @@ async function addPlatforms(requested: TargetPlatform[], flags: CliFlags, userOS
   log.step("Summary");
   const outcomeColor = (o: Outcome) => (o === "added" ? c.green : o === "failed" ? c.red : c.yellow);
   for (const e of summary) {
-    log.plain(`  ${outcomeColor(e.outcome)}${e.outcome.padEnd(8)}${c.reset} ${e.platform} ${c.dim}(${e.note})${c.reset}`);
+    log.plain(`  ${outcomeColor(e.outcome)(e.outcome.padEnd(8))} ${e.platform} ${c.dim(`(${e.note})`)}`);
   }
 
-  log.plain(`\n${c.bold}${c.cyan}Signing:${c.reset}`);
+  log.plain(`\n${c.heading("Signing:")}`);
   const signing = { ...detectProject(root, flags.packageManager).signing };
   for (const p of signedNow) signing[signingTargetFor(p, userOS)] = true;
   printSigningStatus(nativePlatforms, signing, userOS);
 
-  if (followUps.length > 0) {
-    log.plain(`\n${c.bold}${c.yellow}Manual follow-ups:${c.reset}`);
-    followUps.forEach((f, i) => log.plain(`  ${i + 1}. ${f}`));
-  }
-
+  printFollowUps();
   printCommands(project.pm, shown);
 
-  log.plain(`\n${c.green}Done.${c.reset}`);
+  log.plain(`\n${c.green("Done.")}`);
   return followUps.length > 0 ? 2 : 0;
 }
 
-async function signProject(requested: TargetPlatform[], flags: CliFlags, userOS: UserOS): Promise<number> {
+interface SignJob {
+  platform: TauriPlatform;
+  target: SigningTarget;
+  ciOnly: boolean;
+}
+
+/**
+ * Without --ci-only only `desktop` (this OS), `android`, and `ios` (on a Mac) can be signed.
+ * Naming windows, macos or linux means "save the credentials for GitHub Actions", which needs --ci-only.
+ */
+function validateSignTargets(targets: SignTarget[], flags: CliFlags, userOS: UserOS): boolean {
+  if (flags.ciOnly) return true;
+
+  const byName = targets.filter((t) => t === "windows" || t === "macos" || t === "linux");
+  if (byName.length > 0) {
+    log.error(`${byName.join(", ")} can only be set up with --ci-only, which saves the credentials for GitHub Actions without changing this machine.`);
+    log.info("To sign for the OS you are on, run: create-bini-app sign desktop");
+    log.info(`For GitHub Actions, run: create-bini-app sign ${byName.join(",")} --ci-only`);
+    return false;
+  }
+  if (targets.includes("ios") && userOS !== "macos") {
+    log.error("iOS can only be signed on a Mac. To save the credentials for GitHub Actions, run: create-bini-app sign ios --ci-only");
+    return false;
+  }
+  return true;
+}
+
+/**
+ * `create-bini-app sign ...`
+ * - with a file or a mode flag (--sign-command, --thumbprint, --generate, --adhoc, ios --team): no prompts, see signWithArguments
+ * - otherwise: interactive. No target = everything that applies on this machine. An explicit
+ *   windows / macos / ios target works from any OS and then only saves the values for GitHub Actions.
+ */
+async function signProject(parsed: SignParsed, flags: CliFlags, userOS: UserOS): Promise<number> {
   const root = requireProjectRoot();
   if (flags.sign === false) {
     log.error("--nosign cannot be used with the sign command.");
     exit(1);
   }
-  if (!isInteractive()) {
-    log.error("Code signing needs interactive prompts. Run this command in a terminal.");
+  if (!validateSignTargets(parsed.targets, flags, userOS)) return 1;
+
+  const argMode = hasSignInputs(parsed, flags);
+  if (!argMode && !isInteractive()) {
+    log.error("Code signing needs interactive prompts. Run this command in a terminal, or pass the credentials:");
+    log.info("create-bini-app sign <target> <file> <password>");
     exit(1);
   }
 
   const project = detectProject(root, flags.packageManager);
-  log.info(`Project ${c.cyan}${project.name}${c.reset} at ${c.dim}${root}${c.reset}`);
+  log.info(`Project ${c.cyan(project.name)} at ${c.dim(root)}`);
 
-  const available: TauriPlatform[] = [];
-  if (project.hasNative) available.push("desktop");
-  if (project.hasAndroid) available.push("android");
-  if (project.hasIos && userOS === "macos") available.push("ios");
+  if (argMode) return signWithArguments(root, parsed, flags, userOS, project.pm);
 
-  const wanted = requested.filter((p): p is TauriPlatform => p !== "web");
-  let targets = available;
+  const jobs: SignJob[] = [];
+  let problems = 0;
+  const platformOf = (t: SigningTarget): TauriPlatform => (t === "android" ? "android" : t === "ios" ? "ios" : "desktop");
 
-  if (wanted.length > 0) {
-    targets = wanted.filter((p) => available.includes(p));
-    for (const p of wanted.filter((x) => !available.includes(x))) {
-      if (p === "ios" && userOS !== "macos") log.warn("iOS signing is only available on macOS.");
-      else log.warn(`${p} has not been added to this project. Run: create-bini-app add ${p}`);
+  if (parsed.targets.length === 0) {
+    if (flags.ciOnly) {
+      if (project.hasNative) for (const t of ["windows", "macos", "linux"] as const) jobs.push({ platform: "desktop", target: t, ciOnly: true });
+      if (project.hasAndroid) jobs.push({ platform: "android", target: "android", ciOnly: true });
+      if (project.hasIos) jobs.push({ platform: "ios", target: "ios", ciOnly: true });
+    } else {
+      if (project.hasNative) jobs.push({ platform: "desktop", target: userOS, ciOnly: false });
+      if (project.hasAndroid) jobs.push({ platform: "android", target: "android", ciOnly: false });
+      if (project.hasIos && userOS === "macos") jobs.push({ platform: "ios", target: "ios", ciOnly: false });
+      else if (project.hasIos) {
+        log.info("iOS local signing is only available on macOS, skipping it here. To save iOS credentials for GitHub Actions run: create-bini-app sign ios --ci-only");
+      }
     }
-  } else if (project.hasIos && userOS !== "macos") {
-    log.info("iOS signing is only available on macOS, skipping it here.");
+  } else {
+    const seen = new Set<SigningTarget>();
+    for (const requested of parsed.targets) {
+      const target: SigningTarget = requested === "desktop" ? userOS : requested;
+      if (seen.has(target)) continue;
+      seen.add(target);
+
+      if (flags.ciOnly) {
+        jobs.push({ platform: platformOf(target), target, ciOnly: true });
+        continue;
+      }
+
+      const present = target === "android" ? project.hasAndroid : target === "ios" ? project.hasIos : project.hasNative;
+      if (!present) {
+        log.warn(`${requested} has not been added to this project. Run: create-bini-app add ${platformOf(target)} (or add --ci-only to only save the GitHub Actions values).`);
+        problems++;
+        continue;
+      }
+      jobs.push({ platform: platformOf(target), target, ciOnly: false });
+    }
   }
 
-  if (targets.length === 0) {
-    if (wanted.length > 0) return 2;
+  if (jobs.length === 0) {
+    if (problems > 0) return 2;
     log.info("This project has no desktop or mobile platform yet. Add one with: create-bini-app add <target>");
     return 0;
   }
 
-  const labelOf = (p: TauriPlatform) => SIGNING_LABEL[signingTargetFor(p, userOS)];
-  log.info(`Signing prompts: ${targets.map(labelOf).join(", ")}`);
+  log.info(`Signing prompts: ${jobs.map((j) => SIGNING_LABEL[j.target]).join(", ")}`);
 
   const tauriDir = path.join(root, "src-tauri");
-  const done = new Set<TauriPlatform>();
-  for (const platform of targets) {
-    if (await setupCodeSigning({ projectPath: root, tauriDir, platform, userOS, signFlag: true, pm: project.pm })) {
-      done.add(platform);
-    }
+  const results: { job: SignJob; ok: boolean }[] = [];
+  for (const job of jobs) {
+    const ok = await setupCodeSigning({
+      projectPath: root,
+      tauriDir,
+      platform: job.platform,
+      userOS,
+      signFlag: true,
+      pm: project.pm,
+      target: job.target,
+      ciOnly: job.ciOnly,
+    });
+    results.push({ job, ok });
   }
 
   log.step("Signing status");
-  const signing = { ...detectProject(root, flags.packageManager).signing };
-  for (const p of done) signing[signingTargetFor(p, userOS)] = true;
-  printSigningStatus(targets, signing, userOS);
+  const signing = detectProject(root, flags.packageManager).signing;
+  for (const { job, ok } of results) {
+    const label = job.target;
+    const retry = job.ciOnly ? `${label} --ci-only` : job.platform;
+    if (!ok) log.plain(`  ${label}: needs attention ${c.dim(`(run: create-bini-app sign ${retry})`)}`);
+    else if (job.ciOnly) log.plain(`  ${label}: credentials saved for GitHub Actions`);
+    else if (signing[job.target]) log.plain(`  ${label}: signing configured`);
+    else log.plain(`  ${label}: done`);
+  }
 
-  const pending = targets.filter((p) => !signing[signingTargetFor(p, userOS)]);
-  log.plain(pending.length > 0 ? `\n${c.yellow}Some targets still need attention.${c.reset}` : `\n${c.green}Done.${c.reset}`);
-  return pending.length > 0 ? 2 : 0;
+  const pending = results.filter((r) => !r.ok).length + problems;
+  log.plain(pending > 0 ? `\n${c.yellow("Some targets still need attention.")}` : `\n${c.green("Done.")}`);
+  return pending > 0 ? 2 : 0;
 }
 
 const NATIVE_SCRIPTS: Record<TauriPlatform, string[]> = {
@@ -2704,6 +4030,9 @@ const NATIVE_SCRIPTS: Record<TauriPlatform, string[]> = {
 };
 const SHARED_NATIVE_SCRIPTS = ["dev:native", "tauri", "sign", "doctor"];
 
+/** Packages that only exist for the native targets. */
+const REMOVABLE_NATIVE_DEPS = ["@tauri-apps/cli", "@tauri-apps/api", "cross-env", "bini-native"];
+
 async function removeNativeFromPackageJson(root: string, scriptKeys: string[], removeDeps: boolean): Promise<boolean> {
   const pkgPath = path.join(root, "package.json");
   try {
@@ -2712,14 +4041,16 @@ async function removeNativeFromPackageJson(root: string, scriptKeys: string[], r
     let changed = false;
 
     for (const key of scriptKeys) {
-      if (pkg.scripts?.[key] !== undefined && pkg.scripts[key] === patch.scripts[key]) {
+      const current = pkg.scripts?.[key];
+      if (current !== undefined && (current === patch.scripts[key])) {
         delete pkg.scripts[key];
         changed = true;
       }
     }
+
     if (removeDeps) {
       for (const section of ["dependencies", "devDependencies"] as const) {
-        for (const name of Object.keys(patch[section])) {
+        for (const name of REMOVABLE_NATIVE_DEPS) {
           if (pkg[section]?.[name] !== undefined) {
             delete pkg[section][name];
             changed = true;
@@ -2747,7 +4078,7 @@ async function removePlatforms(requested: TargetPlatform[], flags: CliFlags): Pr
   const root = requireProjectRoot();
 
   const project = detectProject(root, flags.packageManager);
-  log.info(`Project ${c.cyan}${project.name}${c.reset} at ${c.dim}${root}${c.reset}`);
+  log.info(`Project ${c.cyan(project.name)} at ${c.dim(root)}`);
 
   const present: Record<TauriPlatform, boolean> = {
     desktop: project.hasNative,
@@ -2799,10 +4130,10 @@ async function removePlatforms(requested: TargetPlatform[], flags: CliFlags): Pr
     if (targets.includes("android")) effects.push("src-tauri/gen/android");
     if (targets.includes("ios")) effects.push("src-tauri/gen/apple");
   }
-  log.plain(`\n${c.bold}This will delete:${c.reset}`);
+  log.plain(`\n${c.bold("This will delete:")}`);
   for (const e of effects) log.plain(`  - ${e}`);
   if (project.hasAndroid && (removeAll || targets.includes("android"))) {
-    log.plain(`  ${c.dim}keystore.jks in the project root is kept.${c.reset}`);
+    log.plain(`  ${c.dim("keystore.jks in the project root is kept.")}`);
   }
   log.plain("");
 
@@ -2845,7 +4176,7 @@ async function removePlatforms(requested: TargetPlatform[], flags: CliFlags): Pr
   if (await removeNativeFromPackageJson(root, keys, removeAll)) {
     log.success("Cleaned the native scripts" + (removeAll ? " and packages" : "") + " from package.json");
   }
-  log.plain(`\n${c.green}Done.${c.reset}`);
+  log.plain(`\n${c.green("Done.")}`);
   return 0;
 }
 
@@ -2886,7 +4217,7 @@ async function renameProject(flags: CliFlags): Promise<number> {
   }
 
   const project = detectProject(root, flags.packageManager);
-  log.info(`Project ${c.cyan}${project.name}${c.reset} at ${c.dim}${root}${c.reset}`);
+  log.info(`Project ${c.cyan(project.name)} at ${c.dim(root)}`);
 
   if (!project.hasNative) {
     log.info("This project has no desktop or mobile platform yet, so there is no native app name or bundle ID to change.");
@@ -2929,11 +4260,13 @@ async function renameProject(flags: CliFlags): Promise<number> {
       `The bundle identifier will change from "${currentIdentifier ?? "(none)"}" to "${newIdentifier}". ` +
       "App stores treat a new identifier as a different app."
     );
-    if (!flags.yes) {
-      if (!(await confirm({ message: "Change the bundle identifier?", default: !hasMobile }))) {
-        log.info("Cancelled. Nothing was changed.");
-        return 0;
-      }
+    if (!flags.yes && !isInteractive()) {
+      log.error("Changing the bundle identifier needs confirmation. Re-run with --yes.");
+      exit(1);
+    }
+    if (!flags.yes && !(await confirm({ message: "Change the bundle identifier?", default: !hasMobile }))) {
+      log.info("Cancelled. Nothing was changed.");
+      return 0;
     }
   }
 
@@ -2948,7 +4281,7 @@ async function renameProject(flags: CliFlags): Promise<number> {
   if (!ok) return 1;
 
   if (nameChanged) log.success(`App name set to "${newName}" in tauri.conf.json`);
-  if (idChanged) log.success(`Bundle identifier set to ${c.cyan}${newIdentifier}${c.reset}`);
+  if (idChanged) log.success(`Bundle identifier set to ${c.cyan(newIdentifier as string)}`);
 
   if (nameChanged && newName && project.hasAndroid) {
     if (await patchAndroidAppName(root, newName)) {
@@ -2964,12 +4297,9 @@ async function renameProject(flags: CliFlags): Promise<number> {
     addFollowUp("The generated Android/iOS projects still use the old bundle identifier. Remove and re-add them to apply the new one (commit first).");
   }
 
-  if (followUps.length > 0) {
-    log.plain(`\n${c.bold}${c.yellow}Manual follow-ups:${c.reset}`);
-    followUps.forEach((f, i) => log.plain(`  ${i + 1}. ${f}`));
-  }
+  printFollowUps();
 
-  log.plain(`\n${c.green}Done.${c.reset}`);
+  log.plain(`\n${c.green("Done.")}`);
   return followUps.length > 0 ? 2 : 0;
 }
 
@@ -3036,7 +4366,7 @@ async function cleanProject(): Promise<number> {
   }
 
   if (removed === 0) log.info("Nothing to clean.");
-  else log.plain(`\n${c.green}Done.${c.reset}`);
+  else log.plain(`\n${c.green("Done.")}`);
   return 0;
 }
 
@@ -3052,6 +4382,32 @@ function upgradeArgs(pm: PackageManager, names: string[], dev: boolean): string[
       return ["add", ...specs, ...(dev ? ["-D"] : [])];
     case "bun":
       return ["add", ...specs, ...(dev ? ["--dev"] : [])];
+  }
+}
+
+/** Copies the latest template files into the project. src/, package.json and vite.config.* are never touched. */
+async function refreshTemplateFiles(root: string, project: DetectedProject, pkg: AnyJson): Promise<boolean> {
+  const deps: Record<string, string> = { ...(pkg.dependencies ?? {}), ...(pkg.devDependencies ?? {}) };
+  const useTypeScript = Boolean(deps.typescript) || fs.existsSync(path.join(root, "tsconfig.json"));
+  const productName = readTauriConfSync(path.join(root, "src-tauri"))?.productName;
+  const vars = buildTemplateVars({
+    projectName: project.name,
+    appName: typeof productName === "string" && productName ? productName : toTitleCase(project.name),
+    useTypeScript,
+    styling: deps.tailwindcss ? "Tailwind" : "None",
+    pm: project.pm,
+  });
+  const skip = (name: string): boolean => name === "src" || name === "package.json" || /^vite\.config\./.test(name);
+
+  log.step("Copying the latest template files (src/, package.json and vite.config are skipped)...");
+  try {
+    await copyTemplateDir("base", root, vars, skip);
+    await copyTemplateDir(useTypeScript ? "typescript" : "javascript", root, vars, skip);
+    log.success("Template files updated.");
+    return true;
+  } catch (err) {
+    log.warn(`Could not copy the template files: ${(err as Error).message}`);
+    return false;
   }
 }
 
@@ -3075,11 +4431,11 @@ async function upgradeProject(flags: CliFlags): Promise<number> {
     return 0;
   }
 
-  log.info(`Project ${c.cyan}${project.name}${c.reset} (${project.pm})`);
-  if (runtime.length) log.plain(`  ${c.bold}dependencies${c.reset}     ${runtime.join(", ")}`);
-  if (dev.length) log.plain(`  ${c.bold}devDependencies${c.reset}  ${dev.join(", ")}`);
-  if (hasRust) log.plain(`  ${c.bold}Rust${c.reset}             cargo update (src-tauri)`);
-  log.plain(`${c.dim}Every package above moves to its latest version, package.json records what it resolved to.${c.reset}\n`);
+  log.info(`Project ${c.cyan(project.name)} (${project.pm})`);
+  if (runtime.length) log.plain(`  ${c.bold("dependencies")}     ${runtime.join(", ")}`);
+  if (dev.length) log.plain(`  ${c.bold("devDependencies")}  ${dev.join(", ")}`);
+  if (hasRust) log.plain(`  ${c.bold("Rust")}             cargo update (src-tauri)`);
+  log.plain(`${c.dim("Every package above moves to its latest version, package.json records what it resolved to.")}\n`);
 
   warnIfGitDirty(root);
 
@@ -3109,8 +4465,9 @@ async function upgradeProject(flags: CliFlags): Promise<number> {
     }
   }
 
-  if (ok) log.plain(`\n${c.green}Done.${c.reset}`);
-  else log.plain(`\n${c.yellow}Finished with problems, see the warnings above.${c.reset}`);
+  if (!(await refreshTemplateFiles(root, project, pkg))) ok = false;
+
+  log.plain(ok ? `\n${c.green("Done.")}` : `\n${c.yellow("Finished with problems, see the warnings above.")}`);
   return ok ? 0 : 2;
 }
 
@@ -3129,7 +4486,52 @@ function initGit(projectPath: string): void {
   else log.warn("git init failed. Run it manually inside the project: git init");
 }
 
-async function generateProject(projectName: string, answers: ProjectAnswers, flags: CliFlags, userOS: UserOS): Promise<void> {
+function buildTemplateVars(o: {
+  projectName: string;
+  appName: string;
+  useTypeScript: boolean;
+  styling: StylingOption;
+  pm: PackageManager;
+}): Record<string, string> {
+  const { projectName, appName, useTypeScript, styling, pm } = o;
+  const mainExt: FileExtension = useTypeScript ? "tsx" : "jsx";
+  return {
+    PROJECT_NAME: projectName,
+    APP_NAME: appName,
+    MAIN_EXT: mainExt,
+    BUILD_COMMAND: useTypeScript
+      ? `tsc --noEmit && vite build && vite build --ssr src/main.${mainExt}`
+      : `vite build && vite build --ssr src/main.${mainExt}`,
+    TYPE_CHECK: useTypeScript ? "tsc --noEmit" : "echo 'TypeScript not enabled'",
+    CHECK_COMMAND: useTypeScript
+      ? "oxlint src && oxfmt src && tsc --noEmit"
+      : "oxlint src && oxfmt src",
+    TS_DEPS: useTypeScript
+      ? `,\n    "@types/react": "latest",\n    "@types/react-dom": "latest",\n    "@types/node": "latest",\n    "typescript": "latest"`
+      : "",
+    TAILWIND_DEPS:
+      styling === "Tailwind"
+        ? `,\n    "tailwindcss": "latest",\n    "@tailwindcss/vite": "latest"`
+        : "",
+    TAILWIND_IMPORT:
+      styling === "Tailwind" ? `import tailwindcss from '@tailwindcss/vite';` : "",
+    TAILWIND_PLUGIN: styling === "Tailwind" ? `\n      tailwindcss(),` : "",
+    // README
+    PM: pm,
+    BUILD_DESC: useTypeScript ? "Type-check, build" : "Build",
+    TAURI_RUN: pm === "npm" ? "npm run tauri --" : `${pm} run tauri`,
+    TS_NOTE: useTypeScript ? ", type-checked with **TypeScript**" : "",
+    REQUIRED_NODE,
+    BINIJS_VERSION,
+  };
+}
+
+async function generateProject(
+  projectName: string,
+  answers: ProjectAnswers,
+  flags: CliFlags,
+  userOS: UserOS
+): Promise<void> {
   const projectPath = path.join(process.cwd(), projectName);
   const publicPath = path.join(projectPath, "public");
 
@@ -3138,11 +4540,11 @@ async function generateProject(projectName: string, answers: ProjectAnswers, fla
     exit(1);
   }
   if (flags.force && fs.existsSync(projectPath)) {
-    log.warn(`Removing existing directory: ${c.dim}${projectPath}${c.reset}`);
+    log.warn(`Removing existing directory: ${c.dim(projectPath)}`);
     safeRm(projectPath);
   }
 
-  log.info(`Creating project in ${c.cyan}${projectPath}${c.reset}`);
+  log.info(`Creating project in ${c.cyan(projectPath)}`);
 
   const { typescript: useTypeScript, styling } = answers;
   const mainExt: FileExtension = useTypeScript ? "tsx" : "jsx";
@@ -3150,51 +4552,66 @@ async function generateProject(projectName: string, answers: ProjectAnswers, fla
   const nativePlatforms = answers.platforms;
   const isTauri = nativePlatforms.length > 0;
 
-  const { pm, failed: pmFailed } = resolvePackageManager(flags.packageManager);
-  if (!pmFailed) {
-    log.info(`Package manager: ${c.cyan}${pm}${c.reset}${flags.packageManager ? ` (forced via --${pm})` : ""}`);
-  }
+  // New project: there is no lockfile yet, so the user agent decides (npx -> npm, pnpm dlx -> pnpm, ...).
+  const pm = resolvePackageManager(flags.packageManager);
+  log.info(`Package manager: ${c.cyan(pm)}${flags.packageManager ? ` (forced via --${pm})` : ""}`);
 
-  log.info("Scaffolding project files");
+  log.info("Scaffolding project files from templates");
 
-  const pkg = basePackageJson(projectName, useTypeScript, mainExt, styling);
-  if (isTauri) mergeNativePatch(pkg, nativePackagePatch());
+  // Every placeholder (README ones included) is known here, so each template is rendered exactly once.
+  const vars = buildTemplateVars({ projectName, appName: answers.appName, useTypeScript, styling, pm });
 
-  await Promise.all([
-    copyAssetFiles(publicPath),
-    generateWebManifest(projectPath, answers.appName),
-    writeFile(
-      path.join(projectPath, "index.html"),
-      `<!DOCTYPE html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.${mainExt}"></script>
-  </body>
-</html>
-`
-    ),
-    generateAppFiles(projectPath, mainExt, useTypeScript, styling, answers.appName),
-    styling === "CSS Modules" ? writeFile(path.join(projectPath, "src/app/page.module.css"), PAGE_CSS) : Promise.resolve(),
-    writeFile(path.join(projectPath, "src/app/globals.css"), generateGlobalStyles(styling)),
-    generateApiFile(projectPath, scriptExt),
-    writeFile(path.join(projectPath, ".gitignore"), GITIGNORE),
-    writeFile(path.join(projectPath, "package.json"), JSON.stringify(pkg, null, 2) + "\n"),
-    generateViteConfig(projectPath, scriptExt, styling),
-    useTypeScript ? generateTsConfig(projectPath) : Promise.resolve(),
-    generateLintAndFormatConfigs(projectPath),
-  ]);
+  // 1. Base files (includes README.md)
+  await copyTemplateDir("base", projectPath, vars);
 
-  log.success(
-    `Generated ${c.green}${useTypeScript ? "TypeScript" : "JavaScript"}${c.reset}` +
-    ` project with ${c.green}${styling}${c.reset} styling`
+  // 2. Language-specific source
+  const langDir = useTypeScript ? "typescript" : "javascript";
+  await copyTemplateDir(langDir, projectPath, vars);
+
+  // 3. Styling
+  const styleKey =
+    styling === "Tailwind" ? "tailwind" :
+    styling === "CSS Modules" ? "css-modules" : "none";
+
+  await copyTemplate(
+    `styling/${styleKey}/globals.css`,
+    path.join(projectPath, "src/app/globals.css")
   );
 
-  const installed = !pmFailed && !flags.noInstall && installDependencies(projectPath, pm);
+  await copyTemplate(
+    `styling/${styleKey}/page.${mainExt}`,
+    path.join(projectPath, `src/app/page.${mainExt}`),
+    vars
+  );
+
+  if (styling === "CSS Modules") {
+    await copyTemplate(
+      "styling/css-modules/page.module.css",
+      path.join(projectPath, "src/app/page.module.css")
+    );
+  }
+
+  // Remove wrong vite.config extension if both were copied
+  const wrongExt = scriptExt === "ts" ? "js" : "ts";
+  const wrongVite = path.join(projectPath, `vite.config.${wrongExt}`);
+  if (fs.existsSync(wrongVite)) {
+    fs.unlinkSync(wrongVite);
+  }
+
+  // 4. Assets
+  await copyAssetFiles(publicPath);
+
+  // 5. package.json - apply native patch if needed
+  const pkgPath = path.join(projectPath, "package.json");
+  let pkg = JSON.parse(await fsPromises.readFile(pkgPath, "utf8")) as AnyJson;
+  if (isTauri) mergeNativePatch(pkg, nativePackagePatch());
+  await writeFile(pkgPath, JSON.stringify(pkg, null, 2) + "\n");
+
+  log.success(
+    `Generated ${c.green(useTypeScript ? "TypeScript" : "JavaScript")} project with ${c.green(styling)} styling`
+  );
+
+  const installed = !flags.noInstall && installDependencies(projectPath, pm);
   const localCli = fs.existsSync(path.join(projectPath, "node_modules", "@tauri-apps", "cli"));
 
   if (isTauri) {
@@ -3211,41 +4628,36 @@ async function generateProject(projectName: string, answers: ProjectAnswers, fla
     });
   }
 
-  await writeFile(path.join(projectPath, "README.md"), generateReadme(projectName, useTypeScript, pm));
   if (!flags.noGit) initGit(projectPath);
 
   log.plain(
-    `\n${c.green}${c.bold}OK${c.reset} ${c.bold}Project created!${c.reset}` +
-    ` ${c.cyan}${projectName}${c.reset} at ${c.dim}${projectPath}${c.reset}\n`
+    `\n${c.green(c.bold("OK"))} ${c.bold("Project created!")}` +
+      ` ${c.cyan(projectName)} at ${c.dim(projectPath)}\n`
   );
-  if (pmFailed) log.warn(`README uses "npm" as placeholder, update manually if needed.\n`);
 
   log.success("Get started:");
-  log.plain(`\n  ${c.green}cd ${projectName}${c.reset}`);
-  if (!installed && !pmFailed) log.plain(`  ${c.green}${pm} install${c.reset}`);
+  log.plain(`\n  ${c.green(`cd ${projectName}`)}`);
+  if (!installed) log.plain(`  ${c.green(`${pm} install`)}`);
 
+  // Includes the Platform group (create-bini-app add / remove / --app-name / --org), so there is no separate hint line any more.
   printCommands(pm, [...(answers.web ? (["web"] as const) : []), ...nativePlatforms]);
-
-  log.plain(`\n${c.dim}Add more platforms later from inside the project: create-bini-app add <target>${c.reset}`);
-  if (isTauri) {
-    log.plain(`${c.dim}Change the app name or bundle ID later: create-bini-app --app-name / create-bini-app --org${c.reset}`);
-  }
 
   if (answers.iosSkipped) {
     log.warn("iOS requires macOS, so the project was created without it.");
     log.info(
       `Develop on web${nativePlatforms.includes("android") ? " or Android" : ""}, ` +
-      `then run \`${pmRun(pm, "deploy")}\` and choose iOS to build the iOS app.`
+        `then run \`${pmRun(pm, "deploy")}\` and choose iOS to build the iOS app.`
     );
   }
-  log.plain(`\n${c.green}Happy coding!${c.reset}`);
+  log.plain(`\n${c.green("Happy coding!")}`);
 }
 
-async function main(): Promise<void> {
+
+export async function main(): Promise<void> {
   checkNodeVersion();
-  if (isInteractive()) warmPrompts();
 
   const { positionals, flags } = parseArguments();
+  assumeYes = flags.yes;
   const userOS = detectUserOS();
   const first = positionals[0];
   const insideProject = !first && findProjectRoot(process.cwd()) !== null;
@@ -3261,16 +4673,16 @@ async function main(): Promise<void> {
     exit(first === "doctor" ? await doctorProject(flags) : first === "clean" ? await cleanProject() : await upgradeProject(flags));
   }
 
-  if (first === "remove" || first === "sign" || first === "add") {
+  if (first === "sign") {
+    const parsed = parseSignArgs(positionals.slice(1), flags.platforms, flags.generate);
+    exit(await signProject(parsed, flags, userOS));
+  }
+
+  // `add` / `remove` without a target open an interactive picker (see addPlatforms / removePlatforms).
+  if (first === "remove" || first === "add") {
     const extra = parsePlatformList(positionals.slice(1).join(",") || undefined, "platform");
     const targets = [...new Set<TargetPlatform>([...extra, ...flags.platforms])];
-    exit(
-      first === "remove"
-        ? await removePlatforms(targets, flags)
-        : first === "sign"
-          ? await signProject(targets, flags, userOS)
-          : await addPlatforms(targets, flags, userOS, false)
-    );
+    exit(first === "remove" ? await removePlatforms(targets, flags) : await addPlatforms(targets, flags, userOS, false));
   }
 
   // Inside a project, `--app-name` / `--org` (with or without a value) change the native app instead of adding a platform.
@@ -3285,7 +4697,7 @@ async function main(): Promise<void> {
   let projectName = first;
   if (!projectName) {
     if (!isInteractive()) {
-      log.error("Project name required in non-interactive mode.");
+      log.error("Project name required when there are no prompts (pass it as the first argument).");
       exit(1);
     }
     projectName = await input({
@@ -3304,4 +4716,4 @@ async function main(): Promise<void> {
   await generateProject(projectName, answers, flags, userOS);
 }
 
-main().catch((err) => fatal(err, "Fatal"));
+void main().catch((err) => fatal(err, "Fatal"));

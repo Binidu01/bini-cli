@@ -1,0 +1,36 @@
+{
+  "name": "{{PROJECT_NAME}}",
+  "type": "module",
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "vite --host --open",
+    "build": "{{BUILD_COMMAND}}",
+    "start": "bini-server",
+    "preview": "vite preview --host --open",
+    "deploy": "bini-deploy",
+    "clean": "npx create-bini-app clean",
+    "upgrade": "npx create-bini-app upgrade",
+    "type-check": "{{TYPE_CHECK}}",
+    "lint": "oxlint src",
+    "format": "oxfmt src",
+    "check": "{{CHECK_COMMAND}}"
+  },
+  "dependencies": {
+    "react": "latest",
+    "react-dom": "latest",
+    "react-router-dom": "latest",
+    "hono": "latest",
+    "bini-router": "latest",
+    "bini-overlay": "latest",
+    "bini-server": "latest",
+    "bini-ssg": "latest"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "latest",
+    "vite": "latest",
+    "oxlint": "latest",
+    "oxfmt": "latest",
+    "bini-env": "latest",
+    "bini-deploy": "latest"{{TS_DEPS}}{{TAILWIND_DEPS}}
+  }
+}

@@ -1,0 +1,91 @@
+.home {
+  display: flex;
+  min-height: 100vh;
+  width: 100%;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: #ffffff;
+}
+
+.home-main {
+  display: flex;
+  min-height: 100vh;
+  width: 100%;
+  max-width: 48rem;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6rem 2rem;
+}
+
+.home-logo { height: 1.75rem; width: auto; }
+
+.home-text {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.5rem;
+  text-align: center;
+}
+
+.home-title {
+  max-width: 20rem;
+  margin: 0;
+  font-size: 1.875rem;
+  font-weight: 600;
+  line-height: 2.5rem;
+  letter-spacing: -0.025em;
+  color: #000000;
+}
+
+.home-code {
+  border-radius: 0.25rem;
+  background: #f4f4f5;
+  padding: 0.125rem 0.375rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.9em;
+}
+
+.home-desc { max-width: 28rem; margin: 0; font-size: 1.125rem; line-height: 2rem; color: #52525b; }
+.home-link { font-weight: 500; color: #09090b; text-decoration: none; }
+.home-actions { display: flex; width: 100%; flex-direction: column; gap: 0.75rem; }
+
+.home-btn {
+  display: flex;
+  height: 3rem;
+  width: 100%;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  padding: 0 2rem;
+  font-weight: 500;
+  text-decoration: none;
+  transition: background-color 0.15s, color 0.15s;
+}
+
+.home-btn-primary { background: #000000; color: #ffffff; }
+.home-btn-primary:hover { background: #27272a; }
+.home-btn-secondary { border: 1px solid #d4d4d8; background: #ffffff; color: #000000; }
+.home-btn-secondary:hover { background: #fafafa; }
+
+@media (min-width: 640px) {
+  .home-main { align-items: flex-start; padding: 8rem 4rem; }
+  .home-logo { height: 2rem; }
+  .home-text { align-items: flex-start; text-align: left; }
+  .home-actions { width: auto; flex-direction: row; }
+  .home-btn { width: auto; }
+}
+
+@media (prefers-color-scheme: dark) {
+  .home { background: #000000; }
+  .home-logo { filter: invert(1); }
+  .home-title { color: #fafafa; }
+  .home-code { background: #18181b; }
+  .home-desc { color: #a1a1aa; }
+  .home-link { color: #fafafa; }
+  .home-btn-primary { background: #ffffff; color: #000000; }
+  .home-btn-primary:hover { background: #e4e4e7; }
+  .home-btn-secondary { border-color: #3f3f46; background: transparent; color: #ffffff; }
+  .home-btn-secondary:hover { background: #18181b; }
+}
