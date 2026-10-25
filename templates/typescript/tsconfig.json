@@ -24,7 +24,8 @@
     "forceConsistentCasingInFileNames": true,
     "types": [
       "vite/client",
-      "node"
+      "node",
+      "bini-router/virtual"
     ]
   },
   "include": [

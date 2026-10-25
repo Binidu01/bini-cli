@@ -1,46 +1,57 @@
-import React from 'react';
-import './globals.css';
-
-export const metadata = {
-  title      : '{{APP_NAME}}',
-  description: 'Modern React application built with Bini.js',
-  keywords   : ['Bini.js', 'React', 'Vite'],
-  themeColor : '#00CFFF',
-  manifest   : '/site.webmanifest',
-  openGraph: {
-    siteName   : '{{APP_NAME}}',
-    title      : '{{APP_NAME}}',
-    description: 'Modern React application built with Bini.js',
-    images     : [{ url: '/og-image.png', width: 1200, height: 630 }],
-  },
-  twitter: {
-    card   : 'summary_large_image',
-    title  : '{{APP_NAME}}',
-    creator: '@binidu01',
-    images : ['/og-image.png'],
-  },
-  icons: {
-    icon : [{ url: '/favicon.ico', type: 'image/x-icon' }],
-    apple: [{ url: '/apple-touch-icon.png', sizes: '180x180' }],
-  },
-};
+import React from 'react'
+import './globals.css'
 
 const jsonLd = {
-  '@context'   : 'https://schema.org',
-  '@type'      : 'WebSite',
-  name         : 'Bini.js',
+  '@context': 'https://schema.org',
+  '@type': 'WebSite',
+  name: 'Bini.js',
   alternateName: 'Bini',
-  url          : 'https://bini.js.org/',
-};
+  url: 'https://bini.js.org/',
+}
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
-  return (
-    <React.Fragment>
+export const document = {
+  head: (
+    <>
+      <title>My Bini App</title>
+      <meta name="description" content="Modern React application built with Bini.js" />
+      <meta name="keywords" content="Bini.js, React, Vite" />
+      <meta name="theme-color" content="#00CFFF" />
+
+      <link rel="manifest" href="/site.webmanifest" />
+      <link rel="icon" type="image/x-icon" href="/favicon.ico" />
+      <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+
+      <meta property="og:site_name" content="My Bini App" />
+      <meta property="og:title" content="My Bini App" />
+      <meta property="og:description" content="Modern React application built with Bini.js" />
+      <meta property="og:image" content="/og-image.png" />
+      <meta property="og:image:width" content="1200" />
+      <meta property="og:image:height" content="630" />
+
+      <meta name="twitter:card" content="summary_large_image" />
+      <meta name="twitter:title" content="My Bini App" />
+      <meta name="twitter:creator" content="@binidu01" />
+      <meta name="twitter:image" content="/og-image.png" />
+
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
       />
+    </>
+  ),
+}
+
+export default function RootLayout({
+  children,
+  modal,
+}: {
+  children: React.ReactNode
+  modal?: React.ReactNode
+}) {
+  return (
+    <React.Fragment>
       {children}
+      {modal}
     </React.Fragment>
-  );
+  )
 }

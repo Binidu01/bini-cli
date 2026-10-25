@@ -1,6 +1,9 @@
+<!-- markdownlint-disable MD033 MD041 -->
 <div align="center">
 
 <img src="https://skills.syvixor.com/api/icons?i=binijs" alt="Bini.js" width="120" height="120" />
+
+<h1>Bini.js</h1>
 
 **Build full-stack React apps for web, desktop, and mobile from one codebase.**
 
@@ -49,26 +52,31 @@ Most React starters give you a bundler and call it a day. Bini.js gives you a fr
 
 ## Features
 
-**Framework**
+### Framework
+
 - File-based routing with nested layouts, dynamic segments, and per-route metadata
 - `.mdx` and `.md` content routes work out of the box alongside `.tsx`/`.jsx` - no extra setup
 - Folder-scoped `loading.tsx`, `not-found.tsx`, and `error.tsx` - the nearest one up the folder tree wins, same mental model as layouts
 - Automatic code splitting - every route is lazy-loaded with no `React.lazy()` boilerplate
 - Auto-imports for common React, React Router, and env hooks - zero import statements needed
 
-**Backend**
+### Backend
+
 - API routes powered by [Hono](https://hono.dev) - plain functions or full Hono apps, colocated in `src/app/api/`
 - One handler, every runtime: Vite dev middleware, `bini-server`, or a `bini-deploy`-generated edge function - no code changes required between them
 - Environment variable loading with startup banners, across Node.js, Bun, Deno, and edge runtimes
 
-**Native**
+### Native
+
 - Desktop (Windows, macOS, Linux), Android, and iOS builds via Tauri from the same project (all require a local Rust toolchain, since Tauri compiles a native Rust binary)
 - Add or remove a desktop or mobile target on an existing project at any time with `create-bini-app add` and `create-bini-app remove`
 - Native plugin wiring generated automatically from the web APIs you actually call
+- A preflight check of your toolchain (Rust, WebView2 / webkit2gtk / Xcode, JDK, Android SDK and NDK) before any native target is created or added
 - Bundle identifier, app name, and app icons set up at scaffold time; code signing for Windows, macOS, Linux, Android, and iOS set up then or later with `create-bini-app sign`, interactively or with a single command and no prompts, either on this machine or only for GitHub Actions (`--ci-only`)
 - Build every native target on GitHub Actions with `npm run deploy`, from any OS (no Mac needed for iOS)
 
-**Developer Experience**
+### Developer tooling
+
 - Animated dev overlay with Shiki-highlighted error panels and clickable stack frames
 - TypeScript or JavaScript, Tailwind CSS v4, CSS Modules, or no styling - your choice at scaffold time
 - Oxlint + Oxfmt - 50-100x faster than ESLint and Prettier, pre-configured out of the box
@@ -77,7 +85,8 @@ Most React starters give you a bundler and call it a day. Bini.js gives you a fr
 - Built-in maintenance commands: `doctor`, `clean`, and `upgrade`
 - Every prompt can be skipped with a flag, and `--yes` accepts every default
 
-**Deployment**
+### Shipping
+
 - `bini-deploy` - a bundled CLI (`npm run deploy`) that generates hosting config for web targets, or GitHub Actions build workflows for desktop and mobile targets, and pushes the project to GitHub
 - Static Site Generation via `bini-ssg` - every route, static or dynamic, is pre-rendered to static HTML at build time (see [Build & Static Site Generation](#build--static-site-generation))
 - Hosting config generation for Netlify Edge Functions, Vercel, Cloudflare Workers, Node.js, and Deno
@@ -86,9 +95,9 @@ Most React starters give you a bundler and call it a day. Bini.js gives you a fr
 
 ## Requirements
 
-| | |
-|---|---|
-| Node.js | `>= 20.19.0` (required by Vite 8; the CLI checks this on startup) |
+| Requirement | Details |
+| --- | --- |
+| Node.js | `>= 20.19.0` (required by Vite 8; the CLI checks this on startup and exits if it is older) |
 
 ---
 
@@ -102,7 +111,7 @@ npx create-bini-app@latest my-app --yes --typescript --tailwind --platform web,a
 ```
 
 | Command | Description |
-|---|---|
+| --- | --- |
 | `create-bini-app [name]` | Create a new project. Run with no arguments **inside** an existing Bini project, it offers to add a platform instead |
 | `create-bini-app add [targets]` | Add desktop and/or mobile targets to an existing project. With no targets, pick from a list |
 | `create-bini-app remove [targets]` | Remove desktop and/or mobile targets from the project. With no targets, pick from a list |
@@ -114,35 +123,35 @@ npx create-bini-app@latest my-app --yes --typescript --tailwind --platform web,a
 | `create-bini-app clean` | Delete build output (Vite and Tauri), keeps `node_modules` |
 | `create-bini-app upgrade` | Update dependencies to the latest versions and copy the latest template files |
 
-`add`, `remove`, `sign`, `doctor`, `clean`, and `upgrade` must be run inside a Bini.js project. The CLI looks for a `package.json` with `bini-router` in the current folder or up to five parent folders. `--platform <targets>` is accepted as an alias for listing targets after `add`, `remove`, and `sign`; inside a project, `create-bini-app --platform android` on its own is the same as `create-bini-app add android`. `create-bini-app desktop sign` is shorthand for `create-bini-app sign desktop` (it works for any sign target, or a comma-separated list of them).
+`add`, `remove`, `sign`, `doctor`, `clean`, and `upgrade` must be run inside a Bini.js project. The CLI looks for a `package.json` with `bini-router` in `dependencies` or `devDependencies`, in the current folder or up to five parent folders. `--platform <targets>` is accepted as an alias for listing targets after `add`, `remove`, and `sign`; inside a project, `create-bini-app --platform android` on its own is the same as `create-bini-app add android`. `create-bini-app desktop sign` is shorthand for `create-bini-app sign desktop` (it works for any sign target, or a comma-separated list of them).
 
-Project names may contain lowercase letters, numbers, hyphens, and dots (max 50 characters). They cannot start with `.` or `-`, cannot be `npm` or `node`, and cannot be a Windows reserved name such as `CON`, `NUL`, or `COM1`. The command names above are reserved.
+Project names may contain lowercase letters, numbers, hyphens, and dots (max 50 characters). They cannot start with `.` or `-`, cannot be `npm` or `node`, and cannot be a Windows reserved name such as `CON`, `NUL`, or `COM1`. The command names above (`add`, `sign`, `remove`, `doctor`, `clean`, `upgrade`) are reserved.
 
 | Flag | Description |
-|---|---|
+| --- | --- |
 | `--typescript` | Use TypeScript (create) |
 | `--javascript` / `--no-typescript` | Use JavaScript (create) |
 | `--tailwind` / `--css-modules` / `--none` | Styling (create). Only one may be used |
 | `--platform <targets>` | `web` (default) · `desktop` · `android` · `ios`. Comma-separated to pick several, e.g. `web,desktop,android`. `desktop` covers Windows, macOS, and Linux |
-| `--app-name [name]` | App name (default: the project name in title case). It becomes the initial site `title` in `src/app/layout.tsx` and, for native targets, the Tauri `productName` and window title. **With no value, you are prompted for it.** Inside an existing project it renames the native app (see [Changing the app name or bundle ID](#changing-the-app-name-or-bundle-id)) |
+| `--app-name [name]` | App name (default: the project name in title case; repeated whitespace is collapsed). It becomes the initial site `title` in `src/app/layout.tsx` and, for native targets, the Tauri `productName` and window title. **With no value, you are prompted for it.** Inside an existing project it renames the native app (see [Changing the app name or bundle ID](#changing-the-app-name-or-bundle-id)) |
 | `--org [domain]` | Bundle ID prefix as a reverse domain, e.g. `com.acme` (default `com.bini`). Lowercase letters and numbers in dot-separated parts, at least two parts, each part starting with a letter, max 80 characters. **With no value, you are prompted for it.** Inside an existing project it changes the bundle identifier |
 | `--sign` / `--nosign` | Auto-confirm (you are still prompted for details) or skip code-signing setup. With `--sign` on an already configured target, only the signing step runs. The two cannot be combined, and `--nosign` is rejected by the `sign` command |
 | `--npm` / `--pnpm` / `--yarn` / `--bun` | Force a package manager instead of auto-detecting. Only one may be used, and it must be on your `PATH` |
 | `--no-install` | Skip installing dependencies (they install automatically by default) |
 | `--no-git` | Skip `git init` (create) |
-| `--force` | Create: overwrite an existing directory. With `sign --generate --ci-only`: replace signing values that are already saved |
+| `--force` | Create: delete and overwrite an existing directory of the same name |
 | `--yes`, `-y` | No prompts: accept the default for every question not answered by a flag, and skip every confirmation (create, add, remove, bundle ID change). Signing questions are skipped too - use `sign <target> <file> <password>` for those |
 | `--version`, `-v` / `--help`, `-h` | Print version / show help |
 
-The `sign` command has its own options (`--alias`, `--profile`, `--team`, `--generate`, `--ci-only`, and others). They are listed under [Code Signing](#code-signing) and are rejected by every other command.
+The `sign` command has its own options (`--alias`, `--profile`, `--team`, `--ci-only`, and others). They are listed under [Code Signing](#code-signing) and are rejected by every other command.
 
 `--typescript`/`--javascript`/`--tailwind`/`--css-modules`/`--none` are ignored (with a warning) in `add` mode, since an existing project keeps its settings.
 
 ### Interactive prompts
 
-When run in a terminal, and when the matching flag is not given, create mode asks for: the project name, TypeScript or JavaScript, the styling solution, and the platforms to include. When a desktop or mobile target is picked it also asks for the app name and the organization used for the bundle identifier (each is skipped when you pass `--app-name "X"` or `--org com.acme`). iOS is only offered on macOS; if you pass `--platform ios` on another system it is dropped with a warning.
+When run in a terminal, and when the matching flag is not given, create mode asks for: the project name, TypeScript or JavaScript, the styling solution, and the platforms to include. When a desktop or mobile target is picked it also asks for the app name and the organization used for the bundle identifier (each is skipped when you pass `--app-name "X"` or `--org com.acme`). iOS is only offered on macOS; if you pass `--platform ios` on another system it is dropped and the CLI explains how to build iOS with `npm run deploy` instead.
 
-`--app-name` and `--org` can also be given **without a value** to force their prompt. For example `create-bini-app my-app --platform android --app-name` asks for the app name while creating the project, and `add android --org` asks for the organization while adding. A bare flag is one that comes last, or is followed by another flag or a command name (`--app-name add android` works; `--app-name my-app` treats `my-app` as the value). Without a terminal, a bare flag falls back to the default with a warning. For web-only projects the two prompts are skipped (with a notice) because there is no native app to name.
+`--app-name` and `--org` can also be given **without a value** to force their prompt. For example `create-bini-app my-app --platform android --app-name` asks for the app name while creating the project, and `add android --org` asks for the organization while adding. A bare flag is one that comes last, or is followed by another flag or a command name (`--app-name add android` works; `--app-name my-app` treats `my-app` as the value). Without a terminal, a bare flag falls back to the default with a warning. For web-only projects the two prompts are skipped because there is no native app to name. A notice is printed only if you passed a bare `--app-name` or `--org`.
 
 In non-interactive environments (CI, no TTY) and with `--yes`, prompts are skipped and defaults apply: TypeScript, Tailwind, `web` platform, `com.bini` as the organization, and no code signing. Flags always override the defaults. A project name is required in non-interactive mode.
 
@@ -173,11 +182,11 @@ npx create-bini-app@latest add desktop android     # several at once (comma-sepa
 npx create-bini-app@latest add android --sign      # set up code signing right away
 ```
 
-The first native target adds `src-tauri/`, the native scripts, and the `@tauri-apps/api`, `@tauri-apps/cli`, `cross-env`, and `bini-native` packages. Existing scripts and versions in your `package.json` are never overwritten. Dependencies are installed afterwards unless you pass `--no-install`. All desktop operating systems share one `src-tauri/`, so adding `desktop` again only offers code signing. Re-running a command is safe: anything already configured is skipped.
+The first native target adds `src-tauri/`, the native scripts, and the `@tauri-apps/api`, `@tauri-apps/cli`, `cross-env`, and `bini-native` packages. Existing scripts and versions in your `package.json` are never overwritten. Dependencies are installed afterwards unless you pass `--no-install`. All desktop operating systems share one `src-tauri/`, so adding `desktop` again only offers code signing. It is skipped entirely when signing for your OS is already configured, unless you pass `--sign`. Re-running a command is safe: anything already configured is skipped.
 
-Run `add` with no targets inside a project to pick from a list. Platforms that are already added are listed above the picker as unselectable, and only the missing ones can be chosen. iOS is only offered on macOS; on Windows and Linux, `add ios` prints how to build it with `npm run deploy` instead.
+Run `add` with no targets inside a project to pick from a list. Platforms that are already added are left out of the picker, and iOS is only offered on macOS; on Windows and Linux, `add ios` prints how to build it with `npm run deploy` instead.
 
-When Tauri is set up for the first time, `add` asks for the app name and the organization in a terminal (defaults: the project name in title case, and `com.bini`). Pass `--app-name "X"` and/or `--org com.acme` to skip those prompts; with `--yes` or without a terminal, the flags or the defaults are used. `src/app/layout.tsx` is not read. If a native target already exists, `--app-name` and `--org` are not applied by `add`; use the commands in [Changing the app name or bundle ID](#changing-the-app-name-or-bundle-id) instead.
+Your toolchain is checked before anything is changed (see [Preflight checks](#preflight-checks)). When Tauri is set up for the first time, `add` asks for the app name and the organization in a terminal (defaults: the project name in title case, and `com.bini`). Pass `--app-name "X"` and/or `--org com.acme` to skip those prompts; with `--yes` or without a terminal, the flags or the defaults are used. `src/app/layout.tsx` is not read. If a native target already exists, `--app-name` and `--org` are not applied by `add`; use the commands in [Changing the app name or bundle ID](#changing-the-app-name-or-bundle-id) instead.
 
 When it finishes, `add` prints a summary of what was added or skipped, the signing status per target, any manual follow-ups, and the commands that apply.
 
@@ -192,7 +201,11 @@ npx create-bini-app@latest remove android
 npx create-bini-app@latest remove desktop android ios --yes   # remove everything native
 ```
 
-`remove` lists what it will delete and asks for confirmation (skip with `--yes`; without a terminal, `--yes` is required). Android and iOS delete their generated folders (`src-tauri/gen/android`, `src-tauri/gen/apple`), and the scripts for that platform are removed from `package.json`. `desktop` shares `src-tauri/` with the mobile targets, so it can only be removed together with all of them; asking for `desktop` while a mobile target would remain prints a warning and skips it. Removing everything deletes all of `src-tauri/` (including any Rust code you added), plus the native scripts and the Tauri packages (`@tauri-apps/api`, `@tauri-apps/cli`, `cross-env`, `bini-native`) from `package.json`. Scripts are removed only if you haven't changed them. `keystore.jks` and `.env.signing` are left in place. `web` cannot be removed.
+`remove` lists what it will delete and asks for confirmation (skip with `--yes`; without a terminal, `--yes` is required). `web` cannot be removed.
+
+- **Android / iOS** delete their generated folders (`src-tauri/gen/android`, `src-tauri/gen/apple`), and the scripts for that platform (`android`, `android:build`, `ios`, `ios:build`) are removed from `package.json` if you haven't changed them. `keystore.jks` in the project root is kept.
+- **Desktop** shares `src-tauri/` with the mobile targets, so it can only be removed together with all of them; asking for `desktop` while a mobile target would remain prints a warning and skips it. The command exits with `2` only when nothing else is left to remove.
+- **Removing everything native** deletes all of `src-tauri/` (including any Rust code you added), every native script from `package.json` (the `tauri:*`, `android*`, `ios*`, `dev:native`, `tauri`, `sign`, and `doctor` scripts, if unchanged), and the `@tauri-apps/*` packages and `cross-env` from `package.json`, then prunes them from `node_modules`. `bini-native` is not removed from `package.json`. It also replaces `src/main.tsx` (or `.jsx`) with the latest template version, so it no longer contains the native polyfill block, and **deletes `.env.signing`, `keystore.jks`, and any `.p12`, `.pfx`, `.p8`, `.mobileprovision`, `.jks`, or `.keystore` file in the project root**. `vite.config.*` and `.gitignore` are left unchanged.
 
 ### Changing the app name or bundle ID
 
@@ -221,7 +234,7 @@ These also exist as scripts in every project (`npm run clean`, `npm run upgrade`
 
 ## Project Structure
 
-```
+```text
 my-app/
 ├── src/
 │   ├── app/
@@ -260,7 +273,7 @@ my-app/
 ## Scripts
 
 | Command | Description |
-|---|---|
+| --- | --- |
 | `dev` | Start the Vite dev server with HMR and open the browser (`vite --host --open`) |
 | `build` | Type-check (TypeScript), build the client and SSR bundles, then pre-render every route to static HTML |
 | `start` | Serve the production build via `bini-server` |
@@ -273,11 +286,11 @@ my-app/
 | `tauri:dev` / `tauri:build` / `tauri:icon` *(desktop)* | Run the desktop app, build it, or regenerate all icons from `public/logo.png` |
 | `android` / `android:build` *(Android)* | Run or build the Android app |
 | `ios` / `ios:build` *(iOS, macOS only)* | Run or build the iOS app |
-| `sign` / `doctor` *(any native target)* | Set up code signing / check your machine for Tauri |
+| `sign` / `doctor` *(any native target)* | Set up code signing (`npx create-bini-app sign`) / check your machine for Tauri (`npx create-bini-app doctor`) |
 | `tauri` *(any native target)* | Pass-through to the Tauri CLI, e.g. `npm run tauri -- icon public/logo.png` |
 | `dev:native` *(any native target)* | Plain `vite`, used by Tauri's `beforeDevCommand` so no browser tab opens |
 
-The native scripts (everything from `tauri:dev` down) are added together when the first native target is added, whichever target that is, and existing scripts with the same name are kept. The desktop, Android, and iOS scripts only work once that platform exists. `deploy` is present in every scaffold, regardless of platform - see [Deployment](#deployment) for what it does. See [Platforms](#platforms) for the command and requirement breakdown per target.
+The native scripts (`dev:native`, `tauri`, `tauri:*`, `sign`, `doctor`, `android*`, `ios*`) are added together when the first native target is added, whichever target that is, and existing scripts with the same name are kept. The desktop, Android, and iOS scripts only work once that platform exists. `deploy` is present in every scaffold, regardless of platform - see [Deployment](#deployment) for what it does. See [Platforms](#platforms) for the command and requirement breakdown per target.
 
 ---
 
@@ -285,7 +298,7 @@ The native scripts (everything from `tauri:dev` down) are added together when th
 
 `bini-router` maps files in `src/app/` to URLs. No router config, no manual `React.lazy()` - every route is code-split automatically.
 
-```
+```text
 src/app/
   page.tsx                 → /
   about.tsx                → /about
@@ -448,40 +461,62 @@ When you add a native target, the CLI runs `tauri init` (frontend dist `../dist`
 
 The `tauri:dev`, `tauri:build`, `android`, `android:build`, `ios`, and `ios:build` scripts set `TAURI=true`. That makes the dev server bind to `TAURI_DEV_HOST` (or `0.0.0.0`) on port 3000, matching Tauri's `devUrl`, and it fails instead of switching to another port. `bini-native` is loaded by `vite.config` only when `TAURI=true` (and not for the SSR build); it serves `/api/*` in-process, opens external links in the system browser, and wires Cargo, capabilities, and manifests for the web APIs you use. Run `npm run doctor` to check your machine, and see the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/).
 
+### Preflight checks
+
+Before it creates or adds a native target, the CLI checks your toolchain and **stops with exit code `1`** if something is missing:
+
+| Target | Checked |
+| --- | --- |
+| Any native target | `cargo` on `PATH` |
+| Desktop on Windows | WebView2 Runtime (looks for the `EdgeWebView` folder under Program Files) |
+| Desktop on Linux | `webkit2gtk-4.1` (via `pkg-config`) |
+| Desktop on macOS, iOS on macOS | `xcodebuild` (Xcode command line tools) |
+| Android | `java` on `PATH`, `ANDROID_HOME` (or `ANDROID_SDK_ROOT`), and `NDK_HOME` |
+
+It also verifies that the locally installed Tauri CLI can actually run. If its native binding is missing (a known npm bug with platform-specific optional dependencies, [npm/cli#4828](https://github.com/npm/cli/issues/4828)), it stops and tells you to run `rm -rf node_modules package-lock.json && npm install`.
+
 ### Web
 
-**Overview** - the default target. A standard Vite + React app with file-based routing, pre-rendered pages, and a Hono API layer.
+#### Web overview
 
-**Features**
+The default target. A standard Vite + React app with file-based routing, pre-rendered pages, and a Hono API layer.
+
+#### Web features
+
 - Zero-dependency production server (`bini-server`)
 - `bini-deploy` generates hosting config for Netlify Edge, Vercel, Cloudflare Workers, Node.js, or Deno and pushes to GitHub
 
-**Commands**
+#### Web commands
 
 | Command | Description |
-|---|---|
+| --- | --- |
 | `npm run dev` | Dev server with HMR |
 | `npm start` | Serve the production build |
 | `npm run build` | Type-check, build, and pre-render every route (static & dynamic) via SSG |
 | `npm run preview` | Preview the production build |
 | `npm run deploy` | Generate hosting config for your chosen platform and push to GitHub |
 
-**Requirements** - Node.js `>= 20.19.0`. Nothing else.
+#### Web requirements
+
+Node.js `>= 20.19.0`. Nothing else.
 
 ---
 
 ### Desktop (Windows, macOS, Linux)
 
-**Overview** - a native desktop binary. It runs inside WebView2 on Windows, WKWebView on macOS, and WebKitGTK on Linux. Bundles are not cross-compiled: build Windows bundles on Windows, macOS bundles on macOS, and Linux bundles on Linux. `npm run deploy` generates one GitHub Actions workflow that builds all three on their own runners (see [Deployment](#deployment)).
+#### Desktop overview
 
-**Features**
+A native desktop binary. It runs inside WebView2 on Windows, WKWebView on macOS, and WebKitGTK on Linux. Bundles are not cross-compiled: build Windows bundles on Windows, macOS bundles on macOS, and Linux bundles on Linux. `npm run deploy` generates one GitHub Actions workflow that builds all three on their own runners (see [Deployment](#deployment)).
+
+#### Desktop features
+
 - Filesystem, clipboard, notifications, and dialogs via `@tauri-apps/api`, auto-wired by `bini-native`
 - Code signing for Windows and macOS, and optional GPG signing of the Linux AppImage and RPM (see [Code Signing](#code-signing))
 
-**Commands**
+#### Desktop commands
 
 | Command | Description |
-|---|---|
+| --- | --- |
 | `npm run tauri:dev` | Run in development mode |
 | `npm run tauri:build` | Build a distributable for the OS you are on |
 | `npm run tauri:icon` | Regenerate icons from `public/logo.png` |
@@ -489,22 +524,25 @@ The `tauri:dev`, `tauri:build`, `android`, `android:build`, `ios`, and `ios:buil
 
 `deploy` does not build the app on your machine. It writes `.github/workflows/desktop.yml` and pushes, and GitHub then builds Windows, macOS, and Linux bundles when you run the workflow or push a `v*` tag. To build locally instead, run `tauri:build` on the OS you want.
 
-**Requirements**
+#### Desktop requirements
 
-*Windows*
+##### Windows
+
 - [Rust](https://www.rust-lang.org/tools/install) (stable toolchain via `rustup`, MSVC toolchain as default) - Tauri compiles a native Rust binary under the hood
 - Microsoft C++ Build Tools ([download](https://visualstudio.microsoft.com/visual-cpp-build-tools/)) - install with "Desktop development with C++"
-- Microsoft Edge WebView2 Runtime ([download](https://developer.microsoft.com/en-us/microsoft-edge/webview2/)) - only needed on older PCs; Windows 11 and recent Windows 10 updates ship it pre-installed
+- Microsoft Edge WebView2 Runtime ([download](https://developer.microsoft.com/en-us/microsoft-edge/webview2/)) - the CLI checks for it and stops if it is not found
 
-*macOS*
+##### macOS
+
 - [Rust](https://www.rust-lang.org/tools/install) (stable toolchain via `rustup`)
 - Xcode Command Line Tools - `xcode-select --install`
 - No Homebrew packages are needed for desktop builds, since macOS ships WKWebView
 - Full Xcode (Mac App Store) if you also plan to build for iOS
 
-*Linux*
+##### Linux
+
 - [Rust](https://www.rust-lang.org/tools/install) (stable toolchain via `rustup`)
-- One of the following system dependency sets:
+- `pkg-config` and one of the following system dependency sets (the CLI checks for `webkit2gtk-4.1`):
 
 ```bash
 # Debian/Ubuntu
@@ -528,28 +566,32 @@ sudo pacman -S --needed webkit2gtk-4.1 base-devel curl wget file openssl \
 
 ### Android
 
-**Overview** - a real native APK/AAB via Tauri's Android backend, not a WebView wrapper.
+#### Android overview
 
-**Features**
+A real native APK/AAB via Tauri's Android backend, not a WebView wrapper.
+
+#### Android features
+
 - Camera, filesystem, notifications, and geolocation auto-wired by `bini-native`
 - Back button, status bar, and splash screen configurable in `src-tauri/gen/android`
 - Release signing (keystore + `keystore.properties`), configurable at scaffold time or later
 - The Rust Android targets are added for you when `rustup` is installed
 
-**Commands**
+#### Android commands
 
 | Command | Description |
-|---|---|
+| --- | --- |
 | `npm run android` | Run on an emulator or connected device |
 | `npm run android:build` | Build a release APK/AAB |
 | `npm run deploy` | Generate the Android GitHub Actions workflow and push the project to GitHub via `bini-deploy` |
 
 `deploy` does not build on your machine. It writes `.github/workflows/android.yml` and pushes, and GitHub builds the APK/AAB (signed when signing values are saved, otherwise unsigned) and attaches it to the run as an artifact. Store submission is manual. Commit the generated `src-tauri/gen/android` folder; only `keystore.properties`, `local.properties`, `.gradle/`, and build output are git-ignored.
 
-**Requirements**
+#### Android requirements
+
 - [Rust](https://www.rust-lang.org/tools/install) (stable toolchain via `rustup`) - Tauri compiles a native Rust binary under the hood
-- Java JDK 17 (`JAVA_HOME` set) - [download](https://adoptium.net/temurin/releases/)
-- Android Studio, with SDK/Build Tools/NDK (`ANDROID_HOME` and `NDK_HOME` set) - [download](https://developer.android.com/studio)
+- Java JDK 17 (`java` on `PATH`, `JAVA_HOME` set) - [download](https://adoptium.net/temurin/releases/)
+- Android Studio, with SDK/Build Tools/NDK (`ANDROID_HOME` or `ANDROID_SDK_ROOT`, and `NDK_HOME`, set) - [download](https://developer.android.com/studio)
 - Rust targets: `rustup target add aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android` (done automatically by the CLI if `rustup` is on your PATH)
 
 If Android initialization fails, the CLI prints the exact `npm run tauri -- android init` command to run once the toolchain is fixed (with your package manager's equivalent if you don't use npm).
@@ -558,21 +600,25 @@ If Android initialization fails, the CLI prints the exact `npm run tauri -- andr
 
 ### iOS
 
-**Overview** - a real native app via Tauri's iOS backend, running inside WKWebView. macOS + Xcode required.
+#### iOS overview
 
-**Features**
+A real native app via Tauri's iOS backend, running inside WKWebView. macOS + Xcode required.
+
+#### iOS features
+
 - Same native plugin wiring story as Android
 - Xcode-managed automatic signing for local runs; manual certificate/profile signing for CI
 
-**Commands**
+#### iOS commands
 
 | Command | Description |
-|---|---|
+| --- | --- |
 | `npm run ios` | Run on the Simulator or a connected device (macOS only) |
 | `npm run ios:build` | Build the app (macOS only) |
 | `npm run deploy` | Generate the iOS GitHub Actions workflow and push the project to GitHub via `bini-deploy` |
 
-**Requirements**
+#### iOS requirements
+
 - [Rust](https://www.rust-lang.org/tools/install) (stable toolchain via `rustup`) - Tauri compiles a native Rust binary under the hood
 - Xcode (Mac App Store) + Command Line Tools - `xcode-select --install`
 - CocoaPods - `brew install cocoapods` (or `sudo gem install cocoapods`)
@@ -593,67 +639,67 @@ npx create-bini-app@latest sign                                  # prompts, ever
 npx create-bini-app@latest sign android                          # prompts, one target
 npx create-bini-app@latest sign desktop ./cert.pfx "pw"          # no prompts: Windows (.pfx) or macOS (.p12), picked from this OS
 npx create-bini-app@latest sign windows ./cert.pfx "pw" --ci-only
-npx create-bini-app@latest sign macos ./dev-id.p12 "pw" --api-issuer ID --api-key KEY --api-key-file ./AuthKey.p8 --ci-only
-npx create-bini-app@latest sign ios ./dist.p12 "pw" --profile ./app.mobileprovision
-npx create-bini-app@latest sign ios --team ABCDE12345            # Xcode automatic signing, no files (on a Mac)
+npx create-bini-app@latest sign macos ./dev-id.p12 "pw" --identity "Developer ID Application: Name (TEAMID)" \
+  --api-issuer ID --api-key KEY --api-key-file ./AuthKey.p8 --ci-only
+npx create-bini-app@latest sign ios ./dist.p12 "pw" --profile ./app.mobileprovision --team ABCDE12345
+npx create-bini-app@latest sign ios --team ABCDE12345            # Xcode automatic signing, no files
 npx create-bini-app@latest sign android ./keystore.jks "pw" --alias upload
-npx create-bini-app@latest sign android --generate "pw"          # new keystore.jks
-npx create-bini-app@latest sign windows --generate --publisher "My Co" --ci-only   # GitHub Actions creates the key
-npx create-bini-app@latest sign linux --generate --publisher "My Co" --ci-only     # one target per command without prompts
-npx create-bini-app@latest sign desktop --adhoc                  # macOS ad-hoc signing for local testing (on a Mac)
+npx create-bini-app@latest sign desktop --thumbprint <sha1>      # Windows: certificate already in your store
+npx create-bini-app@latest sign desktop --sign-command "artifact-signing-cli -e <endpoint> -a <account> -c <profile> %1"   # Windows: cloud signing
+npx create-bini-app@latest sign desktop --adhoc                  # macOS ad-hoc signing for local testing
 ```
 
 **Targets:** `desktop` (the OS you are running on), `windows`, `macos`, `linux`, `android`, `ios`. `create-bini-app desktop sign` is shorthand for `create-bini-app sign desktop`.
 
+**Real credentials only.** Self-signed certificates are not supported: bring a real certificate, keystore, or GPG key. The only things the CLI creates for you are an Android keystore (with `keytool`) and macOS ad-hoc signatures for local testing.
+
 **This machine or GitHub Actions only.**
+
 - `desktop`, `android`, and `ios` (on a Mac) set up signing on this machine. When you give a certificate or keystore, the values are also saved for GitHub Actions.
 - `windows`, `macos`, and `linux` can only be named together with `--ci-only`. They then only save the values for GitHub Actions and change nothing on this machine. Use `desktop` to sign for the OS you are on.
 - `ios` on Windows or Linux also needs `--ci-only`.
 - `--ci-only` works from any OS. With no target, it covers every platform in the project (Windows, macOS, and Linux for the desktop target, plus Android and iOS when added).
+- Without `--ci-only`, prompt mode skips a target that has not been added to the project, with a warning and exit code `2`; run `create-bini-app add <target>` first. Argument mode does not check this: with no matching native project yet, it saves only the GitHub Actions values where it can.
 
-**Two modes.** Give a certificate or keystore file and its password (or a mode flag such as `--generate`, `--thumbprint`, `--sign-command`, `--adhoc`, or `--team` for iOS) and nothing is asked. This argument mode takes exactly one target per command; only the prompt mode accepts a list such as `sign windows,linux --ci-only`. Otherwise `sign` prompts, which needs an interactive terminal and cannot be combined with `--nosign`. Without `--ci-only` and with no target, the prompts cover everything that applies here: desktop for the OS you run on (if the project has a native target), Android once it has been added, and iOS only on macOS. At scaffold time, signing is skipped with no prompts when you pass `--nosign` or `--yes`, or when the terminal is non-interactive. Targets that are not yet signed make the command exit with code `2`; invalid arguments exit with `1`.
-
-**Generated keys in CI.** `--ci-only` with `--generate` (or the prompts under `--ci-only`) saves only a publisher name for Windows, Linux, and Android, plus a keystore password (minimum 6 characters) and key alias for Android. The GitHub Actions workflow creates the certificate, keystore, or GPG key on the first build, stores it as a GitHub secret, and reuses it afterwards. Add a repository secret `SECRETS_PAT` (a token with Secrets: read and write) so the workflow can save the key; `npm run deploy` offers to add it for you. Without it, a new key is created on every build. Linux GPG keys are generated without a passphrase, and the same key signs the AppImage and the RPM. macOS and iOS credentials cannot be generated: use a real certificate (or `--adhoc` on macOS for local testing). Generated keys are self-signed, so use real credentials for store releases. Real credentials take precedence over generated ones. Re-running `--generate --ci-only` on a target that is already saved fails unless you pass `--force` (the prompts ask for confirmation instead), the old real credentials for that target are removed from `.env.signing`, and a key already created in GitHub will no longer match the new values.
+**Two modes.** Give a certificate or keystore file and its password (or a mode flag such as `--thumbprint`, `--sign-command`, `--adhoc`, or `--team` for iOS) and nothing is asked. This argument mode takes exactly one target per command; only the prompt mode accepts a list such as `sign windows,linux --ci-only`. Otherwise `sign` prompts, which needs an interactive terminal and cannot be combined with `--nosign`. Without `--ci-only` and with no target, the prompts cover everything that applies here: desktop for the OS you run on (if the project has a native target), Android once it has been added, and iOS only on macOS. At scaffold time, signing is skipped with no prompts when you pass `--nosign` or `--yes`, or when the terminal is non-interactive. Targets that are not yet signed make the command exit with code `2`; invalid arguments exit with `1`.
 
 | Target | What is set up | Where it lives |
-|---|---|---|
-| Windows | A `.pfx` file (imported into your certificate store when you are on Windows, and saved for CI), the thumbprint of a certificate already in your store (`--thumbprint`), a free self-signed certificate (`--generate`, Windows only without `--ci-only`, created with PowerShell, valid 3 years, name set with `--publisher`), or a cloud or hardware key through a custom sign command (`--sign-command`, must contain `%1`). SHA-256 digest and a DigiCert timestamp URL are configured for store-based signing | `certificateThumbprint`, `digestAlgorithm`, and `timestampUrl` in the git-ignored `src-tauri/tauri.windows.conf.json`, which Tauri merges automatically on Windows only (so the committed `tauri.conf.json` never points at a certificate that only exists on your machine). A sign command is written to `src-tauri/tauri.cloud-sign.conf.json` so normal local builds never call the signing service; sign with `npm run tauri:build -- --config src-tauri/tauri.cloud-sign.conf.json`. CI values: `WINDOWS_CERTIFICATE`, `WINDOWS_CERTIFICATE_PASSWORD`, or `WINDOWS_PUBLISHER` for a key generated in CI |
-| macOS | A Developer ID Application `.p12` (imported into your login keychain on a Mac), optional notarization (App Store Connect API key, or Apple ID + app-specific password), or ad-hoc signing (`--adhoc`) for local testing | `signingIdentity` in the git-ignored `src-tauri/tauri.macos.conf.json`, which Tauri merges automatically on macOS only. CI values: `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, `KEYCHAIN_PASSWORD` (a random password for the temporary keychain the workflow creates), plus `APPLE_API_ISSUER` / `APPLE_API_KEY` / `APPLE_API_KEY_P8` or `APPLE_ID` / `APPLE_PASSWORD` / `APPLE_TEAM_ID` for notarization. `APPLE_API_KEY_PATH` is also written, but it only points at the `.p8` file on this machine for local notarization and is not uploaded to GitHub; the workflow writes the `.p8` content to a file on the runner instead |
-| Linux | GPG signing of the AppImage and the RPM: a new RSA 4096 key valid for 3 years (no passphrase) or a key you already have. Needs `gpg` (or `gpg2`). Optional, and skipped if you choose to | CI values: `GPG_PRIVATE_KEY`, `SIGN=1`, `SIGN_KEY`, `APPIMAGETOOL_FORCE_SIGN=1` (so a signing failure aborts the build instead of producing an unsigned AppImage), and `TAURI_SIGNING_RPM_KEY` for the RPM. `APPIMAGETOOL_SIGN_PASSPHRASE` and `TAURI_SIGNING_RPM_KEY_PASSPHRASE` are only added for an existing key that has a passphrase. A key generated in CI is stored as `LINUX_PUBLISHER`. Local builds only pick these up if you load `.env.signing` into your shell first (see below) |
-| Android | A `keystore.jks` in the project root (generated with `keytool`, which ships with the JDK, or one you already have) and a `keystore.properties` file. The Gradle `signingConfigs` block is patched into `app/build.gradle.kts` for you | `src-tauri/gen/android/keystore.properties`. CI values: `ANDROID_KEY_BASE64`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`, `ANDROID_KEYSTORE_PASSWORD`, or `ANDROID_PUBLISHER` for a keystore generated in CI |
+| --- | --- | --- |
+| Windows | A `.pfx` file (imported into your `CurrentUser\My` certificate store with PowerShell when you are on Windows, and saved for CI), the thumbprint of a certificate already in your store (`--thumbprint`), or a cloud or hardware key through a custom sign command (`--sign-command`, must contain `%1`). SHA-256 digest and the DigiCert timestamp URL are configured for store-based signing | `certificateThumbprint`, `digestAlgorithm`, and `timestampUrl` in the git-ignored `src-tauri/tauri.windows.conf.json`, which Tauri merges automatically on Windows only (so the committed `tauri.conf.json` never points at a certificate that only exists on your machine). A sign command is written to `src-tauri/tauri.cloud-sign.conf.json` so normal local builds never call the signing service; sign with `npm run tauri:build -- --config src-tauri/tauri.cloud-sign.conf.json`. CI values for a `.pfx`: `WINDOWS_CERTIFICATE` (base64) and `WINDOWS_CERTIFICATE_PASSWORD`. A sign command is not uploaded; `bini-deploy` installs the matching CLI in CI when it recognises the command |
+| macOS | A Developer ID Application `.p12` and its signing identity (imported into your login keychain on a Mac when given as arguments), optional notarization (App Store Connect API key, or Apple ID + app-specific password), or ad-hoc signing (`--adhoc`) for local testing | `signingIdentity` in the git-ignored `src-tauri/tauri.macos.conf.json`, which Tauri merges automatically on macOS only. CI values: `APPLE_CERTIFICATE` (base64), `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, `KEYCHAIN_PASSWORD` (a random password for the temporary keychain the workflow creates), plus `APPLE_API_ISSUER` / `APPLE_API_KEY` / `APPLE_API_KEY_P8` (the `.p8` contents, base64) or `APPLE_ID` / `APPLE_PASSWORD` / `APPLE_TEAM_ID` for notarization |
+| Linux | GPG signing of the AppImage and the RPM with a key you already have (create one with `gpg --full-gen-key`, RSA 4096). Prompts only (no credential file or flags); needs `gpg` (or `gpg2`). The secret key is exported with the passphrase you enter. Optional, and skipped if you choose to | CI values: `GPG_PRIVATE_KEY` (base64), `SIGN=1`, `SIGN_KEY`, `APPIMAGETOOL_FORCE_SIGN=1` (so a signing failure aborts the build instead of producing an unsigned AppImage), and `TAURI_SIGNING_RPM_KEY` (raw ASCII-armored text) for the RPM. `APPIMAGETOOL_SIGN_PASSPHRASE` and `TAURI_SIGNING_RPM_KEY_PASSPHRASE` are added only when the key has a passphrase. Local builds only pick these up if you load `.env.signing` into your shell first (see below) |
+| Android | A `keystore.jks` in the project root, copied or generated there unless you pass `--ci-only` (generated with `keytool`, which ships with the JDK - RSA 2048, valid 10,000 days - or one you already have) and a `keystore.properties` file. The Gradle `signingConfigs` block is patched into `app/build.gradle.kts` for you, guarded so unsigned and debug builds keep working | `src-tauri/gen/android/keystore.properties` (written once the Android project exists; before that only the CI values are saved). CI values: `ANDROID_KEY_BASE64`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`, `ANDROID_KEYSTORE_PASSWORD` |
 | iOS | Automatic Xcode signing with your Team ID (nothing to import), or a manual Apple Distribution `.p12` + provisioning profile (`.mobileprovision`) for CI, stored base64-encoded | The Team ID is saved as `developmentTeam` in the git-ignored `src-tauri/tauri.ios.conf.json`, which Tauri merges automatically on iOS builds, so local builds need no environment variables and CI does not try to sign with it. CI values: `IOS_CERTIFICATE`, `IOS_CERTIFICATE_PASSWORD`, `IOS_MOBILE_PROVISION`, `APPLE_DEVELOPMENT_TEAM`. For CI automatic signing with `--team`, an App Store Connect API key is saved instead: `APPLE_API_ISSUER`, `APPLE_API_KEY`, `APPLE_API_KEY_P8` |
 
-Certificates and profiles are checked before they are saved (when `openssl` is available): the CLI reports the certificate name and expiry, warns about the wrong kind of certificate (for example a development certificate where a distribution one is needed), a missing private key, a provisioning profile whose bundle ID or team does not match your app, and development profiles that App Store builds cannot use. Keystores are opened with `keytool` to verify the password and alias. If you have no Apple certificate yet, the interactive prompts can create a certificate request (CSR) on your machine for Apple Developer, or show a short guide for getting one.
+In the prompts, Windows signing lists "a `.pfx` file I already have" and "cloud or hardware key: custom sign command" (new OV/EV certificates are usually issued on hardware or a cloud HSM and cannot be exported as a `.pfx`). On macOS the prompts offer ad-hoc signing or an Apple Developer identity and then ask for the `.p12`, with optional notarization credentials.
 
 ### `sign` options
 
 | Option | Used with | Description |
-|---|---|---|
+| --- | --- | --- |
 | `--alias <name>` | android | Key alias (default `upload`) |
 | `--key-password <pw>` | android | Key password, when it differs from the keystore password. Ignored for `.p12`/`.pfx` keystores, which use one password for both |
-| `--generate` | android, windows, linux | Android: create a new keystore (the password follows the command, minimum 6 characters). Windows: create a self-signed certificate (Windows only, unless used with `--ci-only`). Linux: create a GPG key with no passphrase. With `--ci-only`, only the publisher name (and the Android password) is saved and GitHub Actions creates the key |
-| `--publisher <name>` | windows, android, linux | Publisher name for a generated key or certificate |
-| `--thumbprint <sha1>` | windows | Use a certificate already in the Windows store (40 hex characters) |
+| `--generate` | android | Create a new `keystore.jks` in the project root with `keytool`. The password follows the command (minimum 6 characters) |
+| `--thumbprint <sha1>` | windows | Use a certificate already in the Windows store (40 hex characters; spaces and colons are ignored) |
 | `--sign-command "<cmd>"` | windows | Cloud or hardware signing command containing `%1` |
-| `--identity "<name>"` | macos | Signing identity, when it cannot be read from the certificate |
+| `--identity "<name>"` | macos | Signing identity, e.g. `"Developer ID Application: Name (TEAMID)"`. Required when signing with a certificate file in argument mode |
 | `--adhoc` | macos | Ad-hoc signing for local testing |
 | `--api-issuer`, `--api-key`, `--api-key-file` | macos, ios | App Store Connect API key (all three are required together): notarization on macOS, CI automatic signing on iOS |
 | `--apple-id`, `--apple-password`, `--team` | macos | Notarization with an Apple ID and an app-specific password (all required together). Cannot be combined with the API key options |
 | `--profile <file>` | ios | Provisioning profile for a manual certificate (the certificate file is required too) |
-| `--team <TEAMID>` | ios, macos | Apple Team ID (10 letters and numbers) |
-| `--force` | android, windows, linux | With `--generate --ci-only`: replace signing values that are already saved |
-| `--ci-only` | all | Only save the CI values; skip the local keychain, certificate store, and Gradle setup. Required to name `windows`, `macos`, or `linux`. Cannot be combined with `--sign-command`, `--thumbprint`, `--adhoc`, or `ios --team` |
+| `--team <TEAMID>` | ios, macos | Apple Team ID (10 letters and numbers). Required for iOS, both for automatic signing and together with a certificate and `--profile` |
+| `--publisher <name>` | windows, android, linux | Accepted and validated against those targets, but currently has no effect |
+| `--ci-only` | all | Only save the CI values; skip the local keychain, certificate store, and Gradle setup. Required to name `windows`, `macos`, or `linux`. Cannot be combined with `--sign-command`, `--thumbprint`, `--adhoc`, or `ios --team` without a certificate |
 
 To keep passwords out of shell history and process lists, they can come from the environment instead of the command line: `BINI_SIGN_PASSWORD` (certificate or keystore password), `BINI_KEY_PASSWORD` (Android key password), and `BINI_APPLE_PASSWORD` (Apple ID app-specific password). Use the environment for a password that starts with `-`, since it would be read as a flag.
 
 ### Where secrets live
 
-- `.env.signing` - created with owner-only permissions and git-ignored. It holds the values GitHub Actions needs, and `npm run deploy` uploads them as GitHub secrets. Local builds do not need it: they sign from your local `tauri.windows.conf.json` / `tauri.macos.conf.json` / `tauri.ios.conf.json`, your keychain, and Xcode. Each platform only updates its own keys, so platforms can be set up at different times. To notarize a local macOS build, or to sign a local Linux AppImage or RPM, load it first with `set -a; source .env.signing; set +a`.
+- `.env.signing` - created with owner-only permissions (`0600`). It holds the values GitHub Actions needs, and `npm run deploy` uploads them as GitHub secrets. Never commit it. Local builds do not need it: they sign from your local `tauri.windows.conf.json` / `tauri.macos.conf.json` / `tauri.ios.conf.json`, your keychain, and Xcode. Each platform only updates its own keys, so platforms can be set up at different times. To notarize a local macOS build, or to sign a local Linux AppImage or RPM, load it first with `set -a; source .env.signing; set +a`.
 - `keystore.jks` and `src-tauri/gen/android/keystore.properties` - the Gradle signing config is committed and only activates when `keystore.properties` exists, so fresh clones and debug builds keep working. Back up `keystore.jks` and its password: every Play Store update must be signed with the same key.
-- `.bini-signing/` - private key and certificate request created when you have no Apple certificate yet. Keep the private key safe; it is the only copy.
-- Setting up signing adds `.env.signing`, `.bini-signing/`, `tauri.windows.conf.json`, `tauri.macos.conf.json`, `tauri.ios.conf.json`, `*.jks`, `*.keystore`, `*.p12`, `*.pfx`, `*.p8`, `*.mobileprovision`, `*.key`, and `keystore.properties` to `.gitignore`.
+- Keep `.env.signing`, `keystore.jks`, `keystore.properties`, `tauri.windows.conf.json`, `tauri.macos.conf.json`, `tauri.ios.conf.json`, and any `.p12`, `.pfx`, `.p8`, `.mobileprovision`, `.jks`, or `.keystore` files out of git.
 
-Desktop signing without `--ci-only` covers only the OS you ran `sign` on. Sign the other systems in CI on their own runners (`sign windows,macos,linux --ci-only`). A self-signed Windows certificate still shows a SmartScreen warning to other people; use a certificate from a trusted authority for public releases. Tauri's own guides: [macOS](https://v2.tauri.app/distribute/sign/macos/), [Windows](https://v2.tauri.app/distribute/sign/windows/), [Linux](https://v2.tauri.app/distribute/sign/linux/), [iOS](https://v2.tauri.app/distribute/sign/ios/), [Android](https://v2.tauri.app/distribute/sign/android/).
+Desktop signing without `--ci-only` covers only the OS you ran `sign` on. Sign the other systems in CI on their own runners (`sign windows,macos,linux --ci-only`). Use a certificate from a trusted authority for public releases. Tauri's own guides: [macOS](https://v2.tauri.app/distribute/sign/macos/), [Windows](https://v2.tauri.app/distribute/sign/windows/), [Linux](https://v2.tauri.app/distribute/sign/linux/), [iOS](https://v2.tauri.app/distribute/sign/ios/), [Android](https://v2.tauri.app/distribute/sign/android/).
 
 ---
 
@@ -664,7 +710,7 @@ Desktop signing without `--ci-only` covers only the OS you ran `sign` on. Sign t
 **Auto-imports.** These are available in every file under `src/app/` (including `.mdx`/`.md`) with no import statement:
 
 | From | Symbols |
-|---|---|
+| --- | --- |
 | `react` | `useState` `useEffect` `useRef` `useMemo` `useCallback` `useContext` `createContext` `useReducer` `useId` `useTransition` `useDeferredValue` |
 | `react-router-dom` | `Link` `NavLink` `useNavigate` `useParams` `useLocation` `useSearchParams` `Outlet` |
 | `bini-env` | `getEnv` `requireEnv` |
@@ -695,7 +741,7 @@ npx bini-deploy --platform desktop,android,ios --repo https://github.com/you/app
 ```
 
 | Option | Description |
-|---|---|
+| --- | --- |
 | `--platform <targets>` | `web`, or any of `desktop`, `android`, `ios` (comma-separated). `web` cannot be combined with the others |
 | `--hosting <name>` | Web only: `node` (default with `--yes`), `netlify`, `vercel`, `cloudflare`, `deno` |
 | `--repo <url>` | GitHub repository URL |
@@ -706,7 +752,7 @@ npx bini-deploy --platform desktop,android,ios --repo https://github.com/you/app
 ### Web hosting files
 
 | Platform | Files generated |
-|---|---|
+| --- | --- |
 | `netlify` | `netlify/edge-functions/api.ts`, `netlify/edge-functions/spa-fallback.ts`, and `netlify.toml` |
 | `vercel` | `api/index.ts`, `vercel.json`, and (TypeScript projects) `api/tsconfig.json` |
 | `cloudflare` | `worker.ts` and `wrangler.toml` |
@@ -741,7 +787,7 @@ Netlify redirects cannot exclude paths with a file extension, so the single-page
 For native targets, `bini-deploy` writes one workflow per kind of runner into `.github/workflows/`:
 
 | Workflow | Builds | Runner |
-|---|---|---|
+| --- | --- | --- |
 | `desktop.yml` | Windows, macOS, and Linux (one matrix job) | Windows, macOS, and Ubuntu |
 | `android.yml` | Android APK/AAB | Ubuntu |
 | `ios.yml` | iOS app | macOS |
@@ -750,13 +796,7 @@ The workflows use your project's own scripts (`tauri:build`, `android:build`, `i
 
 Run a workflow from the **Actions** tab, or push a tag such as `v1.0.0`. The finished builds are attached to the run as **Artifacts**.
 
-**Signing in CI.** For each platform, the workflow uses, in order:
-
-1. Real or previously saved credentials from GitHub secrets.
-2. A publisher name saved by `create-bini-app sign <target> --ci-only` (Windows, Linux, Android): the workflow creates a self-signed key on the first build, saves it as a secret, and reuses it. This needs the `SECRETS_PAT` secret.
-3. Nothing: the build is unsigned. macOS falls back to an ad-hoc signature, and iOS builds for the simulator only.
-
-macOS and iOS cannot be generated and need real Apple credentials. During deploy you are offered the signing prompts for each platform you are deploying (skip them with `--nosign`), then the saved values from `.env.signing` are uploaded to GitHub as secrets with the GitHub CLI (`gh`). Install it and run `gh auth login` first, otherwise deploy prints the secret names to add by hand at `https://github.com/<you>/<repo>/settings/secrets/actions`. If a generated key is in use and `SECRETS_PAT` is missing, deploy offers to add it.
+**Signing in CI.** For each platform, the workflow uses the credentials saved as GitHub secrets (from `create-bini-app sign`). Without them the build is unsigned: macOS falls back to an ad-hoc signature, and iOS builds for the simulator only. During deploy you are offered the signing prompts for each platform you are deploying (skip them with `--nosign`), then the saved values from `.env.signing` are uploaded to GitHub as secrets with the GitHub CLI (`gh`). Install it and run `gh auth login` first, otherwise deploy prints the secret names to add by hand at `https://github.com/<you>/<repo>/settings/secrets/actions`.
 
 **Pushing to GitHub.** Deploy initializes git if needed, sets `origin` (an existing remote is never changed), commits, and pushes to `main`. It asks for a git name and email if none are set (stored for this repository only), and for a GitHub username and Personal Access Token if the push is rejected (add the `workflow` scope so GitHub accepts the Actions files). If the remote has commits you don't have locally, it merges them in with `-X ours`: for any file that exists on both sides your local version wins, and files that only exist on the remote are kept.
 
@@ -765,7 +805,7 @@ macOS and iOS cannot be generated and need real Apple credentials. During deploy
 ## Packages
 
 | Package | Role |
-|---|---|
+| --- | --- |
 | [`bini-router`](https://npmjs.com/package/bini-router) | File-based routing, layouts, MDX/Markdown pages, folder-scoped loading/not-found/error, metadata, auto-imports, dev/preview API routing |
 | [`bini-ssg`](https://npmjs.com/package/bini-ssg) | Pre-renders every route - static and dynamic - to static HTML as part of `npm run build` |
 | [`bini-deploy`](https://npmjs.com/package/bini-deploy) | Generates hosting config for web targets and GitHub Actions build workflows for native targets, and pushes the project to GitHub |

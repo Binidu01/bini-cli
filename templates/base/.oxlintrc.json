@@ -1,14 +1,37 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": [
-    "react"
-  ],
+  "plugins": ["react"],
   "env": {
     "browser": true,
     "es2022": true
   },
-  "ignorePatterns": [
-    "dist",
-    "node_modules"
-  ]
+  "rules": {
+    "react/jsx-no-undef": "error"
+  },
+  "globals": {
+    "Await": "readonly",
+    "Form": "readonly",
+    "Link": "readonly",
+    "NavLink": "readonly",
+    "Outlet": "readonly",
+    "isRouteErrorResponse": "readonly",
+    "redirect": "readonly",
+    "useActionData": "readonly",
+    "useAsyncError": "readonly",
+    "useAsyncValue": "readonly",
+    "useFetcher": "readonly",
+    "useFetchers": "readonly",
+    "useLoaderData": "readonly",
+    "useLocation": "readonly",
+    "useMatches": "readonly",
+    "useNavigate": "readonly",
+    "useNavigation": "readonly",
+    "useParams": "readonly",
+    "useRevalidator": "readonly",
+    "useRouteError": "readonly",
+    "useRouteLoaderData": "readonly",
+    "useSearchParams": "readonly",
+    "useSubmit": "readonly"
+  },
+  "ignorePatterns": ["dist", "node_modules"]
 }
