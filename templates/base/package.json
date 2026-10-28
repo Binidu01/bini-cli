@@ -21,16 +21,16 @@
     "react-router-dom": "latest",
     "hono": "latest",
     "bini-router": "latest",
-    "bini-overlay": "latest",
-    "bini-server": "latest",
-    "bini-ssg": "latest"
+    "bini-env": "latest",
+    "bini-server": "latest"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "latest",
     "vite": "latest",
     "oxlint": "latest",
     "oxfmt": "latest",
-    "bini-env": "latest",
-    "bini-deploy": "latest"{{TS_DEPS}}{{TAILWIND_DEPS}}
+    "bini-deploy": "latest",
+    "bini-overlay": "latest",
+    "bini-ssg": "latest"{{TS_DEPS}}{{TAILWIND_DEPS}}
   }
 }

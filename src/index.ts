@@ -52,8 +52,6 @@ interface CliFlags {
   applePassword: string | undefined;
   signCommand: string | undefined;
   ciOnly: boolean;
-  generate: boolean;
-  publisher: string | undefined;
   thumbprint: string | undefined;
   adhoc: boolean;
 }
@@ -762,7 +760,7 @@ function printCommands(pm: PackageManager, selected: TargetPlatform[]): void {
 }
 
 const CLI_OPTIONS = {
-  platform: { type: "string" },
+  platform: { type: "string", multiple: true },
   "app-name": { type: "string" },
   org: { type: "string" },
   typescript: { type: "boolean" },
@@ -793,15 +791,13 @@ const CLI_OPTIONS = {
   "apple-password": { type: "string" },
   "sign-command": { type: "string" },
   "ci-only": { type: "boolean" },
-  generate: { type: "boolean" },
-  publisher: { type: "string" },
   thumbprint: { type: "string" },
   adhoc: { type: "boolean" },
 } as const;
 
 const SIGN_ONLY_FLAGS = [
   "alias", "key-password", "profile", "team", "identity", "api-issuer", "api-key", "api-key-file",
-  "apple-id", "apple-password", "sign-command", "ci-only", "generate", "publisher", "thumbprint", "adhoc",
+  "apple-id", "apple-password", "sign-command", "ci-only", "thumbprint", "adhoc",
 ] as const;
 
 function printHelp(): void {
@@ -809,7 +805,7 @@ function printHelp(): void {
 ${c.heading("Usage:")}
   create-bini-app [project-name] [options]        Create a new project
   create-bini-app add [targets] [options]         Add platform(s) inside an existing Bini project
-  create-bini-app sign [targets]                  Set up or redo code signing
+  create-bini-app sign [targets] [options]        Set up or redo code signing
   create-bini-app remove [targets] [options]      Remove platform(s)
   create-bini-app doctor | clean | upgrade
 
@@ -819,28 +815,63 @@ ${c.heading("Signing:")}
   macOS        .p12 + Apple signing identity; notarization via App Store Connect API key or Apple ID
   Linux        your GPG key (gpg --full-gen-key); CI reads GPG_PRIVATE_KEY + SIGN_KEY + APPIMAGETOOL_SIGN_PASSPHRASE
   iOS          Apple Distribution .p12 + provisioning profile, or App Store Connect API key
-  Android      keystore (.jks) + password; keytool generates it locally or you supply one
+  Android      you supply a keystore (.jks, .keystore or .p12) and its alias + passwords
+
+${c.heading("Signing flags (only with `sign`):")}
+  --alias <name>                 Android: key alias (default: upload)
+  --key-password <pw>            Android: key password when it differs from the keystore password
+  --profile <file>               iOS: provisioning profile (.mobileprovision)
+  --team <TEAMID>                iOS: Apple Team ID (10 alphanumeric characters)
+  --identity <name>              macOS: signing identity (e.g. "Developer ID Application: Name (TEAMID)")
+  --api-issuer <id>              Apple App Store Connect API issuer ID
+  --api-key <id>                 Apple App Store Connect API key ID
+  --api-key-file <file>          Path to the downloaded .p8 private key
+  --apple-id <email>             Apple ID for notarization (with --team and --apple-password)
+  --apple-password <pw>          App-specific password for the Apple ID
+  --sign-command "<cmd>"         Windows: custom cloud/hardware signing command (must contain %1)
+  --thumbprint <sha1>            Windows: certificate thumbprint already in your store
+  --adhoc                        macOS: ad-hoc signing for local testing
+  --ci-only                      Save credentials to .env.signing only; do not touch this machine
+
+${c.heading("Other flags:")}
+  --platform <targets>           Comma-separated or repeated: web, desktop, android, ios
+  --app-name [name]              Set the native app name (prompt when no value is given)
+  --org [domain]                 Set the bundle ID prefix (prompt when no value is given)
+  --typescript / --javascript    Create with TypeScript (default) or JavaScript
+  --tailwind / --css-modules / --none  Styling choice at create time
+  --npm / --pnpm / --yarn / --bun      Force a package manager
+  --no-install / --no-git        Skip installing dependencies / git init
+  --force                        Overwrite an existing project directory
+  --yes, -y                      Accept defaults; skip prompts
+  --help, -h                     Show this help
+  --version, -v                  Print the CLI version
 `);
 }
 
-function parsePlatformList(raw: string | undefined, source: string): TargetPlatform[] {
+function parsePlatformList(
+  raw: string | string[] | undefined,
+  source: string
+): TargetPlatform[] {
   if (raw === undefined) return [];
+  const list = Array.isArray(raw) ? raw : [raw];
+  if (list.length === 0) return [];
+  const values = list.flatMap((s) => s.split(",")).map((s) => s.trim()).filter(Boolean);
   const result: TargetPlatform[] = [];
-  for (const item of raw.split(",").map((s) => s.trim()).filter(Boolean)) {
+  for (const item of values) {
     if (!isTargetPlatform(item)) {
       log.error(`Invalid ${source} "${item}". Use one of: ${TARGET_PLATFORMS.join(", ")}.`);
       exit(1);
     }
     if (!result.includes(item)) result.push(item);
   }
-  if (result.length === 0) {
+  if (values.length > 0 && result.length === 0) {
     log.error(`${source} requires a value.`);
     exit(1);
   }
   return result;
 }
 
-function parseSignArgs(rest: string[], platformFlags: TargetPlatform[], generate: boolean): SignParsed {
+function parseSignArgs(rest: string[], platformFlags: TargetPlatform[]): SignParsed {
   const targets: SignTarget[] = [];
   const add = (t: SignTarget): void => {
     if (!targets.includes(t)) targets.push(t);
@@ -848,16 +879,14 @@ function parseSignArgs(rest: string[], platformFlags: TargetPlatform[], generate
 
   let i = 0;
   for (; i < rest.length; i++) {
-    if (generate && i > 0) break;
     const words = (rest[i] ?? "").split(",").map((s) => s.trim()).filter(Boolean);
     if (words.length === 0 || !words.every(isSignTarget)) break;
     for (const w of words) add(w as SignTarget);
   }
 
   const remaining = rest.slice(i);
-  const max = generate ? 1 : 2;
-  if (remaining.length > max) {
-    log.error(`Unexpected extra argument(s): ${remaining.slice(max).join(" ")}`);
+  if (remaining.length > 2) {
+    log.error(`Unexpected extra argument(s): ${remaining.slice(2).join(" ")}`);
     log.info("Usage: create-bini-app sign <target> <file> <password>");
     exit(1);
   }
@@ -868,7 +897,7 @@ function parseSignArgs(rest: string[], platformFlags: TargetPlatform[], generate
   }
 
   const [first, second] = remaining;
-  const file = generate ? undefined : first;
+  const file = first;
   if (file !== undefined && targets.length === 0) {
     log.error(`Which target is "${file}" for? Use e.g.: create-bini-app sign desktop ${file} <password>`);
     log.info(`Targets: ${SIGN_TARGETS.join(", ")}`);
@@ -878,7 +907,7 @@ function parseSignArgs(rest: string[], platformFlags: TargetPlatform[], generate
     log.error("A credential file belongs to one target. Run sign once per target.");
     exit(1);
   }
-  return { targets, file, password: generate ? first : second };
+  return { targets, file, password: second };
 }
 
 function parseCli(args: string[]) {
@@ -928,8 +957,8 @@ function parseArguments(): { positionals: string[]; flags: CliFlags } {
   }
 
   for (const name of [
-    "platform", "app-name", "org", "alias", "profile", "team", "identity",
-    "api-issuer", "api-key", "api-key-file", "apple-id", "sign-command", "publisher", "thumbprint",
+    "app-name", "org", "alias", "profile", "team", "identity",
+    "api-issuer", "api-key", "api-key-file", "apple-id", "sign-command", "thumbprint",
   ] as const) {
     const value = values[name];
     if (value !== undefined && value.trim() === "") {
@@ -990,6 +1019,31 @@ function parseArguments(): { positionals: string[]; flags: CliFlags } {
     exit(1);
   }
 
+  if (positionals[0] === "sign") {
+    const ciOnly = Boolean(values["ci-only"]);
+    const fileless = values["sign-command"] !== undefined || values.thumbprint !== undefined || values.adhoc;
+    const hasIosTeam = values.team !== undefined;
+
+    if (ciOnly && fileless) {
+      log.error("--sign-command, --thumbprint and --adhoc cannot be combined with --ci-only.");
+      exit(1);
+    }
+    if (ciOnly && hasIosTeam) {
+      log.error("ios --team sets up this machine, so it cannot be combined with --ci-only.");
+      exit(1);
+    }
+
+    const hasArgInputs =
+      positionals.slice(1).some((p) => !p.startsWith("-")) ||
+      fileless ||
+      hasIosTeam ||
+      values.profile !== undefined;
+    if (values.yes && !hasArgInputs) {
+      log.error("--yes with `sign` needs credentials. Use: create-bini-app sign <target> <file> <password>");
+      exit(1);
+    }
+  }
+
   return {
     positionals,
     flags: {
@@ -999,7 +1053,7 @@ function parseArguments(): { positionals: string[]; flags: CliFlags } {
       cssModules: Boolean(values["css-modules"]),
       noStyle: Boolean(values.none),
       noInstall: Boolean(values["no-install"]),
-      platforms: parsePlatformList(values.platform, "--platform"),
+      platforms: parsePlatformList(values.platform as string | string[] | undefined, "--platform"),
       appName: values["app-name"],
       org,
       promptAppName,
@@ -1020,8 +1074,6 @@ function parseArguments(): { positionals: string[]; flags: CliFlags } {
       applePassword: values["apple-password"],
       signCommand: values["sign-command"]?.trim(),
       ciOnly: Boolean(values["ci-only"]),
-      generate: Boolean(values.generate),
-      publisher: values.publisher?.trim(),
       thumbprint,
       adhoc: Boolean(values.adhoc),
     },
@@ -1279,50 +1331,107 @@ async function patchAndroidGradleSigning(androidGenDir: string): Promise<void> {
     return;
   }
 
+  let content: string;
   try {
-    let content = await fsPromises.readFile(gradlePath, "utf-8");
-    if (content.includes("keystore.properties")) {
-      log.skip("build.gradle.kts already configured for release signing.");
-      return;
-    }
-    if (!/buildTypes\s*\{/.test(content)) {
-      log.warn(`Could not find "buildTypes" block in ${gradlePath}. Add signingConfigs manually.`);
-      return;
-    }
+    content = await fsPromises.readFile(gradlePath, "utf-8");
+  } catch (err) {
+    log.warn(`Could not read ${gradlePath}: ${(err as Error).message}`);
+    return;
+  }
 
-    const imports = ["import java.io.FileInputStream", "import java.util.Properties"].filter((i) => !content.includes(i));
-    if (imports.length) content = `${imports.join("\n")}\n${content}`;
+  if (/signingConfigs\s*\{[\s\S]*?create\("release"\)[\s\S]*?keystorePropertiesFile/.test(content)) {
+    log.skip("build.gradle.kts already contains a release signingConfig.");
+    return;
+  }
 
-    // Guarded: unsigned builds must not crash.
-    const signingConfigBlock = `    signingConfigs {
+  const hasAndroidBlock = /(^|\n)\s*android\s*\{/.test(content);
+  const hasBuildTypesBlock = /(^|\n)\s*buildTypes\s*\{/.test(content);
+  const hasReleaseBlock = /getByName\("release"\)\s*\{/.test(content) || /release\s*\{/.test(content);
+
+  if (!hasAndroidBlock || !hasBuildTypesBlock || !hasReleaseBlock) {
+    log.warn(`Could not safely patch ${gradlePath}.`);
+    log.warn(`Expected "android {", "buildTypes {", and a release { ... } block. Found: android=${hasAndroidBlock}, buildTypes=${hasBuildTypesBlock}, release=${hasReleaseBlock}.`);
+    log.info("Add this block manually (same as Tauri's docs): https://v2.tauri.app/distribute/sign/android/");
+    log.plain(`
+${c.dim("// Top of the file:")}
+import java.io.FileInputStream
+import java.util.Properties
+
+val keystoreProperties = Properties()
+val keystorePropertiesFile = rootProject.file("keystore.properties")
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(FileInputStream(keystorePropertiesFile))
+}
+
+${c.dim("// Inside android { } — before buildTypes:")}
+signingConfigs {
+    create("release") {
+        if (keystorePropertiesFile.exists()) {
+            keyAlias = keystoreProperties["keyAlias"] as String
+            keyPassword = keystoreProperties["keyPassword"] as String
+            storeFile = file(keystoreProperties["storeFile"] as String)
+            storePassword = keystoreProperties["storePassword"] as String
+        }
+    }
+}
+
+${c.dim("// Inside buildTypes { release { } } — after signingConfigs:")}
+signingConfig = signingConfigs.getByName("release")
+`);
+    return;
+  }
+
+  const imports = [
+    "import java.io.FileInputStream",
+    "import java.util.Properties",
+  ].filter((i) => !content.includes(i));
+
+  const loadBlock = `val keystoreProperties = Properties()
+val keystorePropertiesFile = rootProject.file("keystore.properties")
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(FileInputStream(keystorePropertiesFile))
+}
+`;
+
+  const signingConfigsBlock = `    signingConfigs {
         create("release") {
-            val f = rootProject.file("keystore.properties")
-            if (f.exists()) {
-                val p = Properties().apply { load(FileInputStream(f)) }
-                keyAlias = p["keyAlias"] as String
-                keyPassword = p["password"] as String
-                storeFile = file(p["storeFile"] as String)
-                storePassword = p["password"] as String
+            if (keystorePropertiesFile.exists()) {
+                keyAlias = keystoreProperties["keyAlias"] as String
+                keyPassword = keystoreProperties["keyPassword"] as String
+                storeFile = file(keystoreProperties["storeFile"] as String)
+                storePassword = keystoreProperties["storePassword"] as String
             }
         }
     }
-
 `;
-    content = content.replace(/(\n[^\S\n]*buildTypes\s*\{)/, `\n${signingConfigBlock}$1`);
 
-    if (/getByName\("release"\)\s*\{/.test(content)) {
-      content = content.replace(
-        /(getByName\("release"\)\s*\{)/,
-        `$1\n            if (rootProject.file("keystore.properties").exists()) {\n                signingConfig = signingConfigs.getByName("release")\n            }`
-      );
-    } else {
-      log.warn(`Could not find getByName("release") in ${gradlePath}. Set signingConfig manually.`);
-    }
+  let next = content;
 
-    await writeFile(gradlePath, content);
+  if (imports.length > 0) {
+    next = `${imports.join("\n")}\n${next}`;
+  }
+
+  next = next.replace(
+    /(^|\n)(\s*android\s*\{)/,
+    (_, lead: string, androidOpen: string) => `${lead}${loadBlock}\n${androidOpen}`,
+  );
+
+  next = next.replace(
+    /(^|\n)(\s*buildTypes\s*\{)/,
+    (_, lead: string, buildTypesOpen: string) => `${lead}${signingConfigsBlock}\n${buildTypesOpen}`,
+  );
+
+  next = next.replace(
+    /(getByName\("release"\)\s*\{)/,
+    (_, releaseOpen: string) =>
+      `${releaseOpen}\n            if (keystorePropertiesFile.exists()) {\n                signingConfig = signingConfigs.getByName("release")\n            }`,
+  );
+
+  try {
+    await writeFile(gradlePath, next);
     log.success("Wired release signingConfig into build.gradle.kts");
   } catch (err) {
-    log.warn(`Could not patch build.gradle.kts: ${(err as Error).message}`);
+    log.warn(`Could not write ${gradlePath}: ${(err as Error).message}`);
     log.info("Configure it manually: https://v2.tauri.app/distribute/sign/android/");
   }
 }
@@ -1349,41 +1458,15 @@ function readKeystoreProperties(file: string): Record<string, string> | null {
   }
 }
 
-function generateAndroidKeystore(file: string, alias: string, storePassword: string, projectName: string): boolean {
-  if (!commandExists("keytool")) {
-    log.warn("keytool not found on PATH (ships with the JDK). Add it to PATH or use Android Studio's copy.");
-  }
-  const s = clack.spinner();
-  s.start(`Generating ${path.relative(process.cwd(), file) || "keystore.jks"}...`);
-  const dname = `CN=${projectName}, OU=Dev, O=Bini, L=Unknown, S=Unknown, C=US`;
-  try {
-    execFileSync(
-      "keytool",
-      [
-        "-genkeypair", "-v",
-        "-keystore", file,
-        "-keyalg", "RSA", "-keysize", "2048", "-validity", "10000",
-        "-alias", alias,
-        "-storepass:env", "BINI_STOREPASS",
-        "-keypass:env", "BINI_KEYPASS",
-        "-dname", dname,
-      ],
-      {
-        stdio: "pipe",
-        timeout: 30_000,
-        windowsHide: true,
-        env: { ...process.env, BINI_STOREPASS: storePassword, BINI_KEYPASS: storePassword },
-      }
-    );
-    s.stop(`Keystore created at ${path.relative(process.cwd(), file) || "keystore.jks"}`);
-    log.info("Back up the keystore and its password: every Play Store update must be signed with the same key.");
-    return true;
-  } catch (err) {
-    s.stop("Could not generate keystore.");
-    log.warn((err as Error).message.split("\n")[0]);
-    log.info("Generate it manually with keytool: https://v2.tauri.app/distribute/sign/android/");
-    return false;
-  }
+function keystoreExtFor(file: string): "jks" | "keystore" | "p12" {
+  const lower = file.toLowerCase();
+  if (lower.endsWith(".p12") || lower.endsWith(".pfx")) return "p12";
+  if (lower.endsWith(".keystore")) return "keystore";
+  return "jks";
+}
+
+function resolveStoreFile(androidGenDir: string, storeFile: string): string {
+  return path.isAbsolute(storeFile) ? storeFile : path.resolve(androidGenDir, storeFile);
 }
 
 async function writeAndroidLocalConfig(
@@ -1397,6 +1480,14 @@ async function writeAndroidLocalConfig(
   const androidGenDir = path.join(tauriDir, "gen", "android");
   if (!fs.existsSync(androidGenDir)) return false;
 
+  const ext = keystoreExtFor(storeFile);
+  const destKeystore = path.join(androidGenDir, `keystore.${ext}`);
+
+  if (path.resolve(storeFile) !== path.resolve(destKeystore)) {
+    await fsPromises.copyFile(storeFile, destKeystore);
+    log.success(`Copied the keystore to ${path.relative(projectPath, destKeystore)}`);
+  }
+
   const propsPath = path.join(androidGenDir, "keystore.properties");
   await writeFile(
     propsPath,
@@ -1404,7 +1495,7 @@ async function writeAndroidLocalConfig(
       `storePassword=${escapeProperty(storePassword)}`,
       `keyPassword=${escapeProperty(keyPassword)}`,
       `keyAlias=${escapeProperty(alias)}`,
-      `storeFile=${escapeProperty(storeFile)}`,
+      `storeFile=keystore.${ext}`,
       "",
     ].join("\n"),
     0o600
@@ -1458,8 +1549,13 @@ async function setupAndroidSigning(ctx: SigningContext): Promise<boolean> {
     return false;
   }
 
+  const project = detectProject(projectPath, pm);
+  if (project.signing.android) {
+    log.skip("Android signing already configured for this project.");
+    return true;
+  }
+
   const propsPath = path.join(androidGenDir, "keystore.properties");
-  const rootStore = path.join(projectPath, "keystore.jks");
 
   if (fs.existsSync(propsPath)) {
     const replace = await confirm({
@@ -1471,8 +1567,8 @@ async function setupAndroidSigning(ctx: SigningContext): Promise<boolean> {
       await patchAndroidGradleSigning(androidGenDir);
 
       const props = readKeystoreProperties(propsPath);
-      const keepStore = props?.storeFile && fs.existsSync(props.storeFile) ? props.storeFile : rootStore;
-      if (props?.keyAlias && props.storePassword && props.keyPassword && fs.existsSync(keepStore)) {
+      const keepStore = props?.storeFile ? resolveStoreFile(androidGenDir, props.storeFile) : undefined;
+      if (props?.keyAlias && props.storePassword && props.keyPassword && keepStore && fs.existsSync(keepStore)) {
         await saveAndroidCiValues(projectPath, keepStore, props.keyAlias, props.storePassword, props.keyPassword);
       } else {
         log.info("Could not read the existing keystore settings; nothing saved for GitHub Actions.");
@@ -1481,93 +1577,26 @@ async function setupAndroidSigning(ctx: SigningContext): Promise<boolean> {
     }
   }
 
-  if (!commandExists("keytool")) {
-    log.warn("keytool not found on PATH (ships with the JDK). Add it to PATH or use Android Studio's copy.");
-  }
+  const picked = await askFile("Path to your keystore (.jks, .keystore or .p12)", [".jks", ".keystore", ".p12", ".pfx"]);
+  const alias = (await input({ message: "Key alias:", default: "upload" })).trim() || "upload";
+  const storePassword = await password({ message: "Keystore password:", validate: minLength(6, "Password") });
+  const kp = isPkcs12File(picked) ? "" : await password({ message: "Key password (leave blank if same as keystore password):" });
+  const keyPassword = kp.length > 0 ? kp : storePassword;
 
-  let source: "root" | "generate" | "file";
-  if (fs.existsSync(rootStore)) {
-    log.info("Using the existing keystore.jks in the project root.");
-    source = "root";
-  } else {
-    source = await select<"generate" | "file">({
-      message: "Android release keystore:",
-      choices: [
-        { name: "Generate a new keystore (recommended for a new app)", value: "generate" },
-        { name: "Use a keystore file I already have", value: "file" },
-      ],
-      default: "generate",
-    });
-  }
-
-  let alias = "upload";
-  let storePassword: string;
-  let keyPassword: string;
-
-  if (source === "generate") {
-    storePassword = await password({ message: "Set a keystore password (min 6 chars):", validate: minLength(6, "Password") });
-    keyPassword = storePassword;
-    if (!generateAndroidKeystore(rootStore, alias, storePassword, path.basename(projectPath))) return false;
-  } else {
-    let picked = rootStore;
-    if (source === "file") {
-      picked = await askFile("Path to your keystore (.jks, .keystore or .p12)", [".jks", ".keystore", ".p12", ".pfx"]);
+  const ext = keystoreExtFor(picked);
+  const destKeystore = path.join(androidGenDir, `keystore.${ext}`);
+  try {
+    if (path.resolve(picked) !== path.resolve(destKeystore)) {
+      await fsPromises.copyFile(picked, destKeystore);
     }
-    alias = await input({ message: "Key alias:", default: "upload" });
-    storePassword = await password({ message: "Keystore password:", validate: minLength(6, "Password") });
-    const kp = isPkcs12File(picked) ? "" : await password({ message: "Key password (leave blank if same as keystore password):" });
-    keyPassword = kp.length > 0 ? kp : storePassword;
-
-    if (path.resolve(picked) !== path.resolve(rootStore)) {
-      await fsPromises.copyFile(picked, rootStore);
-      log.success("Copied the keystore to keystore.jks in the project root.");
-    }
+  } catch (err) {
+    log.error(`Could not copy the keystore into ${path.relative(projectPath, androidGenDir)}: ${(err as Error).message}`);
+    return false;
   }
 
-  await writeAndroidLocalConfig(ctx, rootStore, alias, storePassword, keyPassword);
-  await saveAndroidCiValues(projectPath, rootStore, alias, storePassword, keyPassword);
+  await writeAndroidLocalConfig(ctx, destKeystore, alias, storePassword, keyPassword);
+  await saveAndroidCiValues(projectPath, destKeystore, alias, storePassword, keyPassword);
   log.success(`Android release signing configured. \`${pmRun(pm, "android:build")}\` will produce a signed release.`);
-  return true;
-}
-
-async function applyAndroidKeystore(
-  ctx: SigningContext,
-  flags: CliFlags,
-  file: string | undefined,
-  pass: string
-): Promise<boolean> {
-  const { projectPath } = ctx;
-  const alias = flags.alias ?? "upload";
-  const rootStore = path.join(projectPath, "keystore.jks");
-  let source: string;
-  let keyPass = flags.keyPassword ?? process.env[ENV_KEY_PASSWORD] ?? pass;
-
-  if (file === undefined) {
-    if (pass.length < 6) {
-      log.error("The keystore password must be at least 6 characters.");
-      return false;
-    }
-    if (fs.existsSync(rootStore)) {
-      log.error("keystore.jks already exists in the project root. To use it: sign android keystore.jks <password>");
-      return false;
-    }
-    if (!generateAndroidKeystore(rootStore, alias, pass, path.basename(projectPath))) return false;
-    source = rootStore;
-    keyPass = pass;
-  } else {
-    source = file;
-    if (isPkcs12File(file) && keyPass !== pass) {
-      log.warn("A .p12/.pfx keystore uses one password for the store and the key; key password ignored.");
-      keyPass = pass;
-    }
-  }
-
-  if (!ctx.ciOnly) {
-    if (path.resolve(source) !== path.resolve(rootStore)) await fsPromises.copyFile(source, rootStore);
-    const wired = await writeAndroidLocalConfig(ctx, rootStore, alias, pass, keyPass);
-    if (!wired) log.info("No Android project here yet; only GitHub Actions values were saved.");
-  }
-  await saveAndroidCiValues(projectPath, source, alias, pass, keyPass);
   return true;
 }
 
@@ -2158,6 +2187,27 @@ async function setupIosSigning(ctx: SigningContext): Promise<boolean> {
 
 const gpgCommand = (): string | undefined => ["gpg", "gpg2"].find(commandExists);
 
+function gpgInstallHint(): string {
+  if (process.platform === "win32") {
+    return "winget install -e --id GnuPG.Gpg4win";
+  }
+  if (process.platform === "darwin") {
+    return "brew install gnupg";
+  }
+  if (commandExists("apt-get")) return "sudo apt install gnupg";
+  if (commandExists("dnf")) return "sudo dnf install gnupg2";
+  if (commandExists("pacman")) return "sudo pacman -S gnupg";
+  if (commandExists("zypper")) return "sudo zypper install gpg2";
+  return "Install GnuPG with your system package manager";
+}
+
+function printGpgInstallGuide(): void {
+  log.warn("GnuPG (gpg) is required for Linux package signing but was not found.");
+  log.info("Install it with:");
+  log.plain(`  ${c.green(gpgInstallHint())}`);
+  log.plain(`  ${c.dim(`Full guide: ${SIGNING_DOCS.linux}`)}`);
+}
+
 function exportGpgSecretKey(gpg: string, keyId: string, passphrase: string): { base64Armored: string; rawArmored: string } | null {
   const r = spawnSync(gpg, ["--batch", "--pinentry-mode", "loopback", "--passphrase-fd", "0", "--armor", "--export-secret-keys", keyId], {
     input: `${passphrase}\n`,
@@ -2185,7 +2235,7 @@ interface LinuxKey {
 async function collectLinuxKey(): Promise<LinuxKey | null> {
   const gpg = gpgCommand();
   if (!gpg) {
-    log.warn(`gpg was not found. Install GnuPG, then run this again. Guide: ${SIGNING_DOCS.linux}`);
+    printGpgInstallGuide();
     return null;
   }
 
@@ -2321,7 +2371,6 @@ async function signWithArguments(
   const modeFlags: [flag: string, used: boolean, targets: SigningTarget[]][] = [
     ["--sign-command", flags.signCommand !== undefined, ["windows"]],
     ["--thumbprint", flags.thumbprint !== undefined, ["windows"]],
-    ["--publisher", flags.publisher !== undefined, ["windows", "android", "linux"]],
     ["--adhoc", flags.adhoc, ["macos"]],
     ["--api-issuer", flags.apiIssuer !== undefined, ["ios", "macos"]],
     ["--api-key", flags.apiKey !== undefined, ["ios", "macos"]],
@@ -2352,8 +2401,8 @@ async function signWithArguments(
     log.error(`Linux signing has no credential file. Run it with prompts: create-bini-app sign desktop`);
     return 1;
   }
-  if (flags.ciOnly && fileless) {
-    log.error("--sign-command, --thumbprint, --adhoc and ios --team set up this machine, so they cannot be combined with --ci-only.");
+  if (target === "android" && parsed.file === undefined) {
+    log.error(`Android signing needs a keystore file: create-bini-app sign android <keystore.jks> <password>`);
     return 1;
   }
 
@@ -2391,13 +2440,50 @@ async function signWithArguments(
     if (target === "windows") ok = await applyWindowsCertificate(ctx, file as string, pass);
     else if (target === "macos") ok = await applyMacosCertificate(ctx, flags, file as string, pass);
     else if (target === "ios") ok = await applyIosCredentials(ctx, flags, file as string, pass);
-    else ok = await applyAndroidKeystore(ctx, flags, file, pass);
+    else ok = await applyAndroidKeystore(ctx, flags, file as string, pass);
   }
 
   if (ok) {
     log.plain(`\n${c.green("Done.")}${savedForCi ? ` Upload the saved values to GitHub with: ${c.cyan(pmRun(pm, "deploy"))}` : ""}`);
   }
   return ok ? 0 : 1;
+}
+
+async function applyAndroidKeystore(
+  ctx: SigningContext,
+  flags: CliFlags,
+  file: string,
+  pass: string
+): Promise<boolean> {
+  const { projectPath, tauriDir } = ctx;
+  const alias = flags.alias ?? "upload";
+  let keyPass = flags.keyPassword ?? process.env[ENV_KEY_PASSWORD] ?? pass;
+
+  if (isPkcs12File(file) && keyPass !== pass) {
+    log.warn("A .p12/.pfx keystore uses one password for the store and the key; key password ignored.");
+    keyPass = pass;
+  }
+
+  if (!ctx.ciOnly) {
+    const androidGenDir = path.join(tauriDir, "gen", "android");
+    const ext = keystoreExtFor(file);
+    const destKeystore = path.join(androidGenDir, `keystore.${ext}`);
+    try {
+      if (path.resolve(file) !== path.resolve(destKeystore)) {
+        await fsPromises.copyFile(file, destKeystore);
+      }
+    } catch (err) {
+      log.error(`Could not copy the keystore into ${path.relative(projectPath, androidGenDir)}: ${(err as Error).message}`);
+      return false;
+    }
+    const wired = await writeAndroidLocalConfig(ctx, destKeystore, alias, pass, keyPass);
+    if (!wired) log.info("No Android project here yet; only GitHub Actions values were saved.");
+    await saveAndroidCiValues(projectPath, destKeystore, alias, pass, keyPass);
+    return true;
+  }
+
+  await saveAndroidCiValues(projectPath, file, alias, pass, keyPass);
+  return true;
 }
 
 async function initTauri(o: InitTauriOptions): Promise<InitResult> {
@@ -2900,13 +2986,20 @@ interface SignJob {
 function validateSignTargets(targets: SignTarget[], flags: CliFlags, userOS: UserOS): boolean {
   if (flags.ciOnly) return true;
 
-  const byName = targets.filter((t) => t === "windows" || t === "macos" || t === "linux");
-  if (byName.length > 0) {
-    log.error(`${byName.join(", ")} can only be set up with --ci-only, which saves credentials for GitHub Actions without changing this machine.`);
-    log.info("To sign for the OS you are on, run: create-bini-app sign desktop");
-    log.info(`For GitHub Actions, run: create-bini-app sign ${byName.join(",")} --ci-only`);
+  const namedDesktop = targets.filter(
+    (t): t is "windows" | "macos" | "linux" => t === "windows" || t === "macos" || t === "linux",
+  );
+  const foreign = namedDesktop.filter((t) => t !== userOS);
+  if (foreign.length > 0) {
+    log.error(
+      `${foreign.join(", ")} can only be set up with --ci-only on this machine, ` +
+        `which saves credentials for GitHub Actions without changing anything here.`,
+    );
+    log.info(`To sign for this machine, run: create-bini-app sign desktop`);
+    log.info(`For GitHub Actions, run: create-bini-app sign ${foreign.join(",")} --ci-only`);
     return false;
   }
+
   if (targets.includes("ios") && userOS !== "macos") {
     log.error("iOS can only be signed on a Mac. To save credentials for GitHub Actions, run: create-bini-app sign ios --ci-only");
     return false;
@@ -2920,11 +3013,13 @@ async function signProject(parsed: SignParsed, flags: CliFlags, userOS: UserOS):
     log.error("--nosign cannot be used with the sign command.");
     exit(1);
   }
-  if (!validateSignTargets(parsed.targets, flags, userOS)) return 1;
 
   const argMode = hasSignInputs(parsed, flags);
+  if (!validateSignTargets(parsed.targets, flags, userOS)) return 1;
+
   if (!argMode && !isInteractive()) {
-    log.error("Code signing needs interactive prompts. Run this command in a terminal, or pass the credentials:");
+    log.error("Code signing needs interactive prompts, but there is no terminal here.");
+    log.info("Pass the credentials so signing can run without prompts:");
     log.info("create-bini-app sign <target> <file> <password>");
     exit(1);
   }
@@ -2978,8 +3073,6 @@ async function signProject(parsed: SignParsed, flags: CliFlags, userOS: UserOS):
     log.info("This project has no desktop or mobile platform yet. Add one with: create-bini-app add <target>");
     return 0;
   }
-
-  log.info(`Signing prompts: ${jobs.map((j) => SIGNING_LABEL[j.target]).join(", ")}`);
 
   const tauriDir = path.join(root, "src-tauri");
   const results: { job: SignJob; ok: boolean }[] = [];
@@ -3747,7 +3840,7 @@ export async function main(): Promise<void> {
   }
 
   if (first === "sign") {
-    const parsed = parseSignArgs(positionals.slice(1), flags.platforms, flags.generate);
+    const parsed = parseSignArgs(positionals.slice(1), flags.platforms);
     exit(await signProject(parsed, flags, userOS));
   }
 
