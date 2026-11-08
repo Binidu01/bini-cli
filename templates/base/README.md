@@ -90,7 +90,7 @@ Scripts are run with `{{PM}} run <script>`.
 | Command | Description |
 | --- | --- |
 | `{{PM}} run dev` | Start the dev server with HMR |
-| `{{PM}} run build` | {{BUILD_DESC}} client and SSR, then prerender routes |
+| `{{PM}} run build` | `vite build`, which also prerenders every route |
 | `{{PM}} run start` | Serve the production build with bini-server |
 | `{{PM}} run preview` | Preview the production build |
 

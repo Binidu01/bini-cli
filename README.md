@@ -275,7 +275,7 @@ my-app/
 | Command | Description |
 | --- | --- |
 | `dev` | Start the Vite dev server with HMR and open the browser (`vite --host --open`) |
-| `build` | Type-check (TypeScript), build the client and SSR bundles, then pre-render every route to static HTML |
+| `build` | `vite build` - builds the app, and `bini-ssg` pre-renders every route to static HTML |
 | `start` | Serve the production build via `bini-server` |
 | `preview` | Preview the production build |
 | `type-check` | `tsc --noEmit` (JavaScript projects print a notice instead) |
@@ -433,13 +433,13 @@ Override the default directories if needed: `BINI_API_DIR` (default `src/app/api
 
 ## Build & Static Site Generation
 
-`npm run build` is one script for every target. For TypeScript projects it runs three steps:
+`npm run build` is one script for every target, and it is just:
 
 ```bash
-tsc --noEmit && vite build && vite build --ssr src/main.tsx
+vite build
 ```
 
-The first `vite build` produces the client bundle, and the second builds the SSR bundle (`src/main.jsx` for JavaScript projects, and no `tsc` step). The `bini-ssg` plugin then pre-renders every route, **static and dynamic alike**, using the `render()` function exported from `src/main.tsx`. That function calls React 19's `renderToPipeableStream` directly against `AppRoutes` (from the generated `src/App.tsx`) with a `StaticRouter`, so the output is real server-rendered markup, not a client-only shell. The client then hydrates it with `hydrateRoot` on load - no extra fallback wiring or client-side redirect scripts required. There's no separate export command.
+The `bini-ssg` plugin pre-renders every route, **static and dynamic alike**, using the `render()` function exported from `src/main.tsx` (`src/main.jsx` in JavaScript projects). That function calls React 19's `renderToPipeableStream` directly against `AppRoutes` (from the generated `src/App.tsx`) with a `StaticRouter`, so the output is real server-rendered markup, not a client-only shell. The client then hydrates it with `hydrateRoot` on load - no extra fallback wiring or client-side redirect scripts required. There's no separate export command. The build does not type-check; run `npm run type-check` (or `npm run check`) for that.
 
 Build output goes to `dist/`, organized into `js/`, `css/`, `data/`, `assets/images/`, and `assets/fonts/`.
 
@@ -492,7 +492,7 @@ The default target. A standard Vite + React app with file-based routing, pre-ren
 | --- | --- |
 | `npm run dev` | Dev server with HMR |
 | `npm start` | Serve the production build |
-| `npm run build` | Type-check, build, and pre-render every route (static & dynamic) via SSG |
+| `npm run build` | `vite build`, which also pre-renders every route (static & dynamic) via SSG |
 | `npm run preview` | Preview the production build |
 | `npm run deploy` | Generate hosting config for your chosen platform and push to GitHub |
 
