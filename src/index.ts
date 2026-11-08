@@ -3675,8 +3675,8 @@ function buildTemplateVars(o: {
     APP_NAME: appName,
     MAIN_EXT: mainExt,
     BUILD_COMMAND: useTypeScript
-      ? `tsc --noEmit && vite build && vite build --ssr src/main.${mainExt}`
-      : `vite build && vite build --ssr src/main.${mainExt}`,
+      ? `tsc --noEmit && vite build`
+      : `vite build`,
     TYPE_CHECK: useTypeScript ? "tsc --noEmit" : "echo 'TypeScript not enabled'",
     CHECK_COMMAND: useTypeScript
       ? "oxlint src && oxfmt src && tsc --noEmit"
