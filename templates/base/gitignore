@@ -1,3 +1,5 @@
+# .gitignore
+
 node_modules/
 .pnpm-store/
 
@@ -10,7 +12,6 @@ dist-ssr/
 .env.local
 .env.*.local
 
-# Code signing material: never commit
 .env.signing
 .bini-signing/
 tauri.windows.conf.json

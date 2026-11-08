@@ -2,7 +2,7 @@ import { defineConfig, loadEnv, type UserConfig, type ServerOptions } from 'vite
 import react from '@vitejs/plugin-react';
 import { biniroute } from 'bini-router';
 import { biniOverlay } from 'bini-overlay';
-import { biniEnv } from 'bini-env';
+import { biniEnv } from 'bini-env/vite';
 import { biniSSG } from 'bini-ssg';
 {{TAILWIND_IMPORT}}
 
