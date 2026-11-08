@@ -11,7 +11,7 @@ A **Bini.js** application built with **Vite** and **Hono**.
 
 One codebase for web, and optionally desktop (Windows, macOS, Linux), Android, and iOS via Tauri.
 
-Requires **Node.js >= {{REQUIRED_NODE}}**.
+Requires **Node.js >= {{REQUIRED_NODE}}**. The CLI checks this on start and exits if your Node.js is older.
 
 ---
 
@@ -47,7 +47,7 @@ In a terminal, anything you do not set with a flag is asked interactively (langu
 
 | Option | Description |
 | --- | --- |
-| `--typescript` / `--javascript` | Language (default: TypeScript). `--no-typescript` is an alias for `--javascript` |
+| `--typescript` / `--javascript` | Language (default: TypeScript). `--no-typescript` is an alias for `--javascript`. Cannot be combined |
 | `--tailwind` / `--css-modules` / `--none` | Styling (default: Tailwind). Only one may be given |
 | `--platform <list>` | Comma-separated or repeated: `web`, `desktop`, `android`, `ios` (default: `web`). `ios` is only offered on macOS; on other systems it is skipped with a warning |
 | `--app-name [name]` | App name, used as the site title and the Tauri app name and window title. With no value, you are prompted |
@@ -56,19 +56,21 @@ In a terminal, anything you do not set with a flag is asked interactively (langu
 | `--no-install` | Skip installing dependencies |
 | `--no-git` | Skip `git init` |
 | `--force` | Delete an existing project directory and create it again |
-| `--sign` / `--nosign` | Auto-confirm the "set up signing?" question, or skip signing setup, for native targets. Credentials are still asked for, so `--sign` has no effect without a terminal |
-| `--npm` / `--pnpm` / `--yarn` / `--bun` | Force a package manager |
+| `--sign` / `--nosign` | Auto-confirm the "set up signing?" question, or skip signing setup, for native targets. Credentials are still asked for, so `--sign` has no effect without a terminal. Cannot be combined |
+| `--npm` / `--pnpm` / `--yarn` / `--bun` | Force a package manager. Only one may be given |
 | `--help`, `-h` / `--version`, `-v` | Show help / show the CLI version |
 
-The app name and organization are only asked for when a native target is selected. The bundle identifier is `<org>.<project name without symbols>`, for example `com.bini.myapp` (a name that starts with a digit gets an `app` prefix). Replace it with your own before publishing to an app store.
+The app name and organization are only asked for when a native target is selected. `--app-name` and `--org` with no value need a terminal; without one, the CLI warns and uses the default (or the value you passed). The bundle identifier is `<org>.<project name without symbols>`, for example `com.bini.myapp` (a name that starts with a digit gets an `app` prefix). Replace it with your own before publishing to an app store.
 
-An organization is a reverse domain of dot-separated parts, each starting with a lowercase letter and containing only lowercase letters and numbers (for example `com.acme`), up to 80 characters.
+An organization is a reverse domain of at least two dot-separated parts, each starting with a lowercase letter and containing only lowercase letters and numbers (for example `com.acme`), up to 80 characters.
 
 Project names use lowercase letters, numbers, hyphens and dots (max 50 characters). They cannot start with `.` or `-`, cannot be `npm` or `node`, and cannot be a reserved Windows device name such as `con` or `nul`. `add`, `sign`, `remove`, `doctor`, `clean` and `upgrade` are reserved.
 
+For native targets, Tauri is initialized with the frontend in `dist/`, the dev server at `http://localhost:3000`, `{{PM}} run dev:native` before `tauri dev`, and `{{PM}} run build` before `tauri build`. Desktop signing is offered for the OS you are on only; sign the other systems in CI on their own runners (see [Code signing](#code-signing)).
+
 ### Prerequisite checks
 
-Before creating or adding a native platform, the CLI checks your machine and stops if something is missing:
+Before creating or adding a native platform, the CLI checks your machine and stops (exit code `1`) if something is missing:
 
 - **All native targets:** Rust (`cargo`).
 - **Desktop:** WebView2 on Windows, `webkit2gtk-4.1` on Linux, Xcode command line tools on macOS.
@@ -133,7 +135,7 @@ When the first native platform is added, these scripts are added to `package.jso
 
 **`doctor`** runs `tauri info`. It does nothing if the project has no native platform, and exits with `2` if `tauri info` fails.
 
-**`upgrade`** moves every registry dependency in `package.json` to its latest version (your package manager records what it resolved to) and runs `cargo update` if `src-tauri/Cargo.toml` exists. Dependencies that are not plain registry versions (`file:`, `link:`, `workspace:`, `portal:`, `patch:`, `git`, `github:`, URL and `npm:` specs) are left alone. It then copies the latest template files over the project root, skipping `src/`, `package.json` and `vite.config.*`, so other template files you edited (including this README) are overwritten. If `bundle.iOS.developmentTeam` is set in `tauri.conf.json`, it is moved to the git-ignored `tauri.ios.conf.json`. Commit first so you can review the diff; the CLI warns when the git working tree is dirty.
+**`upgrade`** moves every registry dependency in `package.json` to its latest version (your package manager records what it resolved to) and runs `cargo update` if `src-tauri/Cargo.toml` exists. Dependencies that are not plain registry versions (`file:`, `link:`, `workspace:`, `portal:`, `patch:`, `git+`/`git:`, `github:`, `http(s):` URLs and `npm:` specs) are left alone. It then copies the latest template files over the project root, skipping `src/`, `package.json` and `vite.config.*`, so other template files you edited (including this README) are overwritten. If `bundle.iOS.developmentTeam` is set in `tauri.conf.json`, it is moved to the git-ignored `tauri.ios.conf.json`. If any step fails, the command finishes the remaining steps and exits with `2`. Commit first so you can review the diff; the CLI warns when the git working tree is dirty.
 
 ---
 
@@ -146,7 +148,7 @@ Run these from inside the project (or a subfolder up to 5 levels below its root)
 | `npx create-bini-app add` | Add a platform (pick from a list) |
 | `npx create-bini-app add <target>` | Add `desktop`, `android` or `ios` (comma- or space-separate for several, e.g. `android,ios`) |
 | `npx create-bini-app add desktop --nosign` | Add desktop and skip signing prompts |
-| `npx create-bini-app --platform <list>` | Same as `add <list>` |
+| `npx create-bini-app --platform <list>` | Same as `add <list>` (inside a project) |
 | `npx create-bini-app remove` | Remove a platform (pick from a list) |
 | `npx create-bini-app remove <target>` | Remove `desktop`, `android` or `ios` |
 | `npx create-bini-app remove desktop android ios --yes` | Remove every native target without confirmation |
@@ -154,9 +156,9 @@ Run these from inside the project (or a subfolder up to 5 levels below its root)
 | `npx create-bini-app --org` | Change the bundle ID prefix (prompts) |
 | `npx create-bini-app --app-name "My App" --org com.acme` | Change both without prompts |
 
-**Adding.** The first native platform adds the native scripts and dependencies (`@tauri-apps/api`, `@tauri-apps/cli`, `cross-env`, `bini-native`) to `package.json`, installs them (unless `--no-install`), and creates `src-tauri/` with your app name, bundle identifier and icons generated from `public/logo.png`. Your `vite.config` and the files in `src/` are not modified. Platforms that are already configured are skipped (with `--sign`, only their signing step runs; an added desktop target whose signing for your OS is not configured yet is offered signing again). Each added platform then offers to set up code signing, unless `--nosign` is given. iOS can only be added on macOS; on other systems, run `{{PM}} run deploy` and choose iOS to build it with GitHub Actions. Android setup also adds the Rust Android targets with `rustup`. Language and styling flags (`--typescript`, `--tailwind`, ...) are ignored when adding.
+**Adding.** The first native platform adds the native scripts and dependencies (`@tauri-apps/api`, `@tauri-apps/cli`, `cross-env`, `bini-native`) to `package.json`, installs them (unless `--no-install`), and creates `src-tauri/` with your app name, bundle identifier and icons generated from `public/logo.png`. Your `vite.config` and the files in `src/` are not modified. `web` is always part of the project and is skipped if listed. Platforms that are already configured are skipped (with `--sign`, only their signing step runs; an added desktop target whose signing for your OS is not configured yet is offered signing again). Each added platform then offers to set up code signing, unless `--nosign` is given. iOS can only be added on macOS; on other systems, run `{{PM}} run deploy` and choose iOS to build it with GitHub Actions. Android setup also adds the Rust Android targets with `rustup`. Language and styling flags (`--typescript`, `--tailwind`, ...) are ignored when adding. If a step needs manual work (for example a failed init, or iOS on a non-Mac), the CLI prints a **Manual follow-ups** list at the end and exits with `2`.
 
-**Removing.** Removing Android or iOS deletes `src-tauri/gen/android` or `src-tauri/gen/apple` (for Android this includes the keystore copy and `keystore.properties` inside it), and the matching scripts in `package.json` if you have not changed them. A `keystore.jks` in the project root is kept in this case. `desktop` shares `src-tauri/` with the mobile targets, so it can only be removed together with them. Removing everything native:
+**Removing.** Removing Android or iOS deletes `src-tauri/gen/android` or `src-tauri/gen/apple` (for Android this includes the keystore copy and `keystore.properties` inside it), and the matching scripts in `package.json` if you have not changed them. A `keystore.jks` in the project root is kept in this case. `desktop` shares `src-tauri/` with the mobile targets, so it can only be removed together with them (otherwise the CLI warns and exits with `2`). Removing everything native:
 
 - deletes all of `src-tauri/` (including any Rust code you wrote);
 - removes the native scripts (if unchanged) and every `@tauri-apps/*` package and `cross-env` from `package.json`, and runs your package manager's uninstall for them (`bini-native` is left in place);
@@ -165,7 +167,7 @@ Run these from inside the project (or a subfolder up to 5 levels below its root)
 
 `vite.config` and `.gitignore` are left unchanged. Removing asks for confirmation unless you pass `--yes` (which is required when there is no terminal).
 
-**Renaming.** The native name and bundle identifier live in `src-tauri/tauri.conf.json`. The title in `src/app/layout.{{MAIN_EXT}}` is web-only and is never changed by the CLI. Changing the bundle ID makes app stores treat the app as a different one, so the CLI asks first (unless `--yes`; without a terminal, `--yes` is required). Renaming also updates the app name in a generated Android project (`strings.xml`). The generated Android and iOS projects keep the old bundle ID, and iOS keeps its old display name, until you rename them manually or remove and re-add the platform, so commit first. Renaming does nothing if the project has no native platform yet.
+**Renaming.** The native name and bundle identifier live in `src-tauri/tauri.conf.json`. The title in `src/app/layout.{{MAIN_EXT}}` is web-only and is never changed by the CLI. Changing the bundle ID makes app stores treat the app as a different one, so the CLI asks first (unless `--yes`; without a terminal, `--yes` is required). Renaming also updates the app name in a generated Android project (`strings.xml`). The generated Android and iOS projects keep the old bundle ID, and iOS keeps its old display name, until you rename them manually or remove and re-add the platform, so commit first. Renaming does nothing if the project has no native platform yet. Passing `--app-name` or `--org` with no value needs a terminal; without one, pass a value instead.
 
 `--app-name` and `--org` passed to `add` only take effect when Tauri is first set up.
 
@@ -193,7 +195,7 @@ Self-signed certificates are not supported: real credentials are required for di
 | `npx create-bini-app sign ios` | iOS signing (macOS only) |
 | `npx create-bini-app sign windows,linux --ci-only` | Save credentials for GitHub Actions only |
 
-`windows`, `macos` and `linux` by name only work with `--ci-only`, which saves the credentials for GitHub Actions and changes nothing on this machine. To sign for the OS you are on, use `desktop`. On a non-Mac, iOS credentials can only be saved with `sign ios --ci-only`. With `--ci-only` and no target list, every platform in the project is used. Without `--ci-only`, the target must already be added to the project. `--nosign` cannot be used with `sign`, and `--yes` needs credentials passed as arguments.
+Targets are `desktop`, `windows`, `macos`, `linux`, `android` and `ios`; separate several with commas. `desktop` always means the OS you are on. You can also name your own OS directly, but naming a different OS (`windows`, `macos` or `linux` when you are not on it) only works with `--ci-only`, which saves the credentials for GitHub Actions and changes nothing on this machine. On a non-Mac, iOS credentials can only be saved with `sign ios --ci-only`. With `--ci-only` and no target list, every platform in the project is used. In prompt mode and without `--ci-only`, the target must already be added to the project. `--platform` also works as a target list for `sign` (`web` is ignored, since there is nothing to sign). `--nosign` cannot be used with `sign`, and `--yes` needs credentials passed as arguments.
 
 ### Without prompts
 
@@ -220,7 +222,7 @@ npx create-bini-app sign ios --team ABCDE12345      # on a Mac: Xcode automatic 
 npx create-bini-app sign android ./keystore.jks "password" --alias upload
 ```
 
-`sign desktop` means the OS you are on, so a `.pfx` only goes to Windows signing on Windows (use `sign windows ... --ci-only` elsewhere), and `--thumbprint`, `--sign-command`, `--adhoc` and `sign ios --team` configure this machine, so they cannot be combined with `--ci-only`. A credential file belongs to one target, so run `sign` once per target. Passwords can also come from environment variables (see below). If a password is not given and there is a terminal, you are asked for it.
+`sign desktop` means the OS you are on, so a `.pfx` only goes to Windows signing on Windows (use `sign windows ... --ci-only` elsewhere), and `--thumbprint`, `--sign-command`, `--adhoc` and `sign ios --team` configure this machine, so they cannot be combined with `--ci-only`. A credential file belongs to one target, so run `sign` once per target. A file given without a target is rejected. Passwords can also come from environment variables (see below). If a password is not given and there is a terminal, you are asked for it.
 
 Linux signing has no credential file, so it can only be set up with prompts: `npx create-bini-app sign desktop` on Linux, or `sign linux --ci-only` anywhere. It exports your secret key from your local GPG keyring and saves it for CI. Android signing without prompts needs a keystore file.
 
@@ -292,6 +294,27 @@ See the [Tauri v2 prerequisites](https://v2.tauri.app/start/prerequisites/), and
 `{{PM}} run deploy` can generate GitHub Actions workflows for native targets (`.github/workflows/desktop.yml`, `android.yml`, `ios.yml`), so you can build for any OS without owning that machine (no Mac needed for iOS). Run a workflow from the Actions tab, or push a tag such as `v1.0.0`, and download the builds from the run's **Artifacts**.
 
 Saved signing values from `.env.signing` are uploaded as GitHub secrets. Targets with no signing values build unsigned (macOS signs ad-hoc, and iOS builds for the simulator only).
+
+---
+
+## Troubleshooting
+
+**"The Tauri CLI is installed but its native binding is missing."** This is a known npm bug ([npm/cli#4828](https://github.com/npm/cli/issues/4828)) where platform-specific optional dependencies are skipped. Reinstall from scratch, then retry:
+
+```bash
+rm -rf node_modules package-lock.json && npm install
+```
+
+**"Missing prerequisites."** See [Prerequisite checks](#prerequisite-checks) and install what the CLI lists.
+
+### Exit codes
+
+| Code | Meaning |
+| --- | --- |
+| `0` | Success |
+| `1` | Error (invalid input, missing prerequisites, failed step) |
+| `2` | Finished, but something needs attention (manual follow-ups, a failed `doctor`/`upgrade` step, signing left unconfigured) |
+| `130` / `143` | Cancelled (Ctrl+C / terminated) |
 
 ---
 

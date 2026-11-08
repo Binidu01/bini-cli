@@ -637,7 +637,7 @@ Signing is offered when you add a native target, and you can set it up or redo i
 ```bash
 npx create-bini-app@latest sign                                  # prompts, everything that applies on this machine
 npx create-bini-app@latest sign android                          # prompts, one target
-npx create-bini-app@latest sign desktop ./cert.pfx "pw"          # no prompts: Windows (.pfx) or macOS (.p12), picked from this OS
+npx create-bini-app@latest sign desktop ./cert.pfx "pw"          # no prompts: Windows (.pfx). On macOS, a .p12 also needs --identity (see below)
 npx create-bini-app@latest sign windows ./cert.pfx "pw" --ci-only
 npx create-bini-app@latest sign macos ./dev-id.p12 "pw" --identity "Developer ID Application: Name (TEAMID)" \
   --api-issuer ID --api-key KEY --api-key-file ./AuthKey.p8 --ci-only
@@ -649,14 +649,14 @@ npx create-bini-app@latest sign desktop --sign-command "artifact-signing-cli -e 
 npx create-bini-app@latest sign desktop --adhoc                  # macOS ad-hoc signing for local testing
 ```
 
-**Targets:** `desktop` (the OS you are running on), `windows`, `macos`, `linux`, `android`, `ios`. `create-bini-app desktop sign` is shorthand for `create-bini-app sign desktop`.
+**Targets:** `desktop` (the OS you are running on), `windows`, `macos`, `linux`, `android`, `ios`. `create-bini-app desktop sign` is shorthand for `create-bini-app sign desktop`. `--platform <targets>` also works as a target list for `sign` (`web` is ignored, since there is nothing to sign).
 
 **Real credentials only.** Self-signed certificates are not supported: bring a real certificate, keystore, or GPG key. The CLI creates none of them for you; the only thing it generates itself is a macOS ad-hoc signature for local testing. For Android, supply an existing keystore (`.jks`, `.keystore`, or `.p12`) together with its alias and passwords.
 
 **This machine or GitHub Actions only.**
 
 - `desktop`, `android`, and `ios` (on a Mac) set up signing on this machine. When you give a certificate or keystore, the values are also saved for GitHub Actions.
-- `windows`, `macos`, and `linux` can only be named together with `--ci-only`. They then only save the values for GitHub Actions and change nothing on this machine. Use `desktop` to sign for the OS you are on.
+- `windows`, `macos`, and `linux` can be named directly, but a name other than the OS you are on only works with `--ci-only`. It then only saves the values for GitHub Actions and changes nothing on this machine. `desktop` always means the OS you are on.
 - `ios` on Windows or Linux also needs `--ci-only`.
 - `--ci-only` works from any OS. With no target, it covers every platform in the project (Windows, macOS, and Linux for the desktop target, plus Android and iOS when added).
 - Without `--ci-only`, prompt mode skips a target that has not been added to the project, with a warning and exit code `2`; run `create-bini-app add <target>` first. Argument mode does not check this: with no matching native project yet, it saves only the GitHub Actions values where it can. The exception is Android, which needs `src-tauri/gen/android` to exist unless you pass `--ci-only`.
@@ -687,7 +687,7 @@ In the prompts, Windows signing lists "a `.pfx` file I already have" and "cloud 
 | `--apple-id`, `--apple-password`, `--team` | macos | Notarization with an Apple ID and an app-specific password (all required together). Cannot be combined with the API key options |
 | `--profile <file>` | ios | Provisioning profile for a manual certificate (the certificate file is required too) |
 | `--team <TEAMID>` | ios, macos | Apple Team ID (10 letters and numbers). Required for iOS, both for automatic signing and together with a certificate and `--profile` |
-| `--ci-only` | all | Only save the CI values; skip the local keychain, certificate store, and Gradle setup. Required to name `windows`, `macos`, or `linux`. Cannot be combined with `--sign-command`, `--thumbprint`, `--adhoc`, or `--team` (the CLI rejects `--team` together with `--ci-only` in every case) |
+| `--ci-only` | all | Only save the CI values; skip the local keychain, certificate store, and Gradle setup. Required to name a desktop OS other than the one you are on. Cannot be combined with `--sign-command`, `--thumbprint`, `--adhoc`, or `--team` (the CLI rejects `--team` together with `--ci-only` in every case) |
 
 To keep passwords out of shell history and process lists, they can come from the environment instead of the command line: `BINI_SIGN_PASSWORD` (certificate or keystore password), `BINI_KEY_PASSWORD` (Android key password), and `BINI_APPLE_PASSWORD` (Apple ID app-specific password). Use the environment for a password that starts with `-`, since it would be read as a flag.
 
